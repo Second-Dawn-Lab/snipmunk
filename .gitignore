@@ -1,0 +1,53 @@
+# .NET build output
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+artifacts/
+publish/
+out/
+*.nupkg
+*.snupkg
+project.lock.json
+.nuget/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.rsuser
+TestResults/
+*.trx
+coverage*.xml
+*.log
+
+# Avalonia / packaging
+*.msix
+*.msi
+*.dmg
+*.app/
+installer-output/
+Output/
+
+# Secrets / signing
+*.pfx
+*.snk
+.env
+.env.*
+
+# IDEs
+.vs/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea/
+*.swp
+*.DotSettings.user
+.fleet/
+.claude/settings.local.json
+
+# OS
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
