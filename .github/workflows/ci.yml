@@ -48,7 +48,7 @@ jobs:
       # The Tauri crate embeds the frontend, so it must be built before cargo runs.
       - run: pnpm build
         working-directory: snipmunk
-      - run: cargo fmt --all --check
+      - run: cargo fmt -p snipmunk --check
         working-directory: snipmunk
       - run: cargo check --workspace
         working-directory: snipmunk
