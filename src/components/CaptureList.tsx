@@ -1,39 +1,62 @@
-import { Button, EmptyState, Icon, Select } from "@seconddawn/ui";
-import { useState } from "react";
+import { Button, EmptyState, Select } from "@seconddawn/ui";
+import { GALLERY_VIEWS, type GalleryView } from "../gallery/layout";
+import { directionOf } from "../language";
 import { useT } from "../i18n";
-import { thumbUrl, type Capture, type Session } from "../ipc";
-import { formatTime, type SortMode } from "../sessionModel";
-import { RenameInput } from "./GroupTabs";
+import type { Capture, Session } from "../ipc";
+import type { SortMode } from "../sessionModel";
+import { AppIcon, type AppIconName } from "./AppIcons";
+import { Gallery, type GalleryActions } from "./Gallery";
 import { hotkeyLabel } from "./hotkeyLabel";
 
-/** "Captures (n)", the sort order, select all / clear all and the cards. */
+const VIEW_ICON: Record<GalleryView, AppIconName> = {
+  list: "viewList",
+  medium: "viewMedium",
+  large: "viewLarge",
+};
+
+/** "Captures (n)" with the view toggle, the sort order, select all / clear all and the gallery. */
 export function CaptureList(props: {
   session: Session;
+  groupId: string;
   captures: Capture[];
+  view: GalleryView;
   activeId: string | null;
   selected: ReadonlySet<string>;
+  renamingId: string | null;
   sort: SortMode;
   hotkey: string;
+  actions: GalleryActions;
   onSort: (mode: SortMode) => void;
-  onActivate: (id: string) => void;
-  onToggle: (id: string) => void;
-  onDelete: (id: string) => void;
-  onRename: (id: string, name: string) => void;
+  onView: (view: GalleryView) => void;
   onSelectAll: () => void;
   onClearAll: () => void;
 }) {
   const { t, locale } = useT();
-  const [renaming, setRenaming] = useState<string | null>(null);
-  // The trash icon of a selected card deletes the whole selection; on any other card, just that card.
-  const trashLabel = (id: string, name: string) =>
-    props.selected.has(id)
-      ? t("captures.deleteSelected", { count: props.selected.size })
-      : t("captures.delete", { name });
+  const title = t("captures.title", { count: props.captures.length });
+  const viewLabel = (v: GalleryView) => t(`view.${v}`);
 
   return (
-    <section className="capturelist" aria-label={t("captures.title", { count: props.captures.length })}>
+    <section className="capturelist" aria-label={title}>
       <div className="capturelist__head">
-        <h2 className="capturelist__title">{t("captures.title", { count: props.captures.length })}</h2>
+        <h2 className="capturelist__title">{title}</h2>
+        <div className="viewtoggle" role="radiogroup" aria-label={t("view.label")}>
+          {GALLERY_VIEWS.map((v) => (
+            <button
+              key={v}
+              type="button"
+              role="radio"
+              aria-checked={props.view === v}
+              className={"viewtoggle__btn" + (props.view === v ? " viewtoggle__btn--on" : "")}
+              aria-label={viewLabel(v)}
+              title={viewLabel(v)}
+              onClick={() => props.onView(v)}
+            >
+              <AppIcon name={VIEW_ICON[v]} size={16} />
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="capturelist__bulk">
         <Select
           label={t("captures.sort")}
           value={props.sort}
@@ -44,8 +67,6 @@ export function CaptureList(props: {
             { value: "custom", label: t("captures.sortCustom") },
           ]}
         />
-      </div>
-      <div className="capturelist__bulk">
         <Button variant="ghost" disabled={props.captures.length === 0} onClick={props.onSelectAll}>
           {t("captures.selectAll")}
         </Button>
@@ -59,73 +80,19 @@ export function CaptureList(props: {
           {t("captures.emptyBody", { hotkey: hotkeyLabel(props.hotkey, locale) })}
         </EmptyState>
       ) : (
-        <ul className="capturelist__items">
-          {props.captures.map((c) => {
-            const checked = props.selected.has(c.id);
-            return (
-              <li
-                key={c.id}
-                className={
-                  "card" + (c.id === props.activeId ? " card--active" : "") + (checked ? " card--checked" : "")
-                }
-                onClick={() => props.onActivate(c.id)}
-              >
-                <img
-                  className="card__thumb"
-                  src={thumbUrl(props.session, c)}
-                  alt=""
-                  loading="lazy"
-                  draggable={false}
-                />
-                <div className="card__text">
-                  {renaming === c.id ? (
-                    <RenameInput
-                      className="card__rename"
-                      initial={c.name}
-                      label={t("captures.rename")}
-                      onDone={(name) => {
-                        setRenaming(null);
-                        if (name && name !== c.name) props.onRename(c.id, name);
-                      }}
-                    />
-                  ) : (
-                    <div
-                      className="card__name"
-                      title={c.name}
-                      onDoubleClick={(e) => {
-                        e.stopPropagation();
-                        setRenaming(c.id);
-                      }}
-                    >
-                      {c.name}
-                    </div>
-                  )}
-                  <div className="card__time">{formatTime(c.createdAt, locale)}</div>
-                </div>
-                <input
-                  type="checkbox"
-                  className="card__check"
-                  checked={checked}
-                  aria-label={t("captures.select", { name: c.name })}
-                  onClick={(e) => e.stopPropagation()}
-                  onChange={() => props.onToggle(c.id)}
-                />
-                <button
-                  type="button"
-                  className="card__trash"
-                  aria-label={trashLabel(c.id, c.name)}
-                  title={trashLabel(c.id, c.name)}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    props.onDelete(c.id);
-                  }}
-                >
-                  <Icon name="trash" size={15} />
-                </button>
-              </li>
-            );
-          })}
-        </ul>
+        <Gallery
+          key={props.groupId}
+          session={props.session}
+          groupId={props.groupId}
+          captures={props.captures}
+          view={props.view}
+          activeId={props.activeId}
+          selected={props.selected}
+          renamingId={props.renamingId}
+          actions={props.actions}
+          label={title}
+          rtl={directionOf(locale) === "rtl"}
+        />
       )}
     </section>
   );

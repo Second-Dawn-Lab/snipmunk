@@ -114,6 +114,34 @@ const paths = {
       <path d="M5 5h8M5 19h12" />
     </>
   ),
+  select: <path d="M5 3l14 8-6.500 2L10 20z" />,
+  // capture list views and menus
+  viewList: (
+    <>
+      <rect x="3" y="4" width="5" height="4" rx="1" />
+      <rect x="3" y="10" width="5" height="4" rx="1" />
+      <rect x="3" y="16" width="5" height="4" rx="1" />
+      <path d="M11 6h10M11 12h10M11 18h10" />
+    </>
+  ),
+  viewMedium: (
+    <>
+      <rect x="3" y="3" width="8" height="8" rx="1.500" />
+      <rect x="13" y="3" width="8" height="8" rx="1.500" />
+      <rect x="3" y="13" width="8" height="8" rx="1.500" />
+      <rect x="13" y="13" width="8" height="8" rx="1.500" />
+    </>
+  ),
+  viewLarge: <rect x="4" y="4" width="16" height="16" rx="2" />,
+  duplicate: (
+    <>
+      <rect x="8" y="8" width="13" height="13" rx="2" />
+      <path d="M4 16V5a1 1 0 0 1 1-1h11M14.500 11.500v6M11.500 14.500h6" />
+    </>
+  ),
+  rename: <path d="M4 20h4L19 9a2.800 2.800 0 0 0-4-4L4 16zM13.500 6.500l4 4" />,
+  folder: <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />,
+  trash: <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 10v6M14 10v6" />,
   // generic
   check: <path d="M20 6 9 17l-5-5" />,
   chevron: <path d="m6 9 6 6 6-6" />,

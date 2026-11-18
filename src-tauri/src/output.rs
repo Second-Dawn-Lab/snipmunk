@@ -1,20 +1,17 @@
 //! What happens to a finished capture: clipboard, PNG and thumbnail on disk, the active group, the windows.
 
 use std::borrow::Cow;
-use std::io::Cursor;
 
 use dawn_capture::Frame;
-use image::codecs::png::{CompressionType, FilterType, PngEncoder};
-use image::{DynamicImage, ImageEncoder, RgbaImage};
+use image::codecs::png::CompressionType;
+use image::RgbaImage;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::commands::AppState;
 use crate::naming;
 use crate::popups::{self, ToastInfo};
-
-/// The size the capture list's thumbnails fit into (they are shown at about 84 x 54 CSS pixels, so this is sharp at 200 %).
-pub const THUMB_MAX: (u32, u32) = (192, 124);
+use crate::thumbs::{png_bytes, thumbnail_png};
 
 /// Local time as (hour, minute), for the fallback name.
 #[cfg(windows)]
@@ -33,27 +30,14 @@ fn local_hm() -> (u32, u32) {
     (((secs / 3600) % 24) as u32, ((secs / 60) % 60) as u32)
 }
 
-/// PNG bytes of a frame (fast compression: a 4K screenshot must not take seconds) and a small PNG thumbnail.
+/// PNG bytes of a frame (fast compression: a 4K screenshot must not take seconds) and a thumbnail PNG.
 pub fn encode(frame: &Frame) -> Result<(Vec<u8>, Vec<u8>), String> {
     let image = RgbaImage::from_raw(frame.width, frame.height, frame.rgba.clone())
         .ok_or("the screenshot has an unexpected size")?;
-    let png = |img: &RgbaImage, quality: CompressionType| -> Result<Vec<u8>, String> {
-        let mut out = Cursor::new(Vec::new());
-        PngEncoder::new_with_quality(&mut out, quality, FilterType::Sub)
-            .write_image(
-                img.as_raw(),
-                img.width(),
-                img.height(),
-                image::ExtendedColorType::Rgba8,
-            )
-            .map_err(|e| e.to_string())?;
-        Ok(out.into_inner())
-    };
-    let full = png(&image, CompressionType::Fast)?;
-    let thumb = DynamicImage::ImageRgba8(image)
-        .thumbnail(THUMB_MAX.0, THUMB_MAX.1)
-        .to_rgba8();
-    Ok((full, png(&thumb, CompressionType::Default)?))
+    Ok((
+        png_bytes(&image, CompressionType::Fast)?,
+        thumbnail_png(&image)?,
+    ))
 }
 
 /// Put the capture on the clipboard as an image (with its transparency, for a freeform capture).
@@ -118,6 +102,8 @@ pub fn deliver(app: &AppHandle, frame: Frame, title: Option<String>) -> Result<(
     };
 
     let _ = app.emit("session-changed", &session);
+    // The text of the new capture is read in the background (low priority, one at a time).
+    crate::ocr::queue(app, &capture.id);
     let _ = app.emit(
         "capture-added",
         CaptureAdded {
@@ -147,6 +133,7 @@ pub fn deliver(app: &AppHandle, frame: Frame, title: Option<String>) -> Result<(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::thumbs::THUMB_MAX;
 
     fn frame(w: u32, h: u32) -> Frame {
         Frame {
@@ -158,15 +145,15 @@ mod tests {
 
     #[test]
     fn a_capture_becomes_a_png_and_a_smaller_png_thumbnail() {
-        let (png, thumb) = encode(&frame(640, 360)).unwrap();
+        let (png, thumb) = encode(&frame(1280, 720)).unwrap();
         assert_eq!(&png[1..4], b"PNG");
         assert_eq!(&thumb[1..4], b"PNG");
         let full = image::load_from_memory(&png).unwrap();
-        assert_eq!((full.width(), full.height()), (640, 360));
+        assert_eq!((full.width(), full.height()), (1280, 720));
         let small = image::load_from_memory(&thumb).unwrap();
         assert!(small.width() <= THUMB_MAX.0 && small.height() <= THUMB_MAX.1);
-        assert_eq!(small.width(), 192, "the aspect ratio is kept");
-        assert_eq!(small.height(), 108);
+        assert_eq!(small.width(), 520, "the aspect ratio is kept");
+        assert_eq!(small.height(), 293);
     }
 
     #[test]

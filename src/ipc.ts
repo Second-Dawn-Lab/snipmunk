@@ -4,6 +4,7 @@ import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { mockImageUrl, mockInvoke, mockListen } from "./ipc.mock";
+import type { OcrResult } from "./ocr/types";
 import type { Settings } from "./settings/defaults";
 
 export const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -19,10 +20,16 @@ export interface Capture {
   file: string;
   /** A small preview for the list (`thumbs/<id>.png`); `null` for captures without one. */
   thumbnail: string | null;
+  /** The width limit the thumbnail was made for; below the current one it is upgraded in the background. */
+  thumbSize: number;
+  /** Counts the times the thumbnail was replaced (an edit), so the picture is loaded again. */
+  thumbRev: number;
   width: number;
   height: number;
   sourceWindowTitle: string | null;
-  /** Placeholder for the annotation tools (Phase 5): `null` until then. */
+  /** "screenshot" (taken by Snipmunk), "imported" (dropped in); `null` in sessions of earlier versions. */
+  source: "screenshot" | "imported" | null;
+  /** The editable marks, crop and rotation (see src/annotate/schema.ts); `null` for a capture nobody edited. */
   annotations: unknown;
 }
 
@@ -30,6 +37,10 @@ export interface Group {
   id: string;
   name: string;
   order: number;
+  /** One of `GROUP_COLORS` (groupRules.ts), or none. */
+  color: string | null;
+  /** One of `GROUP_EMOJIS`, or none. */
+  emoji: string | null;
   /** In the user's custom order. */
   captures: Capture[];
 }
@@ -54,9 +65,14 @@ export function imageUrl(session: Session, capture: Capture): string {
 }
 
 /** The small picture of a capture for lists and the toast (the image itself when there is no thumbnail). */
-export function thumbUrl(session: { id: string }, capture: { file: string; thumbnail: string | null }): string {
+export function thumbUrl(
+  session: { id: string },
+  capture: { file: string; thumbnail: string | null; thumbSize?: number; thumbRev?: number },
+): string {
   if (!isTauri) return mockImageUrl(capture as Capture);
-  return convertFileSrc(`${session.id}/${capture.thumbnail ?? capture.file}`, "snipmunk-img");
+  // The size in the address makes the picture load again when the thumbnail is upgraded.
+  const url = convertFileSrc(`${session.id}/${capture.thumbnail ?? capture.file}`, "snipmunk-img");
+  return capture.thumbnail ? `${url}?v=${capture.thumbSize ?? 0}.${capture.thumbRev ?? 0}` : url;
 }
 
 /** What the capture shortcut is doing: "ok", "invalid" (cannot be used) or "hook" (the keyboard hook failed). */
@@ -176,11 +192,43 @@ export const ipc = {
   // session
   getCurrentSession: () => call<Session>("get_current_session"),
   onSessionChanged: (cb: (s: Session) => void) => on<Session>("session-changed", cb),
-  newSession: (discardPrevious: boolean) => call<Session>("new_session", { discardPrevious }),
+  /** `groupName` names the first group of the new session (in the user's language). */
+  newSession: (discardPrevious: boolean, groupName?: string) =>
+    call<Session>("new_session", { discardPrevious, groupName: groupName ?? null }),
+  /** Save the annotations of a capture (`null` = none). Written to disk before it returns. */
+  setAnnotations: (captureId: string, annotations: unknown) => call<Session>("set_annotations", { captureId, annotations }),
+  /** Replace the stored picture of a capture (burn redactions in, or undo that). Same size as before. */
+  replaceCaptureImage: (captureId: string, png: Blob) => replaceImage(captureId, png),
+  // text recognition
+  ocrStatus: () => call<OcrStatus>("ocr_status"),
+  ocrGet: (captureId: string) => call<OcrResult | null>("ocr_get", { captureId }),
+  ocrRecognize: (captureId: string, key: string, png: Blob) => recognize(captureId, key, png),
+  onOcrQueue: (cb: (pending: number) => void) => on<{ pending: number }>("ocr-queue", (p) => cb(p.pending)),
+  onOcrReady: (cb: (captureId: string) => void) => on<{ captureId: string }>("ocr-ready", (p) => cb(p.captureId)),
+  copyText: (text: string) => call<void>("copy_text", { text }),
+  copyTable: (html: string, text: string) => call<void>("copy_table", { html, text }),
+  openOsSettings: (page: "language") => call<void>("open_os_settings", { page }),
+  /** Replace a capture's thumbnail with a PNG rendered by the editor (the picture with its annotations). */
+  setCaptureThumbnail: (captureId: string, png: Blob) => setThumbnail(captureId, png),
   createGroup: (name?: string) => call<Session>("create_group", { name: name ?? null }),
   renameGroup: (groupId: string, name: string) =>
     call<Session>("rename_group", { groupId, name }),
-  deleteGroup: (groupId: string) => call<Session>("delete_group", { groupId }),
+  /** Delete a group; its captures move to the end of `moveTo`, or are deleted with it when that is not given. */
+  deleteGroup: (groupId: string, moveTo?: string) =>
+    call<Session>("delete_group", { groupId, moveTo: moveTo ?? null }),
+  reorderGroups: (groupIds: string[]) => call<Session>("reorder_groups", { groupIds }),
+  setGroupColor: (groupId: string, color: string | null) => call<Session>("set_group_color", { groupId, color }),
+  setGroupEmoji: (groupId: string, emoji: string | null) => call<Session>("set_group_emoji", { groupId, emoji }),
+  /** Move captures (in this order) to a group, at `index` of its list without them (the end when not given). */
+  moveCaptures: (captureIds: string[], groupId: string, index?: number) =>
+    call<Session>("move_captures", { captureIds, groupId, index: index ?? null }),
+  /** Copy captures; each copy sits after its original and is named `<name><suffix>`. */
+  duplicateCaptures: (captureIds: string[], suffix: string) =>
+    call<{ session: Session; ids: string[] }>("duplicate_captures", { captureIds, suffix }),
+  /** Add a dropped image to a group. Fails with code "unsupported" when the file is not a supported image. */
+  importImage: (groupId: string, file: File) => importImage(groupId, file),
+  /** Development builds only: a new session with generated captures. */
+  debugSeedSession: (count: number, groups = 1) => call<Session>("debug_seed_session", { count, groups }),
   renameCapture: (captureId: string, name: string) =>
     call<Session>("rename_capture", { captureId, name }),
   deleteCapture: (captureId: string) => call<Session>("delete_capture", { captureId }),
@@ -189,6 +237,41 @@ export const ipc = {
   moveCaptureToGroup: (captureId: string, groupId: string, index?: number) =>
     call<Session>("move_capture_to_group", { captureId, groupId, index: index ?? null }),
 };
+
+async function importImage(groupId: string, file: File): Promise<Session> {
+  if (!isTauri) return mockInvoke<Session>("import_image", { groupId, name: file.name });
+  // The bytes go as the raw request body (no base64); the group and the file name travel in headers.
+  return invoke<Session>("import_image", new Uint8Array(await file.arrayBuffer()), {
+    headers: { "x-group-id": encodeURIComponent(groupId), "x-file-name": encodeURIComponent(file.name) },
+  });
+}
+
+export interface OcrStatus {
+  engine: string;
+  available: boolean;
+  languages: { tag: string; name: string }[];
+}
+
+async function replaceImage(captureId: string, png: Blob): Promise<Session> {
+  if (!isTauri) return mockInvoke<Session>("set_capture_thumbnail", { captureId });
+  return invoke<Session>("replace_capture_image", new Uint8Array(await png.arrayBuffer()), {
+    headers: { "x-capture-id": encodeURIComponent(captureId) },
+  });
+}
+
+async function recognize(captureId: string, key: string, png: Blob): Promise<OcrResult> {
+  if (!isTauri) throw { code: "ocr", message: "text recognition needs the Snipmunk app" };
+  return invoke<OcrResult>("ocr_recognize", new Uint8Array(await png.arrayBuffer()), {
+    headers: { "x-capture-id": encodeURIComponent(captureId), "x-key": encodeURIComponent(key) },
+  });
+}
+
+async function setThumbnail(captureId: string, png: Blob): Promise<Session> {
+  if (!isTauri) return mockInvoke<Session>("set_capture_thumbnail", { captureId });
+  return invoke<Session>("set_capture_thumbnail", new Uint8Array(await png.arrayBuffer()), {
+    headers: { "x-capture-id": encodeURIComponent(captureId) },
+  });
+}
 
 /** The label of the window this page runs in ("main", "settings"). */
 export function windowLabel(): string {

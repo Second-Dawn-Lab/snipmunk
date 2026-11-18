@@ -43,6 +43,13 @@ See the [roadmap](docs/ROADMAP.md) for the phases.
 
 Snipmunk is built to work entirely on your computer. Screenshots are kept in `%AppData%\SecondDawn\snipmunk` so a crash or restart never loses them, and you choose how long they stay (settings: clear on exit, or delete sessions after N days). There is no telemetry, no account and no upload. The only network access will be the update check against this repository's GitHub releases (not active yet).
 
+### Two things to know about redactions and the clipboard
+
+- **"Copy each capture to the clipboard"** (settings, Capture): when it is on, the capture goes to the clipboard *right after it is taken*, before you have edited it. Anything you blur or cover afterwards is not in that clipboard copy. Turn the setting off if you want to redact first, or copy again after editing.
+- **Redactions are applied to copies and exports, not to the stored original.** Snipmunk never changes the picture file it keeps; blur, pixelate and black boxes are marks on top of it, and the copy or export you make from the capture has the pixels really replaced. The stored original therefore still contains the pixels under a redaction. To remove them from the stored picture as well, use **Blur ▾ → Apply redactions permanently**: the redactions are burned into the file, nothing of the covered area is kept on disk, and after you close Snipmunk that cannot be undone. (Until then, Undo can bring the original back; that earlier picture is held in memory only, never in a file.)
+
+Text recognition (Text actions) runs on your computer with the text recognition that comes with Windows. Nothing is uploaded and no model is downloaded. The recognized text of a capture is kept in the session folder next to it and is deleted when the capture is deleted, when its redactions change, or when its picture is replaced.
+
 ## Build from source
 
 Snipmunk uses the shared code in [`dawn-core`](https://github.com/Second-Dawn-Lab/dawn-core), which must sit **next to** this folder (the version in `dawn-core.ref`).

@@ -3,7 +3,7 @@ import { Icon } from "@seconddawn/ui";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { WindowControls } from "../components/WindowControls";
 import { useT } from "../i18n";
-import { AboutPage, CapturePage, CopyPage, GeneralPage, SessionsPage } from "./pages";
+import { AboutPage, CapturePage, CopyPage, GeneralPage, OcrPage, SessionsPage } from "./pages";
 import type { Settings } from "./defaults";
 import { searchSettings, TABS, type SettingEntry, type Tab } from "./model";
 import { settingsStore } from "./store";
@@ -119,6 +119,7 @@ export function SettingsWindow() {
           {tab === "capture" && <CapturePage settings={settings} set={set} />}
           {tab === "sessions" && <SessionsPage settings={settings} set={set} />}
           {tab === "copy" && <CopyPage settings={settings} set={set} />}
+          {tab === "ocr" && <OcrPage settings={settings} set={set} />}
           {tab === "about" && <AboutPage />}
         </main>
       </div>

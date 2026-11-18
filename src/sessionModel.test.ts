@@ -8,10 +8,7 @@ import {
   formatSize,
   formatTime,
   groupOrFirst,
-  pruneSelection,
-  selectAll,
   sortCaptures,
-  toggled,
   totalCaptures,
   validActive,
   zoomIn,
@@ -24,9 +21,12 @@ const cap = (id: string, createdAt: number): Capture => ({
   createdAt,
   file: `images/${id}.png`,
   thumbnail: null,
+  thumbSize: 0,
+  thumbRev: 0,
   width: 100,
   height: 50,
   sourceWindowTitle: null,
+  source: null,
   annotations: null,
 });
 
@@ -35,8 +35,8 @@ const session: Session = {
   createdAt: 0,
   updatedAt: 0,
   groups: [
-    { id: "g1", name: "Group 1", order: 0, captures: [cap("a", 30), cap("b", 10), cap("c", 20)] },
-    { id: "g2", name: "Group 2", order: 1, captures: [cap("d", 5)] },
+    { id: "g1", name: "Group 1", order: 0, color: null, emoji: null, captures: [cap("a", 30), cap("b", 10), cap("c", 20)] },
+    { id: "g2", name: "Group 2", order: 1, color: null, emoji: null, captures: [cap("d", 5)] },
   ],
 };
 
@@ -52,27 +52,11 @@ describe("sortCaptures", () => {
   });
 });
 
-describe("groups and selection", () => {
+describe("groups", () => {
   it("falls back to the first group", () => {
     expect(groupOrFirst(session, "g2").id).toBe("g2");
     expect(groupOrFirst(session, "gone").id).toBe("g1");
     expect(groupOrFirst(session, null).id).toBe("g1");
-  });
-  it("toggles without mutating", () => {
-    const one = toggled(new Set(), "a");
-    expect([...one]).toEqual(["a"]);
-    expect([...toggled(one, "a")]).toEqual([]);
-    expect(one.has("a")).toBe(true);
-  });
-  it("selects all captures given", () => {
-    expect(selectAll(session.groups[0].captures).size).toBe(3);
-    expect(selectAll([]).size).toBe(0);
-  });
-  it("prunes ids that no longer exist, keeping selections from other groups", () => {
-    const pruned = pruneSelection(new Set(["a", "d", "zzz"]), session);
-    expect([...pruned].sort()).toEqual(["a", "d"]);
-    const same = new Set(["a"]);
-    expect(pruneSelection(same, session)).toBe(same);
   });
   it("counts all captures", () => {
     expect(totalCaptures(session)).toBe(4);

@@ -3,7 +3,7 @@ import { getVersion } from "@tauri-apps/api/app";
 import { useEffect, useState, type ReactNode } from "react";
 import { HotkeyNotice } from "../components/HotkeyNotice";
 import { useT } from "../i18n";
-import { ipc, isTauri } from "../ipc";
+import { ipc, isTauri, type OcrStatus } from "../ipc";
 import { LANGUAGES } from "../language";
 import type { CaptureDelay, CaptureMode, Settings } from "./defaults";
 import { Kbd, ShortcutDialog } from "./ShortcutDialog";
@@ -79,6 +79,67 @@ export function GeneralPage({ settings, set }: PageProps) {
           checked={settings.alwaysOnTop}
           onChange={(alwaysOnTop) => set({ alwaysOnTop })}
         />
+      </Setting>
+      <Setting id="editorWheel" title={t("settings.editorWheel")} description={t("settings.editorWheelDesc")}>
+        <Select
+          label={t("settings.editorWheel")}
+          value={settings.editorWheel}
+          onChange={(editorWheel) => set({ editorWheel })}
+          options={[
+            { value: "zoom", label: t("settings.wheelZoom") },
+            { value: "scroll", label: t("settings.wheelScroll") },
+          ]}
+        />
+      </Setting>
+    </Section>
+  );
+}
+
+export function OcrPage({ settings, set }: PageProps) {
+  const { t } = useT();
+  const [status, setStatus] = useState<OcrStatus | null>(null);
+  useEffect(() => {
+    let gone = false;
+    ipc.ocrStatus().then((s) => !gone && setStatus(s), () => !gone && setStatus({ engine: "windows", available: false, languages: [] }));
+    return () => {
+      gone = true;
+    };
+  }, []);
+  const languages = status?.languages ?? [];
+  return (
+    <Section>
+      <Setting id="ocrEngine" title={t("settings.ocrEngine")} description={t("settings.ocrEngineDesc")}>
+        <span>{t("settings.ocrEngineValue")}</span>
+      </Setting>
+      <Setting id="ocrAuto" title={t("settings.ocrAuto")} description={t("settings.ocrAutoDesc")}>
+        <Switch label={t("settings.ocrAuto")} checked={settings.ocrAuto} onChange={(ocrAuto) => set({ ocrAuto })} />
+      </Setting>
+      <Setting id="ocrLanguages" title={t("settings.ocrLanguages")} description={t("settings.ocrLanguagesDesc")}>
+        <Select
+          label={t("settings.ocrLanguages")}
+          value={settings.ocrLanguages === "auto" || languages.some((l) => l.tag === settings.ocrLanguages) ? settings.ocrLanguages : "auto"}
+          onChange={(ocrLanguages) => set({ ocrLanguages })}
+          options={[{ value: "auto", label: t("settings.ocrLanguagesAuto") }, ...languages.map((l) => ({ value: l.tag, label: l.name }))]}
+        />
+      </Setting>
+      <Setting id="ocrInstalled" title={t("settings.ocrInstalled")} description={t("settings.ocrAddLanguageDesc")}>
+        <div className="ocrlangs">
+          <span>{status === null ? "…" : languages.length > 0 ? languages.map((l) => l.name).join(", ") : t("settings.ocrInstalledNone")}</span>
+          <Button onClick={() => void ipc.openOsSettings("language")} aria-label={t("settings.ocrAddLanguage")}>
+            {t("settings.ocrOpenSettings")}
+          </Button>
+        </div>
+      </Setting>
+      <Setting id="ocrModels" title={t("settings.ocrModels")} description={t("settings.ocrModelsDesc")}>
+        <span>{t("settings.ocrModelsValue")}</span>
+      </Setting>
+      <Setting id="quickRedact" title={t("settings.quickRedact")} description={t("settings.quickRedactDesc")}>
+        <div className="ocrlangs">
+          <Switch label={t("ocr.redactEmail")} checked={settings.quickRedactEmail} onChange={(quickRedactEmail) => set({ quickRedactEmail })} />
+          <span>{t("ocr.redactEmail")}</span>
+          <Switch label={t("ocr.redactPhone")} checked={settings.quickRedactPhone} onChange={(quickRedactPhone) => set({ quickRedactPhone })} />
+          <span>{t("ocr.redactPhone")}</span>
+        </div>
       </Setting>
     </Section>
   );
@@ -199,6 +260,18 @@ export function SessionsPage({ settings, set }: PageProps) {
             { value: "ask", label: t("settings.newSessionAsk") },
             { value: "autoExport", label: t("settings.newSessionExport") },
             { value: "clear", label: t("settings.newSessionClear") },
+          ]}
+        />
+      </Setting>
+      <Setting id="galleryView" title={t("settings.galleryView")} description={t("settings.galleryViewDesc")}>
+        <Select
+          label={t("settings.galleryView")}
+          value={settings.galleryView}
+          onChange={(galleryView) => set({ galleryView })}
+          options={[
+            { value: "list", label: t("view.list") },
+            { value: "medium", label: t("view.medium") },
+            { value: "large", label: t("view.large") },
           ]}
         />
       </Setting>

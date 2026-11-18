@@ -22,7 +22,10 @@ pub struct AppState {
 impl AppState {
     pub fn load() -> Self {
         let settings = Settings::load();
-        let sessions = SessionStore::open(SessionStore::default_root());
+        let sessions = SessionStore::open_in(
+            SessionStore::default_root(),
+            crate::language::resolve(&settings.language),
+        );
         // Old sessions go at startup, according to the retention setting.
         sessions.cleanup(settings.retention_days, now_ms());
         Self {
@@ -69,6 +72,11 @@ pub fn apply(app: &AppHandle, settings: &Settings) {
         let _ = main.set_always_on_top(settings.always_on_top);
     }
     tray::set_language(app, &settings.language);
+    app.state::<AppState>()
+        .sessions
+        .lock()
+        .unwrap()
+        .set_language(crate::language::resolve(&settings.language));
     crate::hotkey::apply(app, &settings.capture_hotkey);
 }
 
@@ -165,7 +173,7 @@ pub fn close_action(
 // --- session ---------------------------------------------------------------
 
 /// Run a change on the session store, then tell every window about the new state.
-fn change_session(
+pub(crate) fn change_session(
     app: &AppHandle,
     state: &State<'_, AppState>,
     f: impl FnOnce(&mut SessionStore) -> Result<(), crate::sessions::StoreError>,
@@ -196,8 +204,11 @@ pub fn new_session(
     app: AppHandle,
     state: State<'_, AppState>,
     discard_previous: bool,
+    group_name: Option<String>,
 ) -> CmdResult<Session> {
-    change_session(&app, &state, |s| s.new_session(discard_previous))
+    change_session(&app, &state, |s| {
+        s.new_session(discard_previous, group_name.clone())
+    })
 }
 
 #[tauri::command]
@@ -219,13 +230,17 @@ pub fn rename_group(
     change_session(&app, &state, |s| s.rename_group(&group_id, &name))
 }
 
+/// Delete a group; its captures go to the end of `move_to`, or are deleted with it when that is not given.
 #[tauri::command]
 pub fn delete_group(
     app: AppHandle,
     state: State<'_, AppState>,
     group_id: String,
+    move_to: Option<String>,
 ) -> CmdResult<Session> {
-    change_session(&app, &state, |s| s.delete_group(&group_id))
+    change_session(&app, &state, |s| {
+        s.delete_group(&group_id, move_to.as_deref())
+    })
 }
 
 #[tauri::command]
@@ -299,7 +314,7 @@ pub fn serve_image<R: tauri::Runtime>(
 }
 
 /// Decode %XX escapes (invalid ones are kept as they are).
-fn percent_decode(s: &str) -> String {
+pub(crate) fn percent_decode(s: &str) -> String {
     let bytes = s.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;

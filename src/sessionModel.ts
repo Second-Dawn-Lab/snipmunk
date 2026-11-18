@@ -16,23 +16,6 @@ export function groupOrFirst(session: Session, groupId: string | null): Group {
   return session.groups.find((g) => g.id === groupId) ?? session.groups[0];
 }
 
-export function toggled(selected: ReadonlySet<string>, id: string): Set<string> {
-  const next = new Set(selected);
-  if (!next.delete(id)) next.add(id);
-  return next;
-}
-
-export function selectAll(captures: readonly Capture[]): Set<string> {
-  return new Set(captures.map((c) => c.id));
-}
-
-/** Drop selected ids whose captures no longer exist anywhere in the session. */
-export function pruneSelection(selected: ReadonlySet<string>, session: Session): Set<string> {
-  const alive = new Set(session.groups.flatMap((g) => g.captures.map((c) => c.id)));
-  const next = new Set([...selected].filter((id) => alive.has(id)));
-  return next.size === selected.size ? (selected as Set<string>) : next;
-}
-
 /** Which capture to show after `deletedId` is removed from the list as shown: the next one, else the previous. */
 export function activeAfterDelete(shownIds: readonly string[], deletedId: string): string | null {
   const i = shownIds.indexOf(deletedId);

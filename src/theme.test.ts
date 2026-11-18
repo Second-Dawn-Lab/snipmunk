@@ -112,3 +112,31 @@ describe("theme blocks", () => {
     expect(contrast("#ffffff", "#e53935")).toBeLessThan(4.5);
   });
 });
+
+// The group colours are accents of tabs and swatches (drawn shapes): 3:1 against the surfaces they sit on, in both themes.
+const GROUP_COLOR_NAMES = ["red", "orange", "amber", "yellow", "green", "teal", "blue", "purple", "pink"];
+for (const [name, tokens] of [
+  ["light", light],
+  ["dark", dark],
+] as [string, Tokens][]) {
+  describe(`${name} group colours`, () => {
+    for (const c of GROUP_COLOR_NAMES) {
+      for (const bg of ["--dw-surface", "--dw-bg"]) {
+        it(`${c} on ${bg} is at least 3:1`, () => {
+          expect(tokens[`--gc-${c}`], c).toMatch(/^#[0-9a-f]{6}$/i);
+          expect(contrast(tokens[`--gc-${c}`], tokens[bg])).toBeGreaterThanOrEqual(3);
+        });
+      }
+    }
+    it("has nine different colours", () => {
+      expect(new Set(GROUP_COLOR_NAMES.map((c) => tokens[`--gc-${c}`].toLowerCase())).size).toBe(9);
+    });
+  });
+}
+
+describe("group colour classes", () => {
+  it("every colour has a class in app.css", () => {
+    const css = unix(app);
+    for (const c of GROUP_COLOR_NAMES) expect(css, c).toContain(`.gc-${c} {`);
+  });
+});

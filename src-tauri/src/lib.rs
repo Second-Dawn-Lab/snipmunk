@@ -4,16 +4,20 @@ mod capture;
 mod commands;
 mod error;
 mod freeform;
+mod gallery;
 mod geometry;
 mod hotkey;
+mod import;
 mod language;
 mod naming;
+mod ocr;
 mod output;
 mod placement;
 mod popups;
 mod sessions;
 mod settings;
 mod startup;
+mod thumbs;
 mod titlebar;
 mod tray;
 mod webview;
@@ -62,6 +66,22 @@ pub fn run() {
             commands::delete_capture,
             commands::reorder_captures,
             commands::move_capture_to_group,
+            gallery::move_captures,
+            gallery::duplicate_captures,
+            gallery::reorder_groups,
+            gallery::set_group_color,
+            gallery::set_group_emoji,
+            gallery::import_image,
+            gallery::set_annotations,
+            gallery::set_capture_thumbnail,
+            gallery::replace_capture_image,
+            ocr::ocr_status,
+            ocr::ocr_get,
+            ocr::ocr_recognize,
+            ocr::copy_text,
+            ocr::copy_table,
+            ocr::open_os_settings,
+            gallery::debug_seed_session,
             titlebar::set_maximize_rect,
             capture::start_capture,
             capture::capture_overlay_info,
@@ -83,6 +103,8 @@ pub fn run() {
             }
             commands::apply(app.handle(), &settings); // also installs the capture shortcut
             capture::precreate(app.handle());
+            // Sessions saved by earlier versions get sharp thumbnails for the large gallery view (background thread).
+            thumbs::spawn_upgrade(app.handle().clone());
             // Only the autostart entry (`--hidden`) stays in the tray; every other start shows the window.
             if !startup::launched_hidden(std::env::args()) {
                 tray::show_main(app.handle());

@@ -12,6 +12,8 @@ export function MenuItem(props: {
   soon?: string;
   disabled?: boolean;
   expanded?: boolean;
+  /** A destructive entry (Delete). */
+  danger?: boolean;
   onSelect?: () => void;
   children?: ReactNode;
 }) {
@@ -21,7 +23,7 @@ export function MenuItem(props: {
     <button
       type="button"
       role={role}
-      className="menuitem"
+      className={props.danger ? "menuitem menuitem--danger" : "menuitem"}
       aria-checked={role === "menuitem" ? undefined : !!props.checked}
       aria-disabled={inert || undefined}
       aria-expanded={props.expanded}

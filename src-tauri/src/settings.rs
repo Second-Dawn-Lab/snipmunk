@@ -29,6 +29,8 @@ pub struct Settings {
     pub retention_days: u32,
     /// How the Copy button puts several screenshots on the clipboard: "separate" | "stack" | "grid"
     pub default_copy_mode: String,
+    /// How the capture list looks: "list" | "medium" | "large"
+    pub gallery_view: String,
     /// The chosen capture mode: "rectangle" | "window" | "fullscreen" | "freeform"
     pub capture_mode: String,
     /// Seconds to wait before a capture: 0, 3, 5 or 10.
@@ -52,6 +54,19 @@ pub struct Settings {
     /// 0 to 100
     pub last_outline_opacity: u32,
     pub last_outline_size: u32,
+    // The Text tool: colour ("#rrggbb"), size in image pixels (8 to 400) and a solid label behind the text.
+    pub last_text_color: String,
+    pub last_text_size: u32,
+    pub last_text_background: bool,
+    /// Mouse wheel in the editor: "zoom" (wheel zooms, Shift pans) or "scroll" (wheel pans, Ctrl zooms).
+    pub editor_wheel: String,
+    /// Recognize the text of every new capture in the background.
+    pub ocr_auto: bool,
+    /// The OCR languages: "auto" (every one Windows has) or a comma separated list of tags ("de-DE,en-GB").
+    pub ocr_languages: String,
+    /// Quick redact: cover e-mail addresses / phone numbers.
+    pub quick_redact_email: bool,
+    pub quick_redact_phone: bool,
 }
 
 /// The interface languages (the language setting may also be "system").
@@ -73,6 +88,7 @@ impl Default for Settings {
             clear_on_exit: false,
             retention_days: 30,
             default_copy_mode: "separate".into(),
+            gallery_view: "list".into(),
             capture_mode: "rectangle".into(),
             capture_delay: 0,
             after_capture: "front".into(),
@@ -87,6 +103,14 @@ impl Default for Settings {
             last_outline_color: "#E53935".into(),
             last_outline_opacity: 100,
             last_outline_size: 3,
+            last_text_color: "#E53935".into(),
+            last_text_size: 28,
+            last_text_background: false,
+            editor_wheel: "zoom".into(),
+            ocr_auto: true,
+            ocr_languages: "auto".into(),
+            quick_redact_email: true,
+            quick_redact_phone: true,
         }
     }
 }
@@ -127,6 +151,11 @@ impl Settings {
             self.language = d.language.clone();
         }
         one_of(
+            &mut self.gallery_view,
+            &["list", "medium", "large"],
+            &d.gallery_view,
+        );
+        one_of(
             &mut self.capture_mode,
             &["rectangle", "window", "fullscreen", "freeform"],
             &d.capture_mode,
@@ -152,6 +181,19 @@ impl Settings {
         self.last_pen_size = self.last_pen_size.clamp(1, 60);
         self.last_highlighter_size = self.last_highlighter_size.clamp(1, 60);
         self.last_outline_size = self.last_outline_size.clamp(1, 60);
+        self.last_text_size = self.last_text_size.clamp(8, 400);
+        one_of(&mut self.editor_wheel, &["zoom", "scroll"], &d.editor_wheel);
+        // Language tags only: letters, digits and dashes, separated by commas.
+        let ok = self.ocr_languages == "auto"
+            || self.ocr_languages.split(',').all(|t| {
+                !t.is_empty()
+                    && t.len() <= 16
+                    && t.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+            });
+        if !ok {
+            self.ocr_languages = d.ocr_languages.clone();
+        }
+        color_or(&mut self.last_text_color, false, &d.last_text_color);
         one_of(
             &mut self.close_action,
             &["background", "quit", "ask"],
@@ -201,6 +243,70 @@ mod tests {
         assert_eq!(s.retention_days, 30);
         assert_eq!(s.default_copy_mode, "separate");
         assert!(!s.clear_on_exit && !s.launch_at_login && !s.always_on_top);
+    }
+
+    #[test]
+    fn the_gallery_view_is_checked() {
+        assert_eq!(Settings::default().gallery_view, "list");
+        let mut s = Settings::default();
+        s.merge(serde_json::json!({"galleryView": "large"}))
+            .unwrap();
+        assert_eq!(s.gallery_view, "large");
+        s.merge(serde_json::json!({"galleryView": "huge"})).unwrap();
+        assert_eq!(
+            s.gallery_view, "list",
+            "an unknown view falls back to the list"
+        );
+        let old: Settings = serde_json::from_str(r#"{"theme":"dark"}"#).unwrap();
+        assert_eq!(old.gallery_view, "list");
+    }
+
+    #[test]
+    fn the_text_tool_settings_are_checked() {
+        let mut s = Settings::default();
+        assert_eq!((s.last_text_size, s.last_text_background), (28, false));
+        s.merge(serde_json::json!({"lastTextColor": "none", "lastTextSize": 9000, "lastTextBackground": true}))
+            .unwrap();
+        assert_eq!(s.last_text_color, "#E53935", "text has no 'none' colour");
+        assert_eq!(s.last_text_size, 400);
+        assert!(s.last_text_background);
+        s.merge(serde_json::json!({"lastTextColor": "#112233", "lastTextSize": 2}))
+            .unwrap();
+        assert_eq!(
+            (s.last_text_color.as_str(), s.last_text_size),
+            ("#112233", 8)
+        );
+    }
+
+    #[test]
+    fn the_text_recognition_and_wheel_settings_are_checked() {
+        let s = Settings::default();
+        assert_eq!(
+            (
+                s.editor_wheel.as_str(),
+                s.ocr_auto,
+                s.ocr_languages.as_str()
+            ),
+            ("zoom", true, "auto")
+        );
+        assert!(s.quick_redact_email && s.quick_redact_phone);
+        let mut s = s;
+        s.merge(serde_json::json!({"editorWheel": "scroll", "ocrLanguages": "de-DE,en-GB", "ocrAuto": false}))
+            .unwrap();
+        assert_eq!(
+            (
+                s.editor_wheel.as_str(),
+                s.ocr_languages.as_str(),
+                s.ocr_auto
+            ),
+            ("scroll", "de-DE,en-GB", false)
+        );
+        s.merge(serde_json::json!({"editorWheel": "fly", "ocrLanguages": "de,, x y"}))
+            .unwrap();
+        assert_eq!(
+            (s.editor_wheel.as_str(), s.ocr_languages.as_str()),
+            ("zoom", "auto")
+        );
     }
 
     #[test]

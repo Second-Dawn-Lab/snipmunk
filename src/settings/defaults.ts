@@ -15,6 +15,8 @@ export interface Settings {
   /** Kept sessions older than this many days are deleted at startup; 0 = keep forever. */
   retentionDays: number;
   defaultCopyMode: CopyMode;
+  /** How the capture list looks. */
+  galleryView: "list" | "medium" | "large";
   captureMode: CaptureMode;
   /** Seconds before a capture. */
   captureDelay: CaptureDelay;
@@ -33,6 +35,19 @@ export interface Settings {
   lastOutlineColor: string;
   lastOutlineOpacity: number;
   lastOutlineSize: number;
+  // The Text tool: colour, size in image pixels, a solid label behind the text.
+  lastTextColor: string;
+  lastTextSize: number;
+  lastTextBackground: boolean;
+  /** The mouse wheel in the editor: "zoom" (wheel zooms, Shift pans) or "scroll" (wheel pans, Ctrl zooms). */
+  editorWheel: "zoom" | "scroll";
+  /** Recognize the text of every new capture in the background. */
+  ocrAuto: boolean;
+  /** "auto" (every language Windows has) or a comma separated list of language tags ("de-DE,en-GB"). */
+  ocrLanguages: string;
+  /** Quick redact: cover e-mail addresses / phone numbers. */
+  quickRedactEmail: boolean;
+  quickRedactPhone: boolean;
 }
 
 export type CaptureMode = "rectangle" | "window" | "fullscreen" | "freeform";
@@ -52,6 +67,7 @@ export const defaultSettings: Settings = {
   clearOnExit: false,
   retentionDays: 30,
   defaultCopyMode: "separate",
+  galleryView: "list",
   captureMode: "rectangle",
   captureDelay: 0,
   afterCapture: "front",
@@ -66,4 +82,12 @@ export const defaultSettings: Settings = {
   lastOutlineColor: "#E53935",
   lastOutlineOpacity: 100,
   lastOutlineSize: 3,
+  lastTextColor: "#E53935",
+  lastTextSize: 28,
+  lastTextBackground: false,
+  editorWheel: "zoom",
+  ocrAuto: true,
+  ocrLanguages: "auto",
+  quickRedactEmail: true,
+  quickRedactPhone: true,
 };

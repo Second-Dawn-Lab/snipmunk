@@ -32,6 +32,8 @@ export const EMOJI: readonly string[] = [
 
 export const SIZE_RANGE = { min: 1, max: 40 } as const;
 export const HIGHLIGHTER_SIZE_RANGE = { min: 4, max: 40 } as const;
+/** The font size of the text tool, in picture pixels. */
+export const TEXT_SIZE_RANGE = { min: 8, max: 200 } as const;
 
 /** Black or white, whichever reads better on `hex` (for the check mark on a selected swatch). */
 export function readableOn(hex: string): "#000000" | "#ffffff" {

@@ -1,29 +1,52 @@
 import { useSettings } from "@seconddawn/settings";
 import { Button, Dialog, Icon } from "@seconddawn/ui";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { zoomIn, zoomOut } from "../sessionModel";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { type DropPlan } from "../gallery/fileTypes";
+import { isGalleryView } from "../gallery/layout";
+import { moveIds, isNoopMove } from "../gallery/reorder";
+import {
+  clearSelection,
+  clickSelect,
+  contextTargets,
+  emptySelection,
+  keySelect,
+  pruneTo,
+  selectEvery,
+  toggleSelect,
+  type SelectionChange,
+  type Selection,
+} from "../gallery/selection";
+import { useFileDrop } from "../gallery/useFileDrop";
+import { nextGroupName } from "../groupNames";
+import { activeAfterGroupDelete, planGroupDelete, type DeleteChoice } from "../groupRules";
+import { dictionaries } from "../i18n";
 import { useT } from "../i18n";
+import { onNotice } from "../notify";
 import { ipc, type CmdError, type Group, type Session } from "../ipc";
 import {
   activeAfterDeleting,
   deleteTargets,
   groupOrFirst,
-  pruneSelection,
-  selectAll,
   sortCaptures,
-  toggled,
   totalCaptures,
   validActive,
+  zoomIn,
+  zoomOut,
   type SortMode,
 } from "../sessionModel";
 import { sessionStore, useSession } from "../sessionStore";
-import { settingsStore } from "../settings/store";
 import type { CopyMode } from "../settings/defaults";
+import { settingsStore } from "../settings/store";
+import { useStable } from "../useStable";
 import { BottomBar } from "./BottomBar";
 import { CaptureList } from "./CaptureList";
 import { CloseDialog } from "./CloseDialog";
+import { ContextMenu, type MenuEntry } from "./ContextMenu";
+import { DeleteGroupDialog } from "./DeleteGroupDialog";
+import type { GalleryActions } from "./Gallery";
 import { GroupTabs } from "./GroupTabs";
 import { HotkeyNotice } from "./HotkeyNotice";
+import { MenuItem } from "./MenuItem";
 import { Preview, type ZoomMode } from "./Preview";
 import { TitleBar } from "./TitleBar";
 import { TopBar } from "./TopBar";
@@ -33,20 +56,37 @@ function messageOf(e: unknown): string {
   return err?.message ?? String(e);
 }
 
+/** What each group tab remembers: its selection and the capture on show. */
+interface GroupView {
+  sel: Selection;
+  active: string | null;
+}
+const EMPTY_VIEW: GroupView = { sel: emptySelection, active: null };
+
+interface CardMenu {
+  x: number;
+  y: number;
+  ids: string[];
+  canRename: boolean;
+}
+
 /** The one page of Snipmunk: title bar, header, the capture list on the left, the preview on the right. */
 export function MainWindow() {
-  const { t } = useT();
+  const { t, locale } = useT();
   const { settings, patch } = useSettings(settingsStore);
   const session = useSession();
   const [groupId, setGroupId] = useState<string | null>(null);
   const [sort, setSort] = useState<SortMode>("newest");
-  const [activeId, setActiveId] = useState<string | null>(null);
-  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
+  const [views, setViews] = useState<Record<string, GroupView>>({});
+  const [renamingId, setRenamingId] = useState<string | null>(null);
   const [copyMode, setCopyMode] = useState<CopyMode>(settings.defaultCopyMode);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [confirmNew, setConfirmNew] = useState(false);
   const [groupToDelete, setGroupToDelete] = useState<Group | null>(null);
   const [pendingDelete, setPendingDelete] = useState<string[] | null>(null);
+  const [menu, setMenu] = useState<CardMenu | null>(null);
+  const [cardDropTab, setCardDropTab] = useState<string | null>(null);
   const [zoomMode, setZoomMode] = useState<ZoomMode>("fit");
   const [effectiveZoom, setEffectiveZoom] = useState(1);
 
@@ -56,12 +96,45 @@ export function MainWindow() {
   const group = session ? groupOrFirst(session, groupId) : null;
   const shown = useMemo(() => (group ? sortCaptures(group.captures, sort) : []), [group, sort]);
   const shownIds = useMemo(() => shown.map((c) => c.id), [shown]);
-  const currentId = validActive(shownIds, activeId);
+  const gid = group?.id ?? "";
+  const view: GroupView = views[gid] ?? EMPTY_VIEW;
+  const currentId = validActive(shownIds, view.active);
   const capture = shown.find((c) => c.id === currentId) ?? null;
+  const galleryView = isGalleryView(settings.galleryView) ? settings.galleryView : "list";
 
-  // Selections of captures that were deleted (here or in another window) go away.
+  /** Change the selection and/or the capture on show of the shown group. */
+  const applyChange = useCallback(
+    (change: SelectionChange | null) => {
+      if (!change || !gid) return;
+      setViews((prev) => {
+        const v = prev[gid] ?? EMPTY_VIEW;
+        return { ...prev, [gid]: { sel: change.selection, active: change.active === undefined ? v.active : change.active } };
+      });
+    },
+    [gid],
+  );
+  const setView = useCallback((groupKey: string, next: GroupView) => setViews((prev) => ({ ...prev, [groupKey]: next })), []);
+
+  // Captures that are gone (deleted, or moved to another group) leave the selections; so do deleted groups.
   useEffect(() => {
-    if (session) setSelected((s) => pruneSelection(s, session));
+    if (!session) return;
+    setViews((prev) => {
+      let changed = false;
+      const next: Record<string, GroupView> = {};
+      for (const [key, v] of Object.entries(prev)) {
+        const g = session.groups.find((x) => x.id === key);
+        if (!g) {
+          changed = true;
+          continue;
+        }
+        const alive = new Set(g.captures.map((c) => c.id));
+        const sel = pruneTo(v.sel, alive);
+        const active = v.active !== null && !alive.has(v.active) ? null : v.active;
+        if (sel !== v.sel || active !== v.active) changed = true;
+        next[key] = sel === v.sel && active === v.active ? v : { sel, active };
+      }
+      return changed ? next : prev;
+    });
   }, [session]);
 
   const run = useCallback(async (work: Promise<Session>): Promise<Session | null> => {
@@ -76,6 +149,16 @@ export function MainWindow() {
     }
   }, []);
 
+  /** "Group 2" in the user's language: the lowest number no default-named group has (renamed groups do not count). */
+  const newGroupName = useCallback(
+    (existing: readonly string[]) => {
+      const templates = Object.values(dictionaries).map((d) => (d as Record<string, string>)["groups.defaultName"]);
+      const own = (dictionaries[locale as keyof typeof dictionaries] as Record<string, string>)["groups.defaultName"];
+      return nextGroupName(existing, own, locale, templates);
+    },
+    [locale],
+  );
+
   // New captures land in the group tab that is shown.
   const shownGroupId = session && group ? group.id : null;
   useEffect(() => {
@@ -84,10 +167,9 @@ export function MainWindow() {
 
   // A capture was taken (by the shortcut, the button or the tray): show it, in its group.
   useEffect(() => {
-    const added = ipc.onCaptureAdded(({ captureId, groupId: gid }) => {
-      setGroupId(gid);
-      setActiveId(captureId);
-      setSelected(new Set());
+    const added = ipc.onCaptureAdded(({ captureId, groupId: target }) => {
+      setGroupId(target);
+      setViews((prev) => ({ ...prev, [target]: { sel: emptySelection, active: captureId } }));
     });
     const failed = ipc.onCaptureError((message) => setError(message));
     return () => {
@@ -96,6 +178,23 @@ export function MainWindow() {
     };
   }, []);
 
+  // Messages from the editor (text copied, redactions made, recognition failed).
+  useEffect(
+    () =>
+      onNotice((n) => {
+        if (n.error) setError(n.text);
+        else setNotice(n.text);
+      }),
+    [],
+  );
+
+  // Notices go away by themselves.
+  useEffect(() => {
+    if (!notice) return;
+    const timer = setTimeout(() => setNotice(null), 7000);
+    return () => clearTimeout(timer);
+  }, [notice]);
+
   // A different capture starts fitted.
   useEffect(() => setZoomMode("fit"), [currentId]);
 
@@ -103,17 +202,17 @@ export function MainWindow() {
   const askDelete = useCallback(
     (clicked?: string) => {
       if (!session) return;
-      const ids = deleteTargets(session, selected, currentId, clicked);
+      const ids = deleteTargets(session, view.sel.ids, currentId, clicked);
       if (ids.length > 0) setPendingDelete(ids);
     },
-    [session, selected, currentId],
+    [session, view.sel, currentId],
   );
 
   const confirmDelete = async () => {
     const ids = pendingDelete ?? [];
     setPendingDelete(null);
     const gone = new Set(ids);
-    setActiveId(activeAfterDeleting(shownIds, gone, currentId));
+    applyChange({ selection: view.sel, active: activeAfterDeleting(shownIds, gone, currentId) });
     for (const id of ids) {
       if ((await run(ipc.deleteCapture(id))) === null) break;
     }
@@ -131,18 +230,36 @@ export function MainWindow() {
     [effectiveZoom, capture],
   );
 
-  // Keyboard: Del deletes, Ctrl+0 / Ctrl++ / Ctrl+- / Ctrl+1 zoom the preview. Not while the user is typing.
+  const dialogOpen = pendingDelete !== null || confirmNew || groupToDelete !== null;
+
+  // Keyboard: Del deletes, Ctrl+A selects all, Esc clears the selection, F2 renames, Ctrl+0 / Ctrl++ / Ctrl+- / Ctrl+1
+  // zoom the preview. Not while the user is typing or a dialog is open.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       const typing =
         !!target &&
         (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) &&
-        !(target instanceof HTMLInputElement && (target.type === "checkbox" || target.type === "range"));
-      if (typing || pendingDelete) return;
+        !(target instanceof HTMLInputElement && (target.type === "checkbox" || target.type === "range" || target.type === "radio"));
+      if (typing || dialogOpen) return;
       if (e.key === "Delete") {
         e.preventDefault();
         askDelete();
+        return;
+      }
+      if (e.key === "Escape" && !e.ctrlKey && !e.altKey && view.sel.ids.size > 0) {
+        e.preventDefault();
+        applyChange({ selection: clearSelection(), active: undefined });
+        return;
+      }
+      if (e.key === "F2" && currentId && !menu) {
+        e.preventDefault();
+        setRenamingId(currentId);
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === "a" || e.key === "A")) {
+        e.preventDefault();
+        applyChange(selectEvery(view.sel, shownIds, currentId));
         return;
       }
       if (!e.ctrlKey || e.altKey || !capture) return;
@@ -163,7 +280,95 @@ export function MainWindow() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [askDelete, capture, pendingDelete, zoom]);
+  }, [askDelete, applyChange, capture, currentId, dialogOpen, menu, shownIds, view.sel, zoom]);
+
+  // --- actions on captures ---------------------------------------------------------------------------------------
+
+  const duplicate = async (ids: string[]) => {
+    try {
+      const result = await ipc.duplicateCaptures(ids, t("captures.copySuffix"));
+      sessionStore.apply(result.session);
+      if (result.ids.length > 0) {
+        setView(gid, { sel: { ids: new Set(result.ids), anchor: result.ids[0] }, active: result.ids[0] });
+      }
+    } catch (e) {
+      setError(messageOf(e));
+    }
+  };
+
+  const moveToGroup = async (ids: string[], target: string) => {
+    if (target === gid) return;
+    const next = activeAfterDeleting(shownIds, new Set(ids), currentId);
+    if (await run(ipc.moveCaptures(ids, target))) {
+      setView(gid, { sel: emptySelection, active: next });
+    }
+  };
+
+  const moveToNewGroup = async (ids: string[]) => {
+    const made = await run(ipc.createGroup(newGroupName(session?.groups.map((g) => g.name) ?? [])));
+    if (made) await moveToGroup(ids, made.groups[made.groups.length - 1].id);
+  };
+
+  const reorder = async (ids: string[], slot: number) => {
+    if (isNoopMove(shownIds, ids, slot)) return;
+    // Dropping always makes the order the user's own: the list is saved as it now looks.
+    const order = moveIds(shownIds, ids, slot);
+    setSort("custom");
+    await run(ipc.reorderCaptures(gid, order));
+  };
+
+  const actions: GalleryActions = useStable({
+    select: (id: string, mods: { ctrl: boolean; shift: boolean }) =>
+      applyChange(clickSelect(view.sel, shownIds, id, mods, currentId)),
+    toggle: (id: string) => applyChange(toggleSelect(view.sel, id)),
+    navigate: (step: number | "first" | "last", extend: boolean) =>
+      applyChange(keySelect(view.sel, shownIds, currentId, step, extend)),
+    contextMenu: (id: string, x: number, y: number) => {
+      const targets = contextTargets(view.sel, shownIds, id);
+      applyChange({ selection: targets.selection, active: targets.selection === view.sel ? undefined : id });
+      setMenu({ x, y, ids: targets.ids, canRename: targets.canRename });
+    },
+    rename: (id: string) => setRenamingId(id),
+    commitRename: (id: string, name: string | null) => {
+      setRenamingId(null);
+      const current = shown.find((c) => c.id === id);
+      if (name && current && name !== current.name) void run(ipc.renameCapture(id, name));
+    },
+    trash: (id: string) => askDelete(id),
+    reorder: (ids: string[], slot: number) => void reorder(ids, slot),
+    moveToGroup: (ids: string[], target: string) => void moveToGroup(ids, target),
+    dragTarget: (target: string | null) => setCardDropTab(target),
+  });
+
+  // --- files dropped into the window ----------------------------------------------------------------------------
+
+  const importFiles = async (files: File[], skipped: number, target: string) => {
+    let added = 0;
+    for (const file of files) {
+      try {
+        sessionStore.apply(await ipc.importImage(target, file));
+        added++;
+      } catch (e) {
+        if ((e as Partial<CmdError>).code === "unsupported") skipped++;
+        else {
+          setError(messageOf(e));
+          break;
+        }
+      }
+    }
+    const parts: string[] = [];
+    if (added > 0) parts.push(t("drop.added", { count: added }));
+    if (skipped > 0) parts.push(t("drop.skipped", { count: skipped }));
+    if (parts.length > 0) setNotice(parts.join(" "));
+  };
+
+  const fileDrag = useFileDrop((plan: DropPlan<File>, tab) => {
+    if (!session || !group) return;
+    if (plan.kind === "url") return setNotice(t("drop.saveFirst"));
+    if (plan.kind !== "files") return;
+    void importFiles(plan.accepted, plan.skipped, tab ?? group.id);
+  });
+  const dropGroup = fileDrag ? (session?.groups.find((g) => g.id === (fileDrag.target ?? group?.id)) ?? null) : null;
 
   if (!session || !group) return null;
 
@@ -171,11 +376,10 @@ export function MainWindow() {
 
   const startNewSession = async (discard: boolean) => {
     setConfirmNew(false);
-    const next = await run(ipc.newSession(discard));
+    const next = await run(ipc.newSession(discard, newGroupName([])));
     if (next) {
       setGroupId(null);
-      setActiveId(null);
-      setSelected(new Set());
+      setViews({});
     }
   };
 
@@ -188,20 +392,84 @@ export function MainWindow() {
   };
 
   const addGroup = async () => {
-    const next = await run(ipc.createGroup());
+    const next = await run(ipc.createGroup(newGroupName(session.groups.map((g) => g.name))));
     if (next) setGroupId(next.groups[next.groups.length - 1].id);
   };
 
   const askDeleteGroup = (g: Group) => {
-    if (g.captures.length === 0) void removeGroup(g.id);
+    if (!planGroupDelete(session.groups, g.id, { mode: "delete" }).ok) return;
+    if (g.captures.length === 0) void removeGroup(g, { mode: "delete" });
     else setGroupToDelete(g);
   };
 
-  const removeGroup = async (id: string) => {
+  const removeGroup = async (g: Group, choice: DeleteChoice) => {
     setGroupToDelete(null);
-    if (id === group.id) setGroupId(null);
-    await run(ipc.deleteGroup(id));
+    const plan = planGroupDelete(session.groups, g.id, choice);
+    if (!plan.ok) return;
+    setGroupId(activeAfterGroupDelete(session.groups, g.id, group.id, plan.moveTo));
+    await run(ipc.deleteGroup(g.id, plan.moveTo ?? undefined));
   };
+
+  // --- the card menu ---------------------------------------------------------------------------------------------
+
+  const closeMenu = () => setMenu(null);
+  const cardMenuEntries = (m: CardMenu): MenuEntry[] => {
+    const others = session.groups.filter((g) => g.id !== group.id);
+    return [
+      {
+        kind: "item",
+        id: "rename",
+        label: t("ctx.rename"),
+        icon: "rename",
+        disabled: !m.canRename,
+        onSelect: () => setRenamingId(m.ids[0]),
+      },
+      { kind: "item", id: "duplicate", label: t("ctx.duplicate"), icon: "duplicate", onSelect: () => void duplicate(m.ids) },
+      {
+        kind: "sub",
+        id: "move",
+        label: t("ctx.moveTo"),
+        icon: "folder",
+        children: (
+          <div className="ctxmenu__list">
+            {others.map((g) => (
+              <MenuItem
+                key={g.id}
+                label={`${g.emoji ? `${g.emoji} ` : ""}${g.name}`}
+                onSelect={() => {
+                  closeMenu();
+                  void moveToGroup(m.ids, g.id);
+                }}
+              />
+            ))}
+            <MenuItem
+              label={t("ctx.newGroup")}
+              icon="plus"
+              onSelect={() => {
+                closeMenu();
+                void moveToNewGroup(m.ids);
+              }}
+            />
+          </div>
+        ),
+      },
+      { kind: "separator", id: "sep1" },
+      { kind: "item", id: "copy", label: t("ctx.copy"), icon: "copy", disabled: true, tip: t("soon.label"), onSelect: () => {} },
+      { kind: "item", id: "save", label: t("ctx.save"), icon: "save", disabled: true, tip: t("soon.label"), onSelect: () => {} },
+      { kind: "separator", id: "sep2" },
+      { kind: "item", id: "delete", label: t("ctx.delete"), icon: "trash", danger: true, onSelect: () => setPendingDelete(m.ids) },
+    ];
+  };
+
+  const banner = (kind: "error" | "notice", text: ReactNode, close: () => void) => (
+    <div className={kind === "error" ? "errorbar" : "errorbar noticebar"} role={kind === "error" ? "alert" : "status"}>
+      <Icon name={kind === "error" ? "alert" : "check"} size={16} />
+      <span>{text}</span>
+      <button type="button" className="errorbar__close" onClick={close} aria-label={t("session.dismiss")}>
+        <Icon name="close" size={14} />
+      </button>
+    </div>
+  );
 
   return (
     <div className="shell">
@@ -218,40 +486,38 @@ export function MainWindow() {
 
       <HotkeyNotice onOpenSettings={() => void ipc.openSettings()} />
 
-      {error && (
-        <div className="errorbar" role="alert">
-          <Icon name="alert" size={16} />
-          <span>{t("session.error", { message: error })}</span>
-          <button type="button" className="errorbar__close" onClick={() => setError(null)} aria-label={t("session.dismiss")}>
-            <Icon name="close" size={14} />
-          </button>
-        </div>
-      )}
+      {error && banner("error", t("session.error", { message: error }), () => setError(null))}
+      {notice && banner("notice", notice, () => setNotice(null))}
 
       <main className="panels">
-        <div className="panel panel--left">
+        <div className={`panel panel--left panel--${galleryView}`}>
           <GroupTabs
             groups={session.groups}
             activeId={group.id}
+            dropTargetId={fileDrag ? (fileDrag.target ?? null) : cardDropTab}
             onSelect={setGroupId}
             onAdd={() => void addGroup()}
             onRename={(id, name) => void run(ipc.renameGroup(id, name))}
             onDelete={askDeleteGroup}
+            onReorder={(ids) => void run(ipc.reorderGroups(ids))}
+            onColor={(id, color) => void run(ipc.setGroupColor(id, color))}
+            onEmoji={(id, emoji) => void run(ipc.setGroupEmoji(id, emoji))}
           />
           <CaptureList
             session={session}
+            groupId={group.id}
             captures={shown}
+            view={galleryView}
             activeId={currentId}
-            selected={selected}
+            selected={view.sel.ids}
+            renamingId={renamingId}
             sort={sort}
             hotkey={settings.captureHotkey}
+            actions={actions}
             onSort={setSort}
-            onActivate={setActiveId}
-            onToggle={(id) => setSelected((s) => toggled(s, id))}
-            onDelete={askDelete}
-            onRename={(id, name) => void run(ipc.renameCapture(id, name))}
-            onSelectAll={() => setSelected(selectAll(shown))}
-            onClearAll={() => setSelected(new Set())}
+            onView={(next) => void patch({ galleryView: next })}
+            onSelectAll={() => applyChange(selectEvery(view.sel, shownIds, currentId))}
+            onClearAll={() => applyChange({ selection: clearSelection(), active: undefined })}
           />
         </div>
         <div className="panel panel--right">
@@ -260,13 +526,25 @@ export function MainWindow() {
             capture={capture}
             zoomMode={zoomMode}
             onZoom={setEffectiveZoom}
+            onZoomMode={setZoomMode}
+            zoom={effectiveZoom}
+            onError={(e) => setError(messageOf(e))}
             settings={settings}
             onPatch={(change) => void patch(change)}
           />
         </div>
+        {dropGroup && (
+          <div className={`dropoverlay${dropGroup.color ? ` gc-${dropGroup.color}` : ""}`} aria-hidden="true">
+            <div className="dropoverlay__msg">
+              {t("drop.overlay", { group: `${dropGroup.emoji ? `${dropGroup.emoji} ` : ""}${dropGroup.name}` })}
+            </div>
+          </div>
+        )}
       </main>
 
-      <BottomBar selectedCount={selected.size} copyMode={copyMode} onCopyMode={setCopyMode} />
+      <BottomBar selectedCount={view.sel.ids.size} copyMode={copyMode} onCopyMode={setCopyMode} />
+
+      {menu && <ContextMenu x={menu.x} y={menu.y} label={t("captures.title", { count: menu.ids.length })} entries={cardMenuEntries(menu)} onClose={closeMenu} />}
 
       <Dialog
         open={confirmNew}
@@ -275,22 +553,20 @@ export function MainWindow() {
         footer={
           <>
             <Button variant="ghost" onClick={() => setConfirmNew(false)}>
-              {t("session.cancel")}
-            </Button>
-            <Button variant="danger" onClick={() => void startNewSession(true)}>
-              {t("session.discard")}
+              {t("session.keepCurrent")}
             </Button>
             <Button variant="primary" onClick={() => void startNewSession(false)}>
-              {t("session.keep")}
+              {t("session.startFresh")}
             </Button>
           </>
         }
       >
         <p>
           {settings.retentionDays > 0
-            ? t("session.newBody", { count, days: settings.retentionDays })
-            : t("session.newBodyForever", { count })}
+            ? t("session.freshBody", { count, days: settings.retentionDays })
+            : t("session.freshBodyForever", { count })}
         </p>
+        <p className="dialog__hint">{t("session.exportHint")}</p>
       </Dialog>
 
       <Dialog
@@ -311,27 +587,12 @@ export function MainWindow() {
         <p>{t("delete.body", { count: pendingDelete?.length ?? 0 })}</p>
       </Dialog>
 
-      <Dialog
-        open={groupToDelete !== null}
-        title={t("groups.deleteTitle")}
-        onClose={() => setGroupToDelete(null)}
-        footer={
-          <>
-            <Button variant="ghost" onClick={() => setGroupToDelete(null)}>
-              {t("session.cancel")}
-            </Button>
-            <Button variant="danger" onClick={() => groupToDelete && void removeGroup(groupToDelete.id)}>
-              {t("groups.deleteConfirm")}
-            </Button>
-          </>
-        }
-      >
-        {groupToDelete && (
-          <p>
-            {t("groups.deleteBody", { name: groupToDelete.name, count: groupToDelete.captures.length })}
-          </p>
-        )}
-      </Dialog>
+      <DeleteGroupDialog
+        group={groupToDelete}
+        groups={session.groups}
+        onCancel={() => setGroupToDelete(null)}
+        onConfirm={(g, choice) => void removeGroup(g, choice)}
+      />
 
       <CloseDialog />
     </div>

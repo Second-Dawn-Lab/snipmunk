@@ -5,6 +5,7 @@ import type { CaptureDelay, CaptureMode, Settings } from "../settings/defaults";
 import { AppIcon, type AppIconName } from "./AppIcons";
 import { hotkeyLabel } from "./hotkeyLabel";
 import { MenuItem } from "./MenuItem";
+import { SubmenuItem } from "./SubmenuItem";
 import { Pop } from "./Pop";
 
 export interface ZoomApi {
@@ -45,7 +46,6 @@ export function TopBar(props: {
   const [modeOpen, setModeOpen] = useState(false);
   const [zoomOpen, setZoomOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
-  const [moreZoom, setMoreZoom] = useState(false);
 
   const soon = (text: string) => `${text} – ${t("soon.label")}`;
   const hotkey = hotkeyLabel(settings.captureHotkey, locale);
@@ -186,10 +186,7 @@ export function TopBar(props: {
 
         <Pop
           open={moreOpen}
-          onClose={() => {
-            setMoreOpen(false);
-            setMoreZoom(false);
-          }}
+          onClose={() => setMoreOpen(false)}
           kind="menu"
           align="end"
           label={t("actions.more")}
@@ -203,17 +200,9 @@ export function TopBar(props: {
             />
           }
         >
-          <MenuItem label={t("menu.zoom")} icon="zoom" expanded={moreZoom} onSelect={() => setMoreZoom((o) => !o)}>
-            <AppIcon name="chevronNext" size={14} className="menuitem__arrow" />
-          </MenuItem>
-          {moreZoom && (
-            <div className="menu__sub" role="group" aria-label={t("menu.zoom")}>
-              {zoomItems(() => {
-                setMoreOpen(false);
-                setMoreZoom(false);
-              })}
-            </div>
-          )}
+          <SubmenuItem label={t("menu.zoom")} icon="zoom">
+            {zoomItems(() => setMoreOpen(false))}
+          </SubmenuItem>
           <MenuItem label={t("menu.openFile")} icon="openfile" hint={key("Ctrl+O")} soon={soon(t("menu.openFile"))} />
           <MenuItem label={t("menu.openFolder")} icon="window" soon={soon(t("menu.openFolder"))} />
           <MenuItem label={t("menu.print")} icon="print" hint={key("Ctrl+P")} soon={soon(t("menu.print"))} />

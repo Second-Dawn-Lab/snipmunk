@@ -1,4 +1,8 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { editorStore, useEditorUi } from "../annotate/editorStore";
+import type { RedactMode } from "../annotate/schema";
+import { pickValues, type ToolValues } from "../annotate/styles";
+import { keyOf, type ShapeKind, type Tool } from "../annotate/tools";
 import { useT } from "../i18n";
 import type { Settings } from "../settings/defaults";
 import { AppIcon, type AppIconName } from "./AppIcons";
@@ -10,35 +14,10 @@ import {
   PALETTE,
   PALETTE_COLUMNS,
   SIZE_RANGE,
+  TEXT_SIZE_RANGE,
   readableOn,
 } from "./palettes";
 import { Pop } from "./Pop";
-
-/** The tool values the popovers change (stored in the settings so that the tools of Phase 5 can start from them). */
-type ToolValues = Pick<
-  Settings,
-  | "lastPenColor"
-  | "lastPenSize"
-  | "lastHighlighterColor"
-  | "lastHighlighterSize"
-  | "lastFillColor"
-  | "lastFillOpacity"
-  | "lastOutlineColor"
-  | "lastOutlineOpacity"
-  | "lastOutlineSize"
->;
-
-const pickValues = (s: Settings): ToolValues => ({
-  lastPenColor: s.lastPenColor,
-  lastPenSize: s.lastPenSize,
-  lastHighlighterColor: s.lastHighlighterColor,
-  lastHighlighterSize: s.lastHighlighterSize,
-  lastFillColor: s.lastFillColor,
-  lastFillOpacity: s.lastFillOpacity,
-  lastOutlineColor: s.lastOutlineColor,
-  lastOutlineOpacity: s.lastOutlineOpacity,
-  lastOutlineSize: s.lastOutlineSize,
-});
 
 /** The values are shown at once and saved a moment after the last change (a slider fires many). */
 function useToolValues(settings: Settings, save: (change: Partial<Settings>) => void) {
@@ -60,6 +39,8 @@ function useToolValues(settings: Settings, save: (change: Partial<Settings>) => 
 
   const change = (patch: Partial<ToolValues>) => {
     setValues((v) => ({ ...v, ...patch }));
+    // The selected marks take the new value at once (a colour or a size is also a way to restyle them).
+    editorStore.actions.restyle(patch);
     pending.current = { ...pending.current, ...patch };
     window.clearTimeout(timer.current);
     timer.current = window.setTimeout(flush, 300);
@@ -67,49 +48,92 @@ function useToolValues(settings: Settings, save: (change: Partial<Settings>) => 
   return [values, change] as const;
 }
 
-type Open = "pen" | "highlighter" | "eraser" | "emoji" | "fill" | "outline" | "redact" | null;
+type Open = "pen" | "highlighter" | "eraser" | "emoji" | "fill" | "outline" | "redact" | "text" | "rotate" | "blur" | null;
 type Sub = "shapes" | "ocr" | null;
 
-/** The annotation toolbar above the preview. The tools themselves arrive in Phase 5; their popovers already work. */
+const SHAPES: { kind: Exclude<ShapeKind, "emoji">; icon: AppIconName; label: "tools.rectangle" | "tools.circle" | "tools.line" | "tools.arrow" }[] = [
+  { kind: "rect", icon: "square", label: "tools.rectangle" },
+  { kind: "ellipse", icon: "circle", label: "tools.circle" },
+  { kind: "line", icon: "line", label: "tools.line" },
+  { kind: "arrow", icon: "arrow", label: "tools.arrow" },
+];
+
+/** The annotation toolbar above the preview: the tools, their popovers (colour, size, ...) and undo / redo. */
 export function AnnotationBar(props: { settings: Settings; onPatch: (change: Partial<Settings>) => void }) {
   const { t } = useT();
+  const ui = useEditorUi();
   const [open, setOpen] = useState<Open>(null);
   const [sub, setSub] = useState<Sub>(null);
-  const [emoji, setEmoji] = useState(EMOJI[0]);
-  const [redact, setRedact] = useState({ email: true, phone: true });
+  const redact = { email: props.settings.quickRedactEmail, phone: props.settings.quickRedactPhone };
   const [values, change] = useToolValues(props.settings, props.onPatch);
+  const on = ui.enabled;
+  // The text layer lies over the picture while the Text actions toolbar is open.
+  useEffect(() => {
+    editorStore.set({ textMode: sub === "ocr" });
+    return () => editorStore.set({ textMode: false });
+  }, [sub]);
 
   const close = () => setOpen(null);
-  const soon = (text: string) => `${text} – ${t("soon.label")}`;
   const toggle = (which: Exclude<Open, null>) => setOpen((o) => (o === which ? null : which));
+  const tip = (tool: string, key?: string) => (key ? t("tools.tip", { tool, key }) : tool);
+  /** A disabled tool says why in its tooltip. */
+  const title = (text: string) => (on ? text : `${text} – ${t("tools.noCapture")}`);
+
+  /** A tool button: pressed when it is the tool in use. */
+  const tool = (which: Tool, icon: AppIconName, label: string, shortcut: string | null, extra?: () => void) => (
+    <button
+      type="button"
+      className="tool"
+      aria-pressed={on && ui.tool === which}
+      aria-disabled={!on || undefined}
+      aria-label={label}
+      title={title(tip(label, shortcut ?? undefined))}
+      onClick={() => {
+        if (!on) return;
+        // Choosing the tool again goes back to selecting (crop and shapes are modes you leave the same way).
+        editorStore.setTool(ui.tool === which && which !== "select" ? "select" : which);
+        extra?.();
+      }}
+    >
+      <AppIcon name={icon} />
+    </button>
+  );
 
   /** The ▾ button next to a tool. */
-  const arrow = (which: Exclude<Open, null>, tool: string) => (
+  const arrow = (which: Exclude<Open, null>, label: string) => (
     <button
       type="button"
       className="tool__more"
-      aria-haspopup={which === "eraser" || which === "redact" ? "menu" : "dialog"}
+      aria-haspopup={which === "eraser" || which === "redact" || which === "rotate" || which === "blur" ? "menu" : "dialog"}
       aria-expanded={open === which}
-      aria-label={t("tools.options", { tool })}
-      title={t("tools.options", { tool })}
-      onClick={() => toggle(which)}
+      aria-disabled={!on || undefined}
+      aria-label={t("tools.options", { tool: label })}
+      title={t("tools.options", { tool: label })}
+      onClick={() => on && toggle(which)}
     >
       <AppIcon name="chevron" size={12} />
     </button>
   );
 
   const label = (key: Parameters<typeof t>[0]) => t(key);
+  const redactModes: { mode: RedactMode; text: string }[] = [
+    { mode: "pixelate", text: t("tools.redactPixelate") },
+    { mode: "blur", text: t("tools.redactBlur") },
+    { mode: "box", text: t("tools.redactBox") },
+  ];
 
   return (
     <div className="annobar" role="toolbar" aria-label={t("tools.label")}>
       <div className="annobar__row">
+        {tool("select", "select", t("tools.select"), keyOf("select"))}
+
         <Pop
           open={open === "pen"}
           onClose={close}
           label={label("tools.pen")}
           trigger={
             <span className="tool tool--split">
-              <SoonTool icon="pen" label={t("tools.pen")} tip={soon(t("tools.pen"))} />
+              {tool("pen", "pen", t("tools.pen"), keyOf("pen"))}
               {arrow("pen", t("tools.pen"))}
             </span>
           }
@@ -129,7 +153,7 @@ export function AnnotationBar(props: { settings: Settings; onPatch: (change: Par
           label={label("tools.highlighter")}
           trigger={
             <span className="tool tool--split">
-              <SoonTool icon="highlighter" label={t("tools.highlighter")} tip={soon(t("tools.highlighter"))} />
+              {tool("highlighter", "highlighter", t("tools.highlighter"), keyOf("highlighter"))}
               {arrow("highlighter", t("tools.highlighter"))}
             </span>
           }
@@ -157,51 +181,172 @@ export function AnnotationBar(props: { settings: Settings; onPatch: (change: Par
           label={label("tools.eraser")}
           trigger={
             <span className="tool tool--split">
-              <SoonTool icon="eraser" label={t("tools.eraser")} tip={soon(t("tools.eraser"))} />
+              {tool("eraser", "eraser", t("tools.eraser"), keyOf("eraser"))}
               {arrow("eraser", t("tools.eraser"))}
             </span>
           }
         >
-          <MenuItem label={t("tools.eraseAll")} icon="eraser" soon={soon(t("tools.eraseAll"))} />
+          <MenuItem
+            label={t("tools.eraseAll")}
+            icon="eraser"
+            disabled={!ui.hasMarks}
+            onSelect={() => {
+              close();
+              editorStore.actions.eraseAll();
+            }}
+          />
         </Pop>
 
         <button
           type="button"
           className="tool"
-          aria-pressed={sub === "shapes"}
+          aria-pressed={on && ui.tool === "shapes"}
           aria-expanded={sub === "shapes"}
-          title={t("tools.shapes")}
+          aria-disabled={!on || undefined}
+          title={title(tip(t("tools.shapes"), keyOf("shapes")))}
           aria-label={t("tools.shapes")}
-          onClick={() => setSub((s) => (s === "shapes" ? null : "shapes"))}
+          onClick={() => {
+            if (!on) return;
+            const next = sub === "shapes" ? null : "shapes";
+            setSub(next);
+            editorStore.setTool(next ? "shapes" : "select");
+          }}
         >
           <AppIcon name="shapes" />
         </button>
-        <SoonTool icon="text" label={t("tools.text")} tip={soon(t("tools.text"))} />
-        <SoonTool icon="crop" label={t("tools.crop")} tip={soon(t("tools.crop"))} />
-        <SoonTool icon="rotate" label={t("tools.rotate")} tip={soon(t("tools.rotate"))} />
-        <SoonTool icon="blur" label={t("tools.blur")} tip={soon(t("tools.blur"))} />
+
+        <Pop
+          open={open === "text"}
+          onClose={close}
+          label={label("tools.text")}
+          trigger={
+            <span className="tool tool--split">
+              {tool("text", "text", t("tools.text"), keyOf("text"))}
+              {arrow("text", t("tools.text"))}
+            </span>
+          }
+        >
+          <ColorPanel
+            colors={PALETTE}
+            value={values.lastTextColor}
+            onColor={(c) => change({ lastTextColor: c })}
+            size={{ ...TEXT_SIZE_RANGE, value: values.lastTextSize, onChange: (v) => change({ lastTextSize: v }) }}
+            preview={<TextPreview color={values.lastTextColor} size={values.lastTextSize} background={values.lastTextBackground} />}
+          >
+            <label className="toggle">
+              <input type="checkbox" checked={values.lastTextBackground} onChange={(e) => change({ lastTextBackground: e.target.checked })} />
+              <span>{t("tools.textBackground")}</span>
+            </label>
+          </ColorPanel>
+        </Pop>
+
+        {tool("crop", "crop", t("tools.crop"), keyOf("crop"))}
+
+        <Pop
+          open={open === "rotate"}
+          onClose={close}
+          kind="menu"
+          label={label("tools.rotate")}
+          trigger={
+            <span className="tool tool--split">
+              <button
+                type="button"
+                className="tool"
+                aria-disabled={!on || undefined}
+                aria-label={t("tools.rotateRight")}
+                title={title(tip(t("tools.rotateRight"), keyOf("rotate")))}
+                onClick={() => on && editorStore.actions.rotate(1)}
+              >
+                <AppIcon name="rotate" />
+              </button>
+              {arrow("rotate", t("tools.rotate"))}
+            </span>
+          }
+        >
+          <MenuItem label={t("tools.rotateRight")} icon="rotate" hint={keyOf("rotate")} onSelect={() => { close(); editorStore.actions.rotate(1); }} />
+          <MenuItem label={t("tools.rotateLeft")} icon="undo" onSelect={() => { close(); editorStore.actions.rotate(-1); }} />
+          <MenuItem label={t("tools.flipH")} onSelect={() => { close(); editorStore.actions.flip("h"); }} />
+          <MenuItem label={t("tools.flipV")} onSelect={() => { close(); editorStore.actions.flip("v"); }} />
+        </Pop>
+
+        <Pop
+          open={open === "blur"}
+          onClose={close}
+          kind="menu"
+          label={label("tools.blur")}
+          trigger={
+            <span className="tool tool--split">
+              {tool("blur", "blur", t("tools.blur"), keyOf("blur"))}
+              {arrow("blur", t("tools.blur"))}
+            </span>
+          }
+        >
+          {redactModes.map((m) => (
+            <MenuItem
+              key={m.mode}
+              role="menuitemradio"
+              label={m.text}
+              checked={ui.redactMode === m.mode}
+              onSelect={() => {
+                close();
+                editorStore.set({ redactMode: m.mode });
+                if (on) editorStore.setTool("blur");
+              }}
+            />
+          ))}
+          <MenuItem
+            label={t("tools.redactBake")}
+            disabled={!ui.hasRedactions}
+            soon={ui.hasRedactions ? undefined : t("tools.redactBakeNone")}
+            onSelect={() => {
+              close();
+              editorStore.actions.askBake();
+            }}
+          />
+        </Pop>
+
         <button
           type="button"
           className="tool tool--wide"
           aria-pressed={sub === "ocr"}
           aria-expanded={sub === "ocr"}
-          title={soon(t("tools.textActions"))}
+          aria-disabled={!on || undefined}
+          aria-busy={ui.ocrBusy || undefined}
+          title={title(ui.ocrBusy ? t("ocr.recognizing") : t("tools.textActions"))}
           aria-label={t("tools.textActions")}
-          onClick={() => setSub((s) => (s === "ocr" ? null : "ocr"))}
+          onClick={() => on && setSub((s) => (s === "ocr" ? null : "ocr"))}
         >
-          <AppIcon name="textscan" />
+          {ui.ocrBusy ? <span className="spinner" aria-hidden="true" /> : <AppIcon name="textscan" />}
           <AppIcon name="chevron" size={12} />
         </button>
 
         <span className="annobar__end">
-          <SoonTool icon="undo" label={t("tools.undo")} tip={soon(t("tools.undo"))} />
-          <SoonTool icon="redo" label={t("tools.redo")} tip={soon(t("tools.redo"))} />
+          <button
+            type="button"
+            className="tool"
+            aria-disabled={!ui.canUndo || undefined}
+            aria-label={t("tools.undo")}
+            title={tip(t("tools.undo"), "Ctrl+Z")}
+            onClick={() => ui.canUndo && editorStore.actions.undo()}
+          >
+            <AppIcon name="undo" />
+          </button>
+          <button
+            type="button"
+            className="tool"
+            aria-disabled={!ui.canRedo || undefined}
+            aria-label={t("tools.redo")}
+            title={tip(t("tools.redo"), "Ctrl+Y")}
+            onClick={() => ui.canRedo && editorStore.actions.redo()}
+          >
+            <AppIcon name="redo" />
+          </button>
         </span>
       </div>
 
       {sub === "shapes" && (
         <div className="annobar__row annobar__sub" role="toolbar" aria-label={t("tools.shapes")}>
-          <button type="button" className="tool" aria-label={t("tools.closeSub")} title={t("tools.closeSub")} onClick={() => setSub(null)}>
+          <button type="button" className="tool" aria-label={t("tools.closeSub")} title={t("tools.closeSub")} onClick={() => { setSub(null); editorStore.setTool("select"); }}>
             <AppIcon name="close" size={16} />
           </button>
           <Pop
@@ -213,11 +358,13 @@ export function AnnotationBar(props: { settings: Settings; onPatch: (change: Par
                 <button
                   type="button"
                   className="tool tool--emoji"
+                  aria-pressed={on && ui.tool === "shapes" && ui.shape === "emoji"}
                   aria-label={t("tools.emoji")}
-                  title={soon(t("tools.emoji"))}
-                  aria-disabled="true"
+                  title={title(t("tools.emoji"))}
+                  aria-disabled={!on || undefined}
+                  onClick={() => on && editorStore.set({ tool: "shapes", shape: "emoji" })}
                 >
-                  <span aria-hidden="true">{emoji}</span>
+                  <span aria-hidden="true">{ui.emoji}</span>
                 </button>
                 {arrow("emoji", t("tools.emoji"))}
               </span>
@@ -229,9 +376,9 @@ export function AnnotationBar(props: { settings: Settings; onPatch: (change: Par
                   key={e}
                   type="button"
                   className="emojigrid__btn"
-                  aria-pressed={e === emoji}
+                  aria-pressed={e === ui.emoji}
                   onClick={() => {
-                    setEmoji(e);
+                    editorStore.set({ emoji: e, tool: "shapes", shape: "emoji" });
                     close();
                   }}
                 >
@@ -240,10 +387,20 @@ export function AnnotationBar(props: { settings: Settings; onPatch: (change: Par
               ))}
             </div>
           </Pop>
-          <SoonTool icon="square" label={t("tools.rectangle")} tip={soon(t("tools.rectangle"))} />
-          <SoonTool icon="circle" label={t("tools.circle")} tip={soon(t("tools.circle"))} />
-          <SoonTool icon="line" label={t("tools.line")} tip={soon(t("tools.line"))} />
-          <SoonTool icon="arrow" label={t("tools.arrow")} tip={soon(t("tools.arrow"))} />
+          {SHAPES.map((s) => (
+            <button
+              key={s.kind}
+              type="button"
+              className="tool"
+              aria-pressed={on && ui.tool === "shapes" && ui.shape === s.kind}
+              aria-disabled={!on || undefined}
+              aria-label={t(s.label)}
+              title={title(t(s.label))}
+              onClick={() => on && editorStore.set({ tool: "shapes", shape: s.kind })}
+            >
+              <AppIcon name={s.icon} />
+            </button>
+          ))}
           <span className="annobar__sep" aria-hidden="true" />
           <Pop
             open={open === "fill"}
@@ -314,11 +471,23 @@ export function AnnotationBar(props: { settings: Settings; onPatch: (change: Par
           <button type="button" className="tool" aria-label={t("tools.closeSub")} title={t("tools.closeSub")} onClick={() => setSub(null)}>
             <AppIcon name="close" size={16} />
           </button>
-          <button type="button" className="tool tool--labelled" aria-disabled="true" title={soon(t("ocr.copyAll"))}>
+          <button
+            type="button"
+            className="tool tool--labelled"
+            aria-disabled={!on || undefined}
+            title={t("ocr.copyAll")}
+            onClick={() => on && editorStore.actions.copyAllText()}
+          >
             <AppIcon name="copytext" size={17} />
             <span>{t("ocr.copyAll")}</span>
           </button>
-          <button type="button" className="tool tool--labelled" aria-disabled="true" title={soon(t("ocr.copyTable"))}>
+          <button
+            type="button"
+            className="tool tool--labelled"
+            aria-disabled={!on || !ui.hasTable || undefined}
+            title={ui.hasTable ? t("ocr.copyTable") : `${t("ocr.copyTable")} – ${ui.ocrBusy ? t("ocr.recognizing") : t("ocr.noTable")}`}
+            onClick={() => on && ui.hasTable && editorStore.actions.copyTable()}
+          >
             <AppIcon name="table" size={17} />
             <span>{t("ocr.copyTable")}</span>
           </button>
@@ -333,8 +502,9 @@ export function AnnotationBar(props: { settings: Settings; onPatch: (change: Par
                 className="tool tool--labelled"
                 aria-haspopup="menu"
                 aria-expanded={open === "redact"}
-                title={soon(t("ocr.redact"))}
-                onClick={() => toggle("redact")}
+                aria-disabled={!on || undefined}
+                title={t("ocr.redact")}
+                onClick={() => on && toggle("redact")}
               >
                 <AppIcon name="redact" size={17} />
                 <span>{t("ocr.redact")}</span>
@@ -346,15 +516,32 @@ export function AnnotationBar(props: { settings: Settings; onPatch: (change: Par
               role="menuitemcheckbox"
               label={t("ocr.redactEmail")}
               checked={redact.email}
-              onSelect={() => setRedact((r) => ({ ...r, email: !r.email }))}
+              onSelect={() => props.onPatch({ quickRedactEmail: !redact.email })}
             />
             <MenuItem
               role="menuitemcheckbox"
               label={t("ocr.redactPhone")}
               checked={redact.phone}
-              onSelect={() => setRedact((r) => ({ ...r, phone: !r.phone }))}
+              onSelect={() => props.onPatch({ quickRedactPhone: !redact.phone })}
             />
-            <MenuItem label={t("ocr.redactClear")} soon={soon(t("ocr.redactClear"))} />
+            <MenuItem
+              label={t("ocr.redactRun")}
+              icon="redact"
+              disabled={!on || (!redact.email && !redact.phone)}
+              onSelect={() => {
+                close();
+                editorStore.actions.quickRedact(redact);
+              }}
+            />
+            <MenuItem
+              label={t("ocr.redactClear")}
+              disabled={!ui.hasQuickRedactions}
+              soon={ui.hasQuickRedactions ? undefined : t("ocr.redactClearNone")}
+              onSelect={() => {
+                close();
+                editorStore.actions.removeQuickRedactions();
+              }}
+            />
           </Pop>
         </div>
       )}
@@ -362,12 +549,16 @@ export function AnnotationBar(props: { settings: Settings; onPatch: (change: Par
   );
 }
 
-/** A tool that works in a later version: it keeps its place, icon and tooltip but does nothing yet. */
-function SoonTool(props: { icon: AppIconName; label: string; tip: string }) {
+/** A text drawn with the chosen colour, size and label. */
+function TextPreview(props: { color: string; size: number; background: boolean }) {
+  const dark = readableOn(props.color) === "#ffffff";
   return (
-    <button type="button" className="tool" aria-disabled="true" aria-label={props.label} title={props.tip}>
-      <AppIcon name={props.icon} />
-    </button>
+    <svg viewBox="0 0 200 56" width="100%" height="56" aria-hidden="true">
+      {props.background && <rect x="40" y="8" width="120" height="40" rx="3" fill={dark ? "#ffffff" : "#000000"} />}
+      <text x="100" y="36" textAnchor="middle" fontSize={Math.min(34, Math.max(10, props.size * 0.6))} fill={props.color} fontFamily="Segoe UI, sans-serif">
+        Abc ۱۲۳
+      </text>
+    </svg>
   );
 }
 
@@ -397,6 +588,8 @@ function ColorPanel(props: {
   opacity?: { value: number; onChange: (v: number) => void };
   size?: Slider;
   preview: ReactNode;
+  /** More controls under the sliders (the text tool's label switch). */
+  children?: ReactNode;
 }) {
   const { t } = useT();
   return (
@@ -432,6 +625,7 @@ function ColorPanel(props: {
       <div className="preview-box" role="img" aria-label={t("tools.preview")}>
         {props.preview}
       </div>
+      {props.children}
     </div>
   );
 }

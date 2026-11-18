@@ -95,7 +95,8 @@ export function Pop(props: {
       return;
     }
     if (kind === "menu" && panel.current?.contains(e.target as Node)) {
-      const items = Array.from(panel.current.querySelectorAll<HTMLElement>(FOCUSABLE));
+      // The items of a flyout belong to it (see SubmenuItem), not to this menu.
+      const items = Array.from(panel.current.querySelectorAll<HTMLElement>(FOCUSABLE)).filter((el) => !el.closest("[data-flyout]"));
       const at = items.indexOf(document.activeElement as HTMLElement);
       const move = (to: number) => {
         e.preventDefault();
@@ -107,8 +108,8 @@ export function Pop(props: {
       else if (e.key === "End") move(items.length - 1);
     } else if (kind === "menu" && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
       // From the trigger: into the menu.
-      const items = panel.current?.querySelectorAll<HTMLElement>(FOCUSABLE);
-      if (items?.length) {
+      const items = Array.from(panel.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? []).filter((el) => !el.closest("[data-flyout]"));
+      if (items.length) {
         e.preventDefault();
         items[e.key === "ArrowDown" ? 0 : items.length - 1].focus();
       }

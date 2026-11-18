@@ -2,13 +2,14 @@
 // title and description in the active language. Pure (no React), so the search is unit tested.
 import type { Key } from "../locales/en";
 
-export type Tab = "general" | "capture" | "sessions" | "copy" | "about";
+export type Tab = "general" | "capture" | "sessions" | "copy" | "ocr" | "about";
 
-export const TABS: { id: Tab; label: Key; icon: "settings" | "scan" | "clock" | "copy" | "info" }[] = [
+export const TABS: { id: Tab; label: Key; icon: "settings" | "scan" | "clock" | "copy" | "text" | "info" }[] = [
   { id: "general", label: "settings.general", icon: "settings" },
   { id: "capture", label: "settings.capture", icon: "scan" },
   { id: "sessions", label: "settings.sessions", icon: "clock" },
   { id: "copy", label: "settings.tab.copy", icon: "copy" },
+  { id: "ocr", label: "settings.tab.ocr", icon: "text" },
   { id: "about", label: "settings.tab.about", icon: "info" },
 ];
 
@@ -26,6 +27,7 @@ export const INDEX: SettingEntry[] = [
   { id: "launchAtLogin", tab: "general", title: "settings.launchAtLogin", desc: "settings.launchAtLoginDesc" },
   { id: "closeAction", tab: "general", title: "settings.closeAction", desc: "settings.closeActionDesc" },
   { id: "alwaysOnTop", tab: "general", title: "settings.alwaysOnTop", desc: "settings.alwaysOnTopDesc" },
+  { id: "editorWheel", tab: "general", title: "settings.editorWheel", desc: "settings.editorWheelDesc" },
 
   { id: "captureHotkey", tab: "capture", title: "settings.captureHotkey", desc: "settings.captureHotkeyDesc" },
   { id: "captureMode", tab: "capture", title: "settings.captureMode", desc: "settings.captureModeDesc" },
@@ -35,11 +37,19 @@ export const INDEX: SettingEntry[] = [
   { id: "magnifier", tab: "capture", title: "settings.magnifier", desc: "settings.magnifierDesc" },
 
   { id: "newSessionAction", tab: "sessions", title: "settings.newSessionAction", desc: "settings.newSessionActionDesc" },
+  { id: "galleryView", tab: "sessions", title: "settings.galleryView", desc: "settings.galleryViewDesc" },
   { id: "exportFolder", tab: "sessions", title: "settings.exportFolder", desc: "settings.exportFolderDesc" },
   { id: "clearOnExit", tab: "sessions", title: "settings.clearOnExit", desc: "settings.clearOnExitDesc" },
   { id: "retention", tab: "sessions", title: "settings.retention", desc: "settings.retentionDesc" },
 
   { id: "defaultCopyMode", tab: "copy", title: "settings.defaultCopyMode", desc: "settings.defaultCopyModeDesc" },
+
+  { id: "ocrEngine", tab: "ocr", title: "settings.ocrEngine", desc: "settings.ocrEngineDesc" },
+  { id: "ocrAuto", tab: "ocr", title: "settings.ocrAuto", desc: "settings.ocrAutoDesc" },
+  { id: "ocrLanguages", tab: "ocr", title: "settings.ocrLanguages", desc: "settings.ocrLanguagesDesc" },
+  { id: "ocrInstalled", tab: "ocr", title: "settings.ocrInstalled", desc: "settings.ocrAddLanguageDesc" },
+  { id: "ocrModels", tab: "ocr", title: "settings.ocrModels", desc: "settings.ocrModelsDesc" },
+  { id: "quickRedact", tab: "ocr", title: "settings.quickRedact", desc: "settings.quickRedactDesc" },
 
   { id: "updates", tab: "about", title: "about.updates", desc: "about.updatesDesc" },
   { id: "github", tab: "about", title: "about.github", desc: "about.githubDesc" },

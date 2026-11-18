@@ -60,9 +60,12 @@ function fake(name: string, minutesAgo: number, width: number, height: number, t
     createdAt: Date.now() - minutesAgo * 60_000,
     file: `images/${cid}.png`,
     thumbnail: null,
+    thumbSize: 0,
+    thumbRev: 0,
     width,
     height,
     sourceWindowTitle: title ?? null,
+    source: "screenshot",
     annotations: null,
   };
 }
@@ -76,6 +79,8 @@ let session: Session = {
       id: "g1",
       name: "Group 1",
       order: 0,
+      color: null,
+      emoji: null,
       captures: [
         fake("Capture 1", 42, 1920, 1080, "Visual Studio Code"),
         fake("Capture 2", 31, 1280, 720, "Settings"),
@@ -83,7 +88,7 @@ let session: Session = {
         fake("Error dialog", 3, 640, 360, "Snipmunk"),
       ],
     },
-    { id: "g2", name: "Group 2", order: 0, captures: [fake("Capture 5", 1, 1024, 768)] },
+    { id: "g2", name: "Group 2", order: 0, color: null, emoji: null, captures: [fake("Capture 5", 1, 1024, 768)] },
   ],
 };
 session.groups[1].order = 1;
@@ -170,13 +175,13 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
         return updated((s) => {
           s.id = id("s");
           s.createdAt = Date.now();
-          s.groups = [{ id: id("g"), name: "Group 1", order: 0, captures: [] }];
+          s.groups = [{ id: id("g"), name: String(args.groupName ?? "Group 1"), order: 0, color: null, emoji: null, captures: [] }];
         });
       case "create_group":
         return updated((s) => {
           groupNumber++;
           const name = String(args.name ?? "").trim() || `Group ${groupNumber}`;
-          s.groups.push({ id: id("g"), name, order: s.groups.length, captures: [] });
+          s.groups.push({ id: id("g"), name, order: s.groups.length, color: null, emoji: null, captures: [] });
         });
       case "rename_group":
         return updated((s) => {
@@ -187,6 +192,9 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
           if (s.groups.length <= 1)
             throw { code: "invalid", message: "the last group cannot be deleted" };
           const g = findGroup(s, args.groupId as string);
+          const target = args.moveTo ? findGroup(s, args.moveTo as string) : null;
+          if (target === g) throw { code: "invalid", message: "cannot move to itself" };
+          if (target) target.captures.push(...g.captures);
           s.groups = s.groups.filter((x) => x !== g);
           s.groups.forEach((x, i) => (x.order = i));
         });
@@ -216,6 +224,80 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
           const [capture] = group.captures.splice(index, 1);
           const at = Math.min((args.index as number | null) ?? target.captures.length, target.captures.length);
           target.captures.splice(at, 0, capture);
+        });
+      case "move_captures":
+        return updated((s) => {
+          const target = findGroup(s, args.groupId as string);
+          const moved = (args.captureIds as string[]).map((cid) => {
+            const { group, index } = findCapture(s, cid);
+            return group.captures.splice(index, 1)[0];
+          });
+          const at = Math.min((args.index as number | null) ?? target.captures.length, target.captures.length);
+          target.captures.splice(at, 0, ...moved);
+        });
+      case "duplicate_captures": {
+        const ids: string[] = [];
+        const next = updated((s) => {
+          for (const cid of args.captureIds as string[]) {
+            const { group, index } = findCapture(s, cid);
+            const original = group.captures[index];
+            const copy = { ...original, id: id("c"), name: `${original.name}${args.suffix}`, createdAt: Date.now() };
+            ids.push(copy.id);
+            group.captures.splice(index + 1, 0, copy);
+          }
+        });
+        return { session: next, ids };
+      }
+      case "reorder_groups":
+        return updated((s) => {
+          const byId = new Map(s.groups.map((g) => [g.id, g]));
+          const order = args.groupIds as string[];
+          if (order.length !== s.groups.length || order.some((i) => !byId.has(i)))
+            throw { code: "invalid", message: "the list does not match the session" };
+          s.groups = order.map((i, n) => Object.assign(byId.get(i)!, { order: n }));
+        });
+      case "set_group_color":
+        return updated((s) => {
+          findGroup(s, args.groupId as string).color = (args.color as string | null) ?? null;
+        });
+      case "set_group_emoji":
+        return updated((s) => {
+          findGroup(s, args.groupId as string).emoji = (args.emoji as string | null) ?? null;
+        });
+      case "import_image":
+        return updated((s) => {
+          const name = String(args.name ?? "").replace(/\.[^.]*$/, "") || "Image";
+          const g = findGroup(s, args.groupId as string);
+          const c = fake(name, 0, 800, 600);
+          c.source = "imported";
+          g.captures.push(c);
+        });
+      case "set_annotations":
+        return updated((s) => {
+          const { group, index } = findCapture(s, args.captureId as string);
+          group.captures[index].annotations = args.annotations ?? null;
+        });
+      case "set_capture_thumbnail":
+        return updated((s) => {
+          const { group, index } = findCapture(s, args.captureId as string);
+          group.captures[index].thumbRev += 1;
+        });
+      case "debug_seed_session":
+        return updated((s) => {
+          const n = Math.max(0, Number(args.count ?? 0));
+          const groupCount = Math.max(1, Number(args.groups ?? 1));
+          s.id = id("s");
+          s.groups = Array.from({ length: groupCount }, (_, gi) => ({
+            id: id("g"),
+            name: `Group ${gi + 1}`,
+            order: gi,
+            color: null,
+            emoji: null,
+            captures: [] as Capture[],
+          }));
+          for (let i = 0; i < n; i++) {
+            s.groups[i % groupCount].captures.push(fake(`Seed ${String(i + 1).padStart(3, "0")}`, n - i, 1280, 720));
+          }
         });
       default:
         throw { code: "unknown_command", message: cmd };
