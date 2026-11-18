@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    # windows-latest has Visual Studio and the Windows SDK preinstalled, which is all the build needs.
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      # snipmunk and dawn-core are checked out side by side, as on a developer machine.
+      - uses: actions/checkout@v4
+        with:
+          path: snipmunk
+      - name: Read the pinned dawn-core ref
+        id: ref
+        shell: bash
+        run: echo "ref=$(grep -v '^#' snipmunk/dawn-core.ref | grep -v '^[[:space:]]*$' | head -n1 | tr -d '[:space:]')" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          repository: Second-Dawn-Lab/dawn-core
+          ref: ${{ steps.ref.outputs.ref }}
+          path: dawn-core
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: snipmunk/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: snipmunk
+          shared-key: windows-snipmunk
+          cache-on-failure: true
+      - run: pnpm install --frozen-lockfile
+        working-directory: dawn-core
+      - run: pnpm install --frozen-lockfile
+        working-directory: snipmunk
+      - run: pnpm lint
+        working-directory: snipmunk
+      - run: pnpm typecheck
+        working-directory: snipmunk
+      - run: pnpm test
+        working-directory: snipmunk
+      # The Tauri crate embeds the frontend, so it must be built before cargo runs.
+      - run: pnpm build
+        working-directory: snipmunk
+      - run: cargo fmt --all --check
+        working-directory: snipmunk
+      - run: cargo check --workspace
+        working-directory: snipmunk
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+        working-directory: snipmunk
+      - run: cargo test --workspace
+        working-directory: snipmunk

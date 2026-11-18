@@ -1,0 +1,294 @@
+import { Button, Icon, Row, Section, Select, Switch } from "@seconddawn/ui";
+import { getVersion } from "@tauri-apps/api/app";
+import { useEffect, useState, type ReactNode } from "react";
+import { HotkeyNotice } from "../components/HotkeyNotice";
+import { useT } from "../i18n";
+import { ipc, isTauri } from "../ipc";
+import { LANGUAGES } from "../language";
+import type { CaptureDelay, CaptureMode, Settings } from "./defaults";
+import { Kbd, ShortcutDialog } from "./ShortcutDialog";
+
+export interface PageProps {
+  settings: Settings;
+  set: (change: Partial<Settings>) => void;
+}
+
+const RETENTION_CHOICES = [0, 7, 14, 30, 90, 365];
+const REPO = "https://github.com/Second-Dawn-Lab/snipmunk";
+
+/** One setting: a row of the design system, with an id the search can scroll to and highlight. */
+function Setting(props: { id: string; title: string; description?: string; children?: ReactNode }) {
+  return (
+    <div className="setting" id={`setting-${props.id}`}>
+      <Row title={props.title} description={props.description}>
+        {props.children}
+      </Row>
+    </div>
+  );
+}
+
+export function GeneralPage({ settings, set }: PageProps) {
+  const { t } = useT();
+  return (
+    <Section>
+      <Setting id="theme" title={t("settings.theme")} description={t("settings.themeDesc")}>
+        <Select
+          label={t("settings.theme")}
+          value={settings.theme}
+          onChange={(theme) => set({ theme })}
+          options={[
+            { value: "system", label: t("settings.themeSystem") },
+            { value: "light", label: t("settings.themeLight") },
+            { value: "dark", label: t("settings.themeDark") },
+          ]}
+        />
+      </Setting>
+      <Setting id="language" title={t("settings.language")} description={t("settings.languageDesc")}>
+        <Select
+          label={t("settings.language")}
+          value={settings.language}
+          onChange={(language) => set({ language })}
+          options={[
+            { value: "system", label: t("settings.languageSystem") },
+            ...LANGUAGES.map((l) => ({ value: l.code as string, label: l.name })),
+          ]}
+        />
+      </Setting>
+      <Setting id="launchAtLogin" title={t("settings.launchAtLogin")} description={t("settings.launchAtLoginDesc")}>
+        <Switch
+          label={t("settings.launchAtLogin")}
+          checked={settings.launchAtLogin}
+          onChange={(launchAtLogin) => set({ launchAtLogin })}
+        />
+      </Setting>
+      <Setting id="closeAction" title={t("settings.closeAction")} description={t("settings.closeActionDesc")}>
+        <Select
+          label={t("settings.closeAction")}
+          value={settings.closeAction}
+          onChange={(closeAction) => set({ closeAction })}
+          options={[
+            { value: "background", label: t("settings.closeBackground") },
+            { value: "quit", label: t("settings.closeQuit") },
+            { value: "ask", label: t("settings.closeAsk") },
+          ]}
+        />
+      </Setting>
+      <Setting id="alwaysOnTop" title={t("settings.alwaysOnTop")} description={t("settings.alwaysOnTopDesc")}>
+        <Switch
+          label={t("settings.alwaysOnTop")}
+          checked={settings.alwaysOnTop}
+          onChange={(alwaysOnTop) => set({ alwaysOnTop })}
+        />
+      </Setting>
+    </Section>
+  );
+}
+
+export function CapturePage({ settings, set }: PageProps) {
+  const { t } = useT();
+  const [recording, setRecording] = useState(false);
+  return (
+    <>
+      <HotkeyNotice />
+      <Section>
+        <Setting id="captureHotkey" title={t("settings.captureHotkey")} description={t("settings.captureHotkeyDesc")}>
+          <Kbd keys={settings.captureHotkey} />
+          <Button onClick={() => setRecording(true)}>{t("settings.shortcutChange")}</Button>
+        </Setting>
+        <Setting id="captureMode" title={t("settings.captureMode")} description={t("settings.captureModeDesc")}>
+          <Select
+            label={t("settings.captureMode")}
+            value={settings.captureMode}
+            onChange={(captureMode) => set({ captureMode: captureMode as CaptureMode })}
+            options={(["rectangle", "window", "fullscreen", "freeform"] as const).map((m) => ({
+              value: m,
+              label: t(`mode.${m}`),
+            }))}
+          />
+        </Setting>
+        <Setting id="captureDelay" title={t("settings.captureDelay")} description={t("settings.captureDelayDesc")}>
+          <Select
+            label={t("settings.captureDelay")}
+            value={String(settings.captureDelay)}
+            onChange={(v) => set({ captureDelay: Number(v) as CaptureDelay })}
+            options={[0, 3, 5, 10].map((d) => ({
+              value: String(d),
+              label: d === 0 ? t("delay.none") : t("delay.seconds", { count: d }),
+            }))}
+          />
+        </Setting>
+        <Setting id="afterCapture" title={t("settings.afterCapture")} description={t("settings.afterCaptureDesc")}>
+          <Select
+            label={t("settings.afterCapture")}
+            value={settings.afterCapture}
+            onChange={(afterCapture) => set({ afterCapture })}
+            options={[
+              { value: "front", label: t("settings.afterFront") },
+              { value: "background", label: t("settings.afterBackground") },
+            ]}
+          />
+        </Setting>
+        <Setting id="autoCopy" title={t("settings.autoCopy")} description={t("settings.autoCopyDesc")}>
+          <Switch
+            label={t("settings.autoCopy")}
+            checked={settings.autoCopyToClipboard}
+            onChange={(autoCopyToClipboard) => set({ autoCopyToClipboard })}
+          />
+        </Setting>
+        <Setting id="magnifier" title={t("settings.magnifier")} description={t("settings.magnifierDesc")}>
+          <Switch
+            label={t("settings.magnifier")}
+            checked={settings.showMagnifier}
+            onChange={(showMagnifier) => set({ showMagnifier })}
+          />
+        </Setting>
+      </Section>
+      {recording && (
+        <ShortcutDialog
+          current={settings.captureHotkey}
+          onClose={() => setRecording(false)}
+          onSave={(captureHotkey) => {
+            setRecording(false);
+            set({ captureHotkey });
+          }}
+        />
+      )}
+    </>
+  );
+}
+
+function TextSetting(props: { label: string; value: string; placeholder?: string; onCommit: (value: string) => void }) {
+  const [draft, setDraft] = useState(props.value);
+  useEffect(() => setDraft(props.value), [props.value]);
+  const commit = () => {
+    const next = draft.trim();
+    if (next !== props.value) props.onCommit(next);
+    else setDraft(props.value);
+  };
+  return (
+    <input
+      className="textsetting"
+      aria-label={props.label}
+      placeholder={props.placeholder}
+      value={draft}
+      spellCheck={false}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") e.currentTarget.blur();
+        if (e.key === "Escape") setDraft(props.value);
+      }}
+    />
+  );
+}
+
+export function SessionsPage({ settings, set }: PageProps) {
+  const { t } = useT();
+  // Offer the saved value even if it is not one of the usual choices.
+  const retention = RETENTION_CHOICES.includes(settings.retentionDays)
+    ? RETENTION_CHOICES
+    : [...RETENTION_CHOICES, settings.retentionDays].sort((a, b) => a - b);
+  return (
+    <Section>
+      <Setting id="newSessionAction" title={t("settings.newSessionAction")} description={t("settings.newSessionActionDesc")}>
+        <Select
+          label={t("settings.newSessionAction")}
+          value={settings.newSessionAction}
+          onChange={(newSessionAction) => set({ newSessionAction })}
+          options={[
+            { value: "ask", label: t("settings.newSessionAsk") },
+            { value: "autoExport", label: t("settings.newSessionExport") },
+            { value: "clear", label: t("settings.newSessionClear") },
+          ]}
+        />
+      </Setting>
+      <Setting id="exportFolder" title={t("settings.exportFolder")} description={t("settings.exportFolderDesc")}>
+        <TextSetting
+          label={t("settings.exportFolder")}
+          placeholder={t("settings.exportFolderPlaceholder")}
+          value={settings.exportFolder}
+          onCommit={(exportFolder) => set({ exportFolder })}
+        />
+      </Setting>
+      <Setting id="clearOnExit" title={t("settings.clearOnExit")} description={t("settings.clearOnExitDesc")}>
+        <Switch
+          label={t("settings.clearOnExit")}
+          checked={settings.clearOnExit}
+          onChange={(clearOnExit) => set({ clearOnExit })}
+        />
+      </Setting>
+      <Setting id="retention" title={t("settings.retention")} description={t("settings.retentionDesc")}>
+        <Select
+          label={t("settings.retention")}
+          value={String(settings.retentionDays)}
+          onChange={(days) => set({ retentionDays: Number(days) })}
+          options={retention.map((days) => ({
+            value: String(days),
+            label: days === 0 ? t("settings.retentionForever") : t("settings.retentionDays", { days }),
+          }))}
+        />
+      </Setting>
+    </Section>
+  );
+}
+
+export function CopyPage({ settings, set }: PageProps) {
+  const { t } = useT();
+  return (
+    <Section>
+      <Setting id="defaultCopyMode" title={t("settings.defaultCopyMode")} description={t("settings.defaultCopyModeDesc")}>
+        <Select
+          label={t("settings.defaultCopyMode")}
+          value={settings.defaultCopyMode}
+          onChange={(defaultCopyMode) => set({ defaultCopyMode })}
+          options={[
+            { value: "separate", label: t("copyMode.separate") },
+            { value: "stack", label: t("copyMode.stack") },
+            { value: "grid", label: t("copyMode.grid") },
+          ]}
+        />
+      </Setting>
+    </Section>
+  );
+}
+
+export function AboutPage() {
+  const { t } = useT();
+  const [version, setVersion] = useState("0.0.0");
+  useEffect(() => {
+    if (isTauri) void getVersion().then(setVersion).catch(() => undefined);
+  }, []);
+  const open = (url: string) => void ipc.openUrl(url).catch(() => undefined);
+  return (
+    <>
+      <div className="about">
+        <div className="about__name">{t("app.name")}</div>
+        <div className="about__tagline">{t("app.tagline")}</div>
+        <div className="about__version">{t("about.version", { version })}</div>
+      </div>
+      <Section>
+        <Setting id="updates" title={t("about.updates")} description={t("about.updatesDesc")}>
+          <button type="button" className="dw-btn" aria-disabled="true" title={`${t("about.updates")} – ${t("soon.label")}`}>
+            <Icon name="download" size={16} />
+            {t("about.updates")}
+          </button>
+        </Setting>
+        <Setting id="github" title={t("about.github")} description={t("about.githubDesc")}>
+          <Button icon="external" onClick={() => open(REPO)}>
+            {t("about.open")}
+          </Button>
+        </Setting>
+        <Setting id="license" title={t("about.license")} description={t("about.licenseDesc")}>
+          <Button icon="external" onClick={() => open(`${REPO}/blob/main/LICENSE`)}>
+            {t("about.open")}
+          </Button>
+        </Setting>
+        <Setting id="translations" title={t("about.translations")} description={t("about.translationsDesc")}>
+          <Button icon="external" onClick={() => open(`${REPO}/issues`)}>
+            {t("about.helpTranslate")}
+          </Button>
+        </Setting>
+      </Section>
+    </>
+  );
+}

@@ -1,5 +1,5 @@
 <h1 align="center">Snipmunk</h1>
-<p align="center"><b>A free, open-source screenshot clipboard.<br />Collect several screenshots, then paste them all in one go.</b></p>
+<p align="center"><b>Grab, mark up and share everything on your screen, all in one place.</b></p>
 
 <p align="center"><sub>by Second Dawn</sub></p>
 
@@ -20,15 +20,17 @@ Take as many screenshots as you like in one session and annotate them like in Sn
 
 ## Planned features
 
-- **Capture modes:** region, window and full screen, started with a global hotkey, with a red selection pointer and support for multiple monitors and high-DPI screens.
-- **Annotation tools:** mark up a screenshot right after capturing it (arrows, shapes, text, highlight and more).
-- **Session gallery:** every screenshot of the session in a small widget window, where you can select, reorder and delete them.
-- **Paste all / paste selected:** put everything, or only the selection, into any app in one go.
-- **Drag and drop:** drag screenshots straight into documents, chats and folders.
-- **Ask-to-save or auto-save sessions:** when you close the app or start a new session, Snipmunk asks whether to save the screenshots, or saves them automatically, depending on a setting.
+- **Screenshots:** rectangle, window, full screen and freeform capture, with an optional delay, started with a global hotkey (default Ctrl+Alt+PrintScreen), a red selection pointer, and support for multiple monitors and high-DPI screens.
+- **Screen recording:** record your screen, next to the screenshot tools.
+- **Annotation:** pen and highlighter with color palettes, shapes, emoji stickers, text, crop, rotate, blur, eraser, undo and redo.
+- **Text recognition:** copy all the text of a screenshot, select text on it, copy it as a table, or quickly redact email addresses and phone numbers. It all runs locally and works offline.
+- **Groups:** organize the screenshots of a session into groups.
+- **Multi-copy:** copy several screenshots at once, as separate pictures, as one stacked picture, or as a grid.
+- **Auto-kept sessions:** every change is saved at once, so nothing is lost when the app closes or crashes. You decide whether a session is cleared on exit or kept for a number of days.
+- **12 languages, including right-to-left:** English, German, Spanish, French, Italian, Dutch, Polish, Turkish, Simplified and Traditional Chinese, Arabic and Urdu.
 - **Start with Windows:** optional, so it is always ready.
 
-Screenshots only: there is no OCR and no text recognition.
+Translations are AI-generated for now; native speaker review is very welcome.
 
 ## Platforms
 
@@ -36,6 +38,33 @@ Screenshots only: there is no OCR and no text recognition.
 - **macOS:** planned, soon after the first Windows release.
 
 See the [roadmap](docs/ROADMAP.md) for the phases.
+
+## Privacy and offline use
+
+Snipmunk is built to work entirely on your computer. Screenshots are kept in `%AppData%\SecondDawn\snipmunk` so a crash or restart never loses them, and you choose how long they stay (settings: clear on exit, or delete sessions after N days). There is no telemetry, no account and no upload. The only network access will be the update check against this repository's GitHub releases (not active yet).
+
+## Build from source
+
+Snipmunk uses the shared code in [`dawn-core`](https://github.com/Second-Dawn-Lab/dawn-core), which must sit **next to** this folder (the version in `dawn-core.ref`).
+
+```text
+SecondDawn/
+  dawn-core/
+  snipmunk/     <- this repo
+```
+
+You need Node.js 20+, [pnpm](https://pnpm.io), Rust (stable) and the [Tauri prerequisites](https://tauri.app/start/prerequisites/).
+
+```bash
+cd dawn-core && pnpm install
+cd ../snipmunk && pnpm install
+pnpm tauri dev      # or run-snipmunk.bat on Windows
+pnpm dev            # UI alone in a browser with a mock backend (src/ipc.mock.ts); add ?window=settings
+pnpm lint && pnpm typecheck && pnpm test
+cargo fmt --all --check && cargo clippy --workspace --all-targets && cargo test --workspace
+```
+
+Release process: [docs/releasing.md](docs/releasing.md).
 
 ## Part of Second Dawn
 

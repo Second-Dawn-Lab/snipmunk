@@ -1,0 +1,191 @@
+//! What happens to a finished capture: clipboard, PNG and thumbnail on disk, the active group, the windows.
+
+use std::borrow::Cow;
+use std::io::Cursor;
+
+use dawn_capture::Frame;
+use image::codecs::png::{CompressionType, FilterType, PngEncoder};
+use image::{DynamicImage, ImageEncoder, RgbaImage};
+use serde::Serialize;
+use tauri::{AppHandle, Emitter, Manager};
+
+use crate::commands::AppState;
+use crate::naming;
+use crate::popups::{self, ToastInfo};
+
+/// The size the capture list's thumbnails fit into (they are shown at about 84 x 54 CSS pixels, so this is sharp at 200 %).
+pub const THUMB_MAX: (u32, u32) = (192, 124);
+
+/// Local time as (hour, minute), for the fallback name.
+#[cfg(windows)]
+fn local_hm() -> (u32, u32) {
+    use windows::Win32::System::SystemInformation::GetLocalTime;
+    let t = unsafe { GetLocalTime() };
+    (t.wHour as u32, t.wMinute as u32)
+}
+
+#[cfg(not(windows))]
+fn local_hm() -> (u32, u32) {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    (((secs / 3600) % 24) as u32, ((secs / 60) % 60) as u32)
+}
+
+/// PNG bytes of a frame (fast compression: a 4K screenshot must not take seconds) and a small PNG thumbnail.
+pub fn encode(frame: &Frame) -> Result<(Vec<u8>, Vec<u8>), String> {
+    let image = RgbaImage::from_raw(frame.width, frame.height, frame.rgba.clone())
+        .ok_or("the screenshot has an unexpected size")?;
+    let png = |img: &RgbaImage, quality: CompressionType| -> Result<Vec<u8>, String> {
+        let mut out = Cursor::new(Vec::new());
+        PngEncoder::new_with_quality(&mut out, quality, FilterType::Sub)
+            .write_image(
+                img.as_raw(),
+                img.width(),
+                img.height(),
+                image::ExtendedColorType::Rgba8,
+            )
+            .map_err(|e| e.to_string())?;
+        Ok(out.into_inner())
+    };
+    let full = png(&image, CompressionType::Fast)?;
+    let thumb = DynamicImage::ImageRgba8(image)
+        .thumbnail(THUMB_MAX.0, THUMB_MAX.1)
+        .to_rgba8();
+    Ok((full, png(&thumb, CompressionType::Default)?))
+}
+
+/// Put the capture on the clipboard as an image (with its transparency, for a freeform capture).
+pub fn copy_to_clipboard(frame: &Frame) -> Result<(), String> {
+    let mut clipboard = arboard::Clipboard::new().map_err(|e| e.to_string())?;
+    clipboard
+        .set_image(arboard::ImageData {
+            width: frame.width as usize,
+            height: frame.height as usize,
+            bytes: Cow::Borrowed(&frame.rgba),
+        })
+        .map_err(|e| e.to_string())
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CaptureAdded<'a> {
+    capture_id: &'a str,
+    group_id: &'a str,
+}
+
+/// Save a finished capture and tell the user. Runs on its own thread, never on the UI thread.
+pub fn deliver(app: &AppHandle, frame: Frame, title: Option<String>) -> Result<(), String> {
+    let settings = app.state::<AppState>().settings.lock().unwrap().clone();
+    let copied = settings.auto_copy_to_clipboard && copy_to_clipboard(&frame).is_ok();
+    let (png, thumb) = encode(&frame)?;
+    let (hour, minute) = local_hm();
+    let name = naming::capture_name(title.as_deref(), &settings.language, hour, minute);
+
+    let state = app.state::<AppState>();
+    let wanted = state.active_group.lock().unwrap().clone();
+    let (capture, group_id, group_name, session_id, session) = {
+        let mut store = state.sessions.lock().unwrap();
+        // The group the user is looking at; the first one when it is gone.
+        let group = store
+            .session()
+            .groups
+            .iter()
+            .find(|g| Some(&g.id) == wanted.as_ref())
+            .or_else(|| store.session().groups.first())
+            .map(|g| (g.id.clone(), g.name.clone()))
+            .ok_or("the session has no group")?;
+        // The files are on disk before the session file mentions them (see SessionStore::add_capture).
+        let capture = store
+            .add_capture(
+                &group.0,
+                Some(name),
+                &png,
+                Some(&thumb),
+                frame.width,
+                frame.height,
+                title,
+            )
+            .map_err(|e| crate::error::CmdError::from(e).message)?;
+        (
+            capture,
+            group.0,
+            group.1,
+            store.session().id.clone(),
+            store.session().clone(),
+        )
+    };
+
+    let _ = app.emit("session-changed", &session);
+    let _ = app.emit(
+        "capture-added",
+        CaptureAdded {
+            capture_id: &capture.id,
+            group_id: &group_id,
+        },
+    );
+
+    if settings.after_capture == "background" {
+        popups::show_toast(
+            app,
+            ToastInfo {
+                session_id,
+                file: capture.thumbnail.clone().unwrap_or(capture.file.clone()),
+                group_name,
+                copied,
+                width: capture.width,
+                height: capture.height,
+            },
+        );
+    } else {
+        crate::tray::show_main(app);
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn frame(w: u32, h: u32) -> Frame {
+        Frame {
+            width: w,
+            height: h,
+            rgba: (0..w * h * 4).map(|i| (i % 251) as u8).collect(),
+        }
+    }
+
+    #[test]
+    fn a_capture_becomes_a_png_and_a_smaller_png_thumbnail() {
+        let (png, thumb) = encode(&frame(640, 360)).unwrap();
+        assert_eq!(&png[1..4], b"PNG");
+        assert_eq!(&thumb[1..4], b"PNG");
+        let full = image::load_from_memory(&png).unwrap();
+        assert_eq!((full.width(), full.height()), (640, 360));
+        let small = image::load_from_memory(&thumb).unwrap();
+        assert!(small.width() <= THUMB_MAX.0 && small.height() <= THUMB_MAX.1);
+        assert_eq!(small.width(), 192, "the aspect ratio is kept");
+        assert_eq!(small.height(), 108);
+    }
+
+    #[test]
+    fn transparency_survives_the_png() {
+        let mut f = frame(4, 4);
+        f.rgba[3] = 0;
+        let (png, _) = encode(&f).unwrap();
+        let back = image::load_from_memory(&png).unwrap().to_rgba8();
+        assert_eq!(back.get_pixel(0, 0)[3], 0);
+        assert_eq!(back.get_pixel(1, 0)[3], f.rgba[7]);
+    }
+
+    #[test]
+    fn a_wrong_size_is_an_error_not_a_panic() {
+        let bad = Frame {
+            width: 10,
+            height: 10,
+            rgba: vec![0; 12],
+        };
+        assert!(encode(&bad).is_err());
+    }
+}

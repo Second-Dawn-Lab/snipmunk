@@ -1,0 +1,56 @@
+[package]
+name = "snipmunk"
+description = "Snipmunk: a screenshot clipboard"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "snipmunk_lib"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-autostart = "2"
+# A second launch focuses the running window instead of starting another tray icon.
+tauri-plugin-single-instance = "2"
+# Update checks against the latest GitHub release, and the restart after installing one.
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+dawn-core = { path = "../../dawn-core/crates/dawn-core" }
+# Used from Phase 3 (capture hotkey, screenshots). Linked now so the workspace layout is final.
+dawn-hotkeys = { path = "../../dawn-core/crates/dawn-hotkeys" }
+dawn-capture = { path = "../../dawn-core/crates/dawn-capture" }
+
+# Saves captures as PNG (and their thumbnails) and puts the latest one on the clipboard.
+image = { version = "0.25", default-features = false, features = ["png"] }
+arboard = { version = "3", default-features = false, features = ["image-data"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+# Turns off WebView2's built-in browser shortcuts (F5 reloads, Ctrl+P prints, F12, ...) in Snipmunk's windows.
+# The same versions Tauri itself uses, so nothing new is compiled.
+[target.'cfg(windows)'.dependencies]
+webview2-com = "0.39"
+windows-core = "0.62"
+
+# Snap Layouts for the custom title bar (see src/titlebar.rs): window hit testing needs Win32.
+[target.'cfg(windows)'.dependencies.windows]
+version = "0.61"
+features = [
+  "Win32_Foundation",
+  "Win32_Globalization",
+  "Win32_Graphics_Dwm",
+  "Win32_Graphics_Gdi",
+  "Win32_System_SystemInformation",
+  "Win32_System_Threading",
+  "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_UI_Shell",
+  "Win32_UI_WindowsAndMessaging",
+]

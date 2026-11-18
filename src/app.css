@@ -1,0 +1,992 @@
+/* Snipmunk layout. Controls come from @seconddawn/ui (loaded first); only the brand accents are overridden here.
+
+   Colors: surfaces, borders and text are the neutral greys of @seconddawn/ui, in light and in dark. The Snipmunk
+   colors are accents only:
+     chestnut #A0522D  primary buttons, focus, the active tab, the selected card
+     capture red #E53935  Add capture (and later the selection pointer)
+     amber #F2A541  highlights and badges
+   Every text/background pair is checked against WCAG AA in src/theme.test.ts.
+
+   Layout uses logical properties (inline-start/end, inset-inline, text-align: start) so that everything mirrors when
+   the page is right to left (<html dir="rtl">, set from the locale in App.tsx). */
+
+[hidden] {
+  display: none !important;
+}
+
+/* --- Brand tokens ------------------------------------------------------ */
+:root {
+  --sm-capture: #e53935; /* accents, the future selection pointer */
+  --sm-capture-btn: #d32f2f; /* the button itself: white text on #E53935 is only 4.2:1, on this 4.98:1 */
+  --sm-capture-btn-hover: #b71c1c;
+  --sm-amber: #f2a541;
+  --sm-on-amber: #2b1d16;
+
+  --dw-brand: #a0522d;
+  --dw-brand-hover: #8a4424;
+  --dw-brand-soft: #f7ece4;
+  --dw-brand-text: #8a4424;
+  --dw-on-brand: #ffffff;
+  --dw-text-3: #6b6b73; /* the design system's #86868f is below 4.5:1 on white */
+  --dw-danger: #c22840; /* the design system's #cf2f49 is 4.4:1 on its soft background */
+  --dw-focus: 0 0 0 3px rgba(160, 82, 45, 0.35);
+
+  --dw-font: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", "Microsoft JhengHei UI", "PingFang SC",
+    "PingFang TC", system-ui, -apple-system, sans-serif;
+}
+
+:root[data-theme="dark"] {
+  --sm-capture: #ef5350;
+  --sm-amber: #f2a541;
+
+  --dw-brand: #a85a33;
+  --dw-brand-hover: #b05f38;
+  --dw-brand-soft: #3a2a22;
+  --dw-brand-text: #e8a27c;
+  --dw-on-brand: #ffffff;
+  --dw-text-3: #9a9aa3;
+  --dw-focus: 0 0 0 3px rgba(232, 162, 124, 0.45);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]):not([data-theme="dark"]) {
+    --sm-capture: #ef5350;
+    --sm-amber: #f2a541;
+
+    --dw-brand: #a85a33;
+    --dw-brand-hover: #b05f38;
+    --dw-brand-soft: #3a2a22;
+    --dw-brand-text: #e8a27c;
+    --dw-on-brand: #ffffff;
+    --dw-text-3: #9a9aa3;
+    --dw-focus: 0 0 0 3px rgba(232, 162, 124, 0.45);
+  }
+}
+
+/* --- Fonts per language -------------------------------------------------
+   The system stack, with CJK fallbacks (above) and, for Arabic script, Segoe UI first (it has Arabic) and the
+   Nastaliq faces for Urdu when they are installed. Urdu gets a taller line, its script needs the room. */
+html[lang="zh-Hans"] {
+  --dw-font: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", "PingFang SC", system-ui, sans-serif;
+}
+html[lang="zh-Hant"] {
+  --dw-font: "Segoe UI Variable Text", "Segoe UI", "Microsoft JhengHei UI", "PingFang TC", system-ui, sans-serif;
+}
+html[lang="ar"] {
+  --dw-font: "Segoe UI", "Segoe UI Variable Text", Tahoma, system-ui, sans-serif;
+}
+html[lang="ur"] {
+  --dw-font: "Noto Nastaliq Urdu", "Urdu Typesetting", "Segoe UI", Tahoma, system-ui, sans-serif;
+}
+html[lang="ur"] body {
+  line-height: 1.85;
+}
+html[lang="ur"] .dw-btn,
+html[lang="ur"] .splitbtn__main,
+html[lang="ur"] .editbtn,
+html[lang="ur"] .tool--labelled {
+  line-height: 1.5;
+}
+
+/* Directional icons (undo, redo, chevrons that point sideways) mirror; a camera or a trash can does not. */
+[dir="rtl"] .rtl-flip {
+  transform: scaleX(-1);
+}
+
+/* The design system's switch moves its knob with a physical offset. */
+[dir="rtl"] .dw-switch::after {
+  left: auto;
+  right: 3px;
+}
+[dir="rtl"] .dw-switch[aria-checked="true"]::after {
+  transform: translateX(-18px);
+}
+
+/* --- Shell --------------------------------------------------------------- */
+.shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-width: 0;
+}
+
+/* Title bar. The bar itself stays left-to-right so the window buttons stay at the right edge, where Windows
+   (and Snap Layouts) expect them; only its content follows the page direction. */
+.titlebar {
+  display: flex;
+  align-items: center;
+  height: 44px;
+  padding-inline-start: 0;
+  background: var(--dw-surface);
+  border-bottom: 1px solid var(--dw-border);
+  user-select: none;
+  flex: none;
+  direction: ltr;
+}
+.titlebar__content {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  align-self: stretch;
+  min-width: 0;
+  padding-inline: 14px 4px;
+  direction: inherit;
+}
+[dir="rtl"] .titlebar__content {
+  direction: rtl;
+}
+.titlebar__brand {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  align-self: stretch;
+  min-width: 0;
+}
+.titlebar__logo {
+  border-radius: 5px;
+  pointer-events: none;
+}
+.titlebar__name {
+  font-weight: 650;
+}
+.titlebar__tagline {
+  color: var(--dw-text-3);
+  font-size: 12.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.titlebar__actions {
+  display: flex;
+  align-items: center;
+}
+
+/* Window buttons of the custom title bar */
+.winctl {
+  display: flex;
+  align-self: stretch;
+  direction: ltr;
+}
+.winctl__btn {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  border: 0;
+  background: transparent;
+  color: var(--dw-text);
+  cursor: default;
+}
+.winctl__btn svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1;
+}
+.winctl__btn:hover,
+.winctl__btn--hover {
+  background: var(--dw-surface-2);
+}
+.winctl__btn--close:hover {
+  background: #c42b1c;
+  color: #fff;
+}
+
+/* --- Top bar --------------------------------------------------------------- */
+.topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 10px 16px;
+  flex: none;
+}
+.topbar__group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.topbar__group--end {
+  margin-inline-start: auto;
+  gap: 4px;
+}
+
+/* A button that opens a popover next to it: the wrapper takes the size of the trigger. */
+.pop {
+  position: relative;
+  display: inline-flex;
+}
+.pop__panel {
+  position: fixed;
+  z-index: 40;
+  min-width: 190px;
+  overflow: auto;
+  padding: 6px;
+  border: 1px solid var(--dw-border);
+  border-radius: var(--dw-radius-sm);
+  background: var(--dw-surface);
+  box-shadow: var(--dw-shadow-pop);
+}
+.pop__panel--measuring {
+  visibility: hidden;
+  inset-block-start: 0;
+  inset-inline-start: 0;
+}
+
+/* Add capture: a split button in the capture red */
+.splitbtn {
+  display: inline-flex;
+  height: 36px;
+  border-radius: var(--dw-radius-sm);
+  overflow: hidden;
+  background: var(--sm-capture-btn);
+  color: #fff;
+}
+.splitbtn button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-weight: 650;
+  cursor: pointer;
+}
+.splitbtn__main {
+  padding-inline: 14px 12px;
+  white-space: nowrap;
+}
+.splitbtn__more {
+  justify-content: center;
+  width: 30px;
+  border-inline-start: 1px solid rgba(255, 255, 255, 0.4) !important;
+}
+.splitbtn button:hover {
+  background: var(--sm-capture-btn-hover);
+}
+.splitbtn button[aria-disabled="true"] {
+  cursor: default;
+}
+.splitbtn button:focus-visible {
+  box-shadow: inset 0 0 0 2px #fff;
+}
+
+.delay {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--dw-text-2);
+}
+.delay .dw-select {
+  min-width: 0;
+  width: auto;
+  max-width: 160px;
+}
+
+.segmented {
+  display: inline-flex;
+  padding: 2px;
+  gap: 2px;
+  border: 1px solid var(--dw-border-strong);
+  border-radius: var(--dw-radius-sm);
+  background: var(--dw-surface);
+}
+.segmented__btn {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 28px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dw-text-2);
+  cursor: pointer;
+}
+.segmented__btn[aria-pressed="true"] {
+  background: var(--dw-brand);
+  color: var(--dw-on-brand);
+}
+.segmented__btn[aria-disabled="true"] {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.editbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding-inline: 10px 12px;
+  border: 1px solid transparent;
+  border-radius: var(--dw-radius-sm);
+  background: transparent;
+  color: var(--dw-text);
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.editbtn:hover {
+  background: var(--dw-surface-2);
+}
+.editbtn[aria-disabled="true"],
+.dw-iconbtn[aria-disabled="true"] {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.errorbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 16px 8px;
+  padding: 8px 12px;
+  border-radius: var(--dw-radius-sm);
+  background: var(--dw-danger-soft);
+  color: var(--dw-danger);
+  flex: none;
+}
+.errorbar span {
+  flex: 1;
+}
+.errorbar__close {
+  display: grid;
+  place-items: center;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 2px;
+}
+
+/* --- Menus ------------------------------------------------------------------ */
+.menuitem {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 34px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--dw-text);
+  text-align: start;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.menuitem:hover,
+.menuitem:focus-visible {
+  background: var(--dw-surface-2);
+}
+.menuitem[aria-disabled="true"] {
+  color: var(--dw-text-3);
+  cursor: default;
+}
+.menuitem__check {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  flex: none;
+  color: var(--dw-brand-text);
+}
+.menuitem__label {
+  flex: 1;
+}
+.menuitem__hint {
+  margin-inline-start: 18px;
+  color: var(--dw-text-3);
+  font: inherit;
+  font-size: 12.5px;
+}
+.menuitem__arrow {
+  margin-inline-start: 8px;
+}
+.menu__sub {
+  margin-inline-start: 26px;
+  padding-inline-start: 6px;
+  border-inline-start: 2px solid var(--dw-border);
+}
+
+/* --- Panels ----------------------------------------------------------------- */
+.panels {
+  display: grid;
+  grid-template-columns: minmax(250px, 340px) minmax(0, 1fr);
+  gap: 12px;
+  flex: 1;
+  min-height: 0;
+  padding: 0 16px;
+}
+.panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  background: var(--dw-surface);
+  border: 1px solid var(--dw-border);
+  border-radius: var(--dw-radius);
+  overflow: hidden;
+}
+
+/* Group tabs */
+.grouptabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 8px 0;
+  border-bottom: 1px solid var(--dw-border);
+  overflow-x: auto;
+  flex: none;
+}
+.grouptab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 32px;
+  padding-inline: 10px;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: var(--dw-radius-sm) var(--dw-radius-sm) 0 0;
+  background: transparent;
+  color: var(--dw-text-2);
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+}
+.grouptab:hover {
+  background: var(--dw-surface-2);
+}
+.grouptab--active,
+.grouptab--active:hover {
+  background: var(--dw-bg);
+  border-color: var(--dw-border);
+  color: var(--dw-text);
+  font-weight: 600;
+  margin-bottom: -1px;
+  height: 33px;
+  box-shadow: inset 0 2px 0 var(--dw-brand);
+}
+.grouptab--add {
+  width: 30px;
+  padding: 0;
+  justify-content: center;
+}
+.grouptab--input {
+  width: 130px;
+  border-color: var(--dw-brand);
+  background: var(--dw-surface);
+  color: var(--dw-text);
+  cursor: text;
+}
+.grouptab__name {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.grouptab__close {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--dw-text-3);
+  opacity: 0;
+}
+.grouptab:hover .grouptab__close,
+.grouptab:focus-within .grouptab__close,
+.grouptab--active .grouptab__close {
+  opacity: 1;
+}
+.grouptab__close:hover {
+  background: var(--dw-border);
+  color: var(--dw-text);
+}
+
+/* Capture list */
+.capturelist {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  background: var(--dw-bg);
+}
+.capturelist__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px 4px;
+}
+.capturelist__title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 650;
+}
+.capturelist__head .dw-select {
+  min-width: 0;
+  width: auto;
+  max-width: 62%;
+  height: 30px;
+}
+.capturelist__bulk {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 0 6px 6px;
+}
+.capturelist__bulk .dw-btn {
+  height: 28px;
+  padding: 0 8px;
+  font-size: 13px;
+  color: var(--dw-brand-text);
+}
+.capturelist__items {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 0 8px 8px;
+  list-style: none;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.capturelist .dw-empty {
+  margin: auto;
+  padding: 16px;
+}
+
+.card {
+  position: relative;
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr) auto;
+  grid-template-areas: "thumb text check";
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border: 1px solid var(--dw-border);
+  border-radius: var(--dw-radius-sm);
+  background: var(--dw-surface);
+  cursor: pointer;
+}
+.card:hover {
+  border-color: var(--dw-border-strong);
+}
+.card--active {
+  border-color: var(--dw-brand);
+  background: var(--dw-brand-soft);
+}
+.card__thumb {
+  grid-area: thumb;
+  width: 84px;
+  height: 54px;
+  object-fit: cover;
+  border-radius: 6px;
+  background: var(--dw-surface-2);
+  border: 1px solid var(--dw-border);
+}
+.card__text {
+  grid-area: text;
+  min-width: 0;
+}
+.card__name {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.card__rename {
+  width: 100%;
+  height: 26px;
+  padding: 0 6px;
+  border: 1px solid var(--dw-brand);
+  border-radius: 6px;
+  background: var(--dw-surface);
+}
+.card__time {
+  color: var(--dw-text-3);
+  font-size: 12.5px;
+}
+.card__check {
+  grid-area: check;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--dw-brand);
+}
+.card__trash {
+  position: absolute;
+  inset-inline-end: 6px;
+  inset-block-end: 6px;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--dw-surface);
+  color: var(--dw-text-2);
+  opacity: 0;
+  box-shadow: 0 0 0 1px var(--dw-border);
+}
+.card:hover .card__trash,
+.card:focus-within .card__trash {
+  opacity: 1;
+}
+.card__trash:hover {
+  background: var(--dw-danger-soft);
+  color: var(--dw-danger);
+}
+
+/* --- Preview ----------------------------------------------------------------- */
+.preview {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+.preview__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 16px 6px;
+}
+.preview__title {
+  min-width: 0;
+}
+.preview__name {
+  font-weight: 650;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.preview__size {
+  color: var(--dw-text-3);
+  font-size: 12.5px;
+}
+.preview__zoom {
+  flex: none;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--dw-surface-2);
+  color: var(--dw-text-2);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Annotation toolbar */
+.annobar {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 12px;
+  padding: 6px;
+  border: 1px solid var(--dw-border);
+  border-radius: var(--dw-radius-sm);
+  background: var(--dw-bg);
+}
+.annobar__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+.annobar__sub {
+  padding-top: 6px;
+  border-top: 1px solid var(--dw-border);
+}
+.annobar__end {
+  display: inline-flex;
+  gap: 4px;
+  margin-inline-start: auto;
+}
+.annobar__sep {
+  align-self: stretch;
+  width: 1px;
+  margin-inline: 4px;
+  background: var(--dw-border-strong);
+}
+.tool {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 34px;
+  height: 32px;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--dw-text-2);
+  cursor: pointer;
+}
+.tool:hover {
+  background: var(--dw-surface-2);
+  color: var(--dw-text);
+}
+.tool[aria-disabled="true"] {
+  opacity: 0.55;
+  cursor: default;
+}
+.tool[aria-pressed="true"],
+.tool[aria-expanded="true"] {
+  background: var(--dw-brand-soft);
+  border-color: var(--dw-brand);
+  color: var(--dw-brand-text);
+}
+.tool--split {
+  gap: 0;
+  padding: 0;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  cursor: default;
+}
+.tool--split:hover {
+  background: transparent;
+}
+.tool--split > .tool {
+  border-start-end-radius: 0;
+  border-end-end-radius: 0;
+}
+.tool__more {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-start-end-radius: 7px;
+  border-end-end-radius: 7px;
+  background: transparent;
+  color: var(--dw-text-2);
+  cursor: pointer;
+}
+.tool__more:hover {
+  background: var(--dw-surface-2);
+  color: var(--dw-text);
+}
+.tool__more[aria-expanded="true"] {
+  background: var(--dw-brand-soft);
+  border-color: var(--dw-brand);
+  color: var(--dw-brand-text);
+}
+.tool__more:focus-visible {
+  border-radius: 7px;
+}
+.tool--wide {
+  gap: 2px;
+}
+.tool--labelled {
+  padding-inline: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--dw-text);
+  white-space: nowrap;
+}
+.tool--emoji {
+  font-size: 18px;
+  line-height: 1;
+}
+
+/* Color and size popovers */
+.colorpanel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 244px;
+  padding: 6px;
+}
+.swatchgrid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.swatchgrid__cells {
+  display: grid;
+  gap: 6px;
+}
+.swatchgrid__cell {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 1;
+  min-width: 0;
+  padding: 0;
+  border: 1px solid var(--dw-border-strong);
+  border-radius: 7px;
+  cursor: pointer;
+}
+.swatchgrid__cell[aria-checked="true"] {
+  box-shadow: 0 0 0 2px var(--dw-surface), 0 0 0 4px var(--dw-brand);
+}
+.swatchgrid__none {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border: 1px solid var(--dw-border-strong);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--dw-text);
+  text-align: start;
+  cursor: pointer;
+}
+.swatchgrid__none[aria-checked="true"] {
+  border-color: var(--dw-brand);
+  background: var(--dw-brand-soft);
+  color: var(--dw-brand-text);
+}
+.chip {
+  display: inline-block;
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--dw-border-strong);
+  border-radius: 4px;
+}
+.chip--none {
+  background: linear-gradient(to top right, transparent 46%, var(--dw-danger) 46%, var(--dw-danger) 54%, transparent 54%),
+    var(--dw-surface);
+}
+.rangerow {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr) 52px;
+  align-items: center;
+  gap: 8px;
+  color: var(--dw-text-2);
+}
+.rangerow input[type="range"] {
+  width: 100%;
+  margin: 0;
+  accent-color: var(--dw-brand);
+}
+.rangerow__value {
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+  color: var(--dw-text);
+}
+.preview-box {
+  padding: 4px 8px;
+  border: 1px solid var(--dw-border);
+  border-radius: 7px;
+  background: var(--dw-bg);
+}
+.emojigrid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 4px;
+  width: 240px;
+  padding: 4px;
+}
+.emojigrid__btn {
+  display: grid;
+  place-items: center;
+  height: 36px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+.emojigrid__btn:hover {
+  background: var(--dw-surface-2);
+}
+.emojigrid__btn[aria-pressed="true"] {
+  border-color: var(--dw-brand);
+  background: var(--dw-brand-soft);
+}
+
+.preview__stage {
+  flex: 1;
+  min-height: 0;
+  margin: 10px 12px;
+  display: grid;
+  place-items: center;
+  overflow: auto;
+  border: 1px solid var(--dw-border);
+  border-radius: var(--dw-radius-sm);
+  background-color: var(--dw-surface-2);
+  background-image:
+    linear-gradient(45deg, rgba(128, 128, 128, 0.12) 25%, transparent 25%, transparent 75%, rgba(128, 128, 128, 0.12) 75%),
+    linear-gradient(45deg, rgba(128, 128, 128, 0.12) 25%, transparent 25%, transparent 75%, rgba(128, 128, 128, 0.12) 75%);
+  background-size: 20px 20px;
+  background-position:
+    0 0,
+    10px 10px;
+}
+.preview__stage > * {
+  margin: 16px;
+}
+.preview__image {
+  display: block;
+  max-width: none;
+  box-shadow: var(--dw-shadow);
+  background: #fff;
+}
+.preview__none {
+  color: var(--dw-text-3);
+  text-align: center;
+}
+
+/* --- Bottom bar -------------------------------------------------------------- */
+.bottombar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  padding: 10px 16px;
+  flex: none;
+}
+.bottombar__spacer {
+  flex: 1;
+}
+.bottombar__count {
+  font-weight: 600;
+  color: var(--dw-text-2);
+}
+.bottombar .dw-select {
+  min-width: 120px;
+}
+.dw-btn[aria-disabled="true"] {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.textsetting {
+  height: 34px;
+  min-width: 200px;
+  padding: 0 10px;
+  border: 1px solid var(--dw-border-strong);
+  border-radius: var(--dw-radius-sm);
+  background: var(--dw-surface);
+}
+
+/* Long words (German, Polish) and narrow windows: nothing may be clipped. */
+.dw-btn,
+.dw-select {
+  max-width: 100%;
+}
+.dw-row__desc {
+  overflow-wrap: anywhere;
+}
+.dw-dialog__footer {
+  flex-wrap: wrap;
+}
+
+@media (max-width: 760px) {
+  .panels {
+    grid-template-columns: minmax(230px, 280px) minmax(0, 1fr);
+  }
+  .titlebar__tagline {
+    display: none;
+  }
+  .editbtn span {
+    display: none;
+  }
+}

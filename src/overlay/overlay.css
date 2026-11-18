@@ -1,0 +1,201 @@
+/* --- Capture overlay ----------------------------------------------------------
+   One of these covers each monitor: the frozen screenshot, dimmed outside the selection, a red selection border,
+   a mode bar on the monitor under the pointer, a size readout and a magnifier. Also the countdown badge and the toast. */
+html[data-window^="overlay"],
+html[data-window^="overlay"] body,
+html[data-window^="overlay"] #root {
+  overflow: hidden;
+  background: transparent;
+  user-select: none;
+}
+html[data-window="toast"],
+html[data-window="toast"] body,
+html[data-window="toast"] #root,
+html[data-window="countdown"],
+html[data-window="countdown"] body,
+html[data-window="countdown"] #root {
+  background: transparent;
+  overflow: hidden;
+  user-select: none;
+}
+.overlay {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  /* a red crosshair with a white outline */
+  cursor:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='33' height='33' viewBox='0 0 33 33'%3E%3Cg stroke-linecap='round'%3E%3Cpath d='M16.5 2v10M16.5 21v10M2 16.5h10M21 16.5h10' stroke='%23fff' stroke-width='5'/%3E%3Cpath d='M16.5 2v10M16.5 21v10M2 16.5h10M21 16.5h10' stroke='%23e53935' stroke-width='2'/%3E%3C/g%3E%3C/svg%3E")
+      16 16,
+    crosshair;
+}
+.overlay--idle {
+  background: transparent;
+}
+/* Until the frozen screenshot is drawn the window is see-through and dimmed: the live screen looks the same. */
+.overlay--loading {
+  background: rgba(0, 0, 0, 0.28);
+}
+.overlay__frozen,
+.overlay__shade {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.shade {
+  fill: rgba(0, 0, 0, 0.28);
+}
+.shade--sel {
+  fill: rgba(0, 0, 0, 0.5);
+}
+.outline {
+  stroke: #e53935;
+  stroke-width: 2px;
+  vector-effect: non-scaling-stroke;
+}
+.readout {
+  position: absolute;
+  padding: 3px 9px;
+  border-radius: 6px;
+  background: #d32f2f;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.loupe {
+  position: absolute;
+  width: 120px;
+  height: 120px;
+  border: 2px solid #fff;
+  border-radius: 6px;
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.6),
+    0 6px 20px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+  image-rendering: pixelated;
+}
+.modebar {
+  position: absolute;
+  inset-block-start: 16px;
+  inset-inline: 0;
+  margin-inline: auto;
+  width: max-content;
+  max-width: calc(100% - 32px);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 6px;
+  border-radius: 12px;
+  background: rgba(32, 32, 36, 0.94);
+  color: #fff;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+  cursor: default;
+}
+.modebar__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding-inline: 12px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #fff;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.modebar__btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+.modebar__btn[aria-pressed="true"] {
+  background: #d32f2f;
+}
+.modebar__btn kbd {
+  padding: 0 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.2);
+  font: inherit;
+  font-size: 11.5px;
+}
+.modebar__btn--icon {
+  padding-inline: 9px;
+}
+.modebar__sep {
+  align-self: stretch;
+  width: 1px;
+  margin-inline: 4px;
+  background: rgba(255, 255, 255, 0.25);
+}
+.modebar__hint {
+  flex-basis: 100%;
+  padding: 2px 8px 4px;
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 12.5px;
+  text-align: center;
+}
+.countdown {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: #d32f2f;
+  color: #fff;
+  font-size: 44px;
+  font-weight: 700;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.4);
+}
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: calc(100% - 4px);
+  padding: 10px 12px;
+  border: 1px solid var(--dw-border);
+  border-radius: 12px;
+  background: var(--dw-surface);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
+}
+.toast__thumb {
+  width: 84px;
+  height: 54px;
+  flex: none;
+  border-radius: 6px;
+  object-fit: cover;
+  background: var(--dw-surface-2);
+}
+.toast__text {
+  flex: 1;
+  min-width: 0;
+}
+.toast__title {
+  font-weight: 650;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.toast__sub {
+  color: var(--dw-text-2);
+  font-size: 12.5px;
+}
+.toast__open {
+  flex: none;
+  height: 32px;
+  padding-inline: 14px;
+  border: 0;
+  border-radius: var(--dw-radius-sm);
+  background: var(--dw-brand);
+  color: var(--dw-on-brand);
+  font-weight: 600;
+  cursor: pointer;
+}
+.toast__open:hover {
+  background: var(--dw-brand-hover);
+}
