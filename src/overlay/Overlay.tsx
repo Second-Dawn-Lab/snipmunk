@@ -23,6 +23,7 @@ import {
   type Pt,
 } from "./geometry";
 
+const DELAYS = [0, 3, 5, 10] as const;
 const LOUPE = 120; // CSS pixels
 const LOUPE_CELLS = 15; // physical pixels on a side: 8x zoom
 const MODE_ICONS: Record<CaptureModeId, AppIconName> = {
@@ -38,6 +39,8 @@ export function Overlay() {
   const label = windowLabel();
   const [info, setInfo] = useState<OverlayInfo | null>(null);
   const [mode, setMode] = useState<CaptureModeId>("rectangle");
+  const [delay, setDelay] = useState<number>(0);
+  const [delayOpen, setDelayOpen] = useState(false);
   const [drawn, setDrawn] = useState(false);
   const [viewport, setViewport] = useState({ w: window.innerWidth, h: window.innerHeight });
   const [pointer, setPointer] = useState<Pt | null>(null); // CSS pixels
@@ -64,8 +67,10 @@ export function Overlay() {
       reset();
       setDrawn(false);
       setInfo(next);
+      setDelayOpen(false);
       if (next) {
         setMode(next.mode);
+        setDelay(next.delay);
         setInside(next.focus);
       }
     };
@@ -163,12 +168,23 @@ export function Overlay() {
     void ipc.captureSetMode(next);
   };
 
+  /** The delay dropdown. Any delay but "none" closes this overlay: the backend counts down, grabs again and reopens. */
+  const chooseDelay = (next: number) => {
+    setDelayOpen(false);
+    setDelay(next);
+    void ipc.captureSetDelay(next);
+    if (next > 0) done();
+  };
+  const delayText = (d: number) => (d === 0 ? t("delay.none") : t("delay.seconds", { count: d }));
+
   useEffect(() => {
     if (!info) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
-        cancel();
+        // Esc closes an open dropdown first, then the capture.
+        if (delayOpen) setDelayOpen(false);
+        else cancel();
         return;
       }
       const next = modeForKey(e.key);
@@ -193,6 +209,7 @@ export function Overlay() {
   };
 
   const onPointerDown = (e: ReactPointerEvent) => {
+    if (delayOpen) return setDelayOpen(false); // a click outside the dropdown only closes it
     if (e.button === 2) return cancel();
     if (e.button !== 0) return;
     const p = toPhysical(cssPoint(e), ratio);
@@ -346,6 +363,32 @@ export function Overlay() {
             </button>
           ))}
           <span className="modebar__sep" aria-hidden="true" />
+          <div className="modebar__delay">
+            <button
+              type="button"
+              className="modebar__btn"
+              aria-haspopup="listbox"
+              aria-expanded={delayOpen}
+              title={t("capture.delay")}
+              aria-label={`${t("capture.delay")}: ${delayText(delay)}`}
+              onClick={() => setDelayOpen((o) => !o)}
+            >
+              <AppIcon name="clock" size={18} />
+              <span>{delayText(delay)}</span>
+              <AppIcon name="chevron" size={14} />
+            </button>
+            {delayOpen && (
+              <ul className="modebar__menu" role="listbox" aria-label={t("capture.delay")}>
+                {DELAYS.map((d) => (
+                  <li key={d} role="presentation">
+                    <button type="button" role="option" aria-selected={d === delay} className="modebar__option" onClick={() => chooseDelay(d)}>
+                      {delayText(d)}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
           <button type="button" className="modebar__btn modebar__btn--icon" title={t("overlay.cancel")} aria-label={t("overlay.cancel")} onClick={cancel}>
             <AppIcon name="close" size={18} />
           </button>

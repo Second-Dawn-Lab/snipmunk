@@ -109,6 +109,30 @@ pub fn restore(window: &WebviewWindow) {
     }
 }
 
+/// Is the window where a person can see it? A window with (almost) no part on any monitor (an unplugged monitor, the
+/// -32000 place of a minimized window) is not.
+pub fn is_on_screen(rect: Bounds, monitors: &[Monitor]) -> bool {
+    monitors.iter().any(|m| overlap(&rect, m) >= 120 * 80)
+}
+
+/// Bring a window that is off every monitor back to the middle of one. Returns whether it had to move.
+pub fn ensure_on_screen(window: &WebviewWindow) -> bool {
+    let (Ok(pos), Ok(size)) = (window.outer_position(), window.outer_size()) else {
+        return false;
+    };
+    let rect = Bounds {
+        x: pos.x,
+        y: pos.y,
+        w: size.width as i32,
+        h: size.height as i32,
+        maximized: false,
+    };
+    if is_on_screen(rect, &monitors(window)) {
+        return false;
+    }
+    window.center().is_ok()
+}
+
 struct Tracker {
     latest: Option<Bounds>,
     last_write: Option<Instant>,
@@ -265,5 +289,19 @@ mod tests {
     fn old_or_partial_files_load() {
         let v: Bounds = serde_json::from_str(r#"{"x":5,"y":6}"#).unwrap();
         assert_eq!((v.x, v.y, v.w, v.maximized), (5, 6, 0, false));
+    }
+
+    #[test]
+    fn a_window_off_every_monitor_is_not_on_screen() {
+        let m = [mon(0, 0, 1920, 1080, 1.0), mon(1920, 0, 1920, 1080, 1.0)];
+        assert!(is_on_screen(b(100, 100, 900, 700), &m));
+        assert!(is_on_screen(b(1800, 100, 900, 700), &m), "across the seam");
+        assert!(!is_on_screen(b(-32000, -32000, 900, 700), &m), "minimized");
+        assert!(
+            !is_on_screen(b(4000, 100, 900, 700), &m),
+            "unplugged monitor"
+        );
+        assert!(!is_on_screen(b(1910, 1075, 900, 700), &m), "a corner only");
+        assert!(!is_on_screen(b(0, 0, 900, 700), &[]));
     }
 }

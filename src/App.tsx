@@ -8,9 +8,10 @@ import { Overlay } from "./overlay/Overlay";
 import { Toast } from "./overlay/Toast";
 import { dictionaries } from "./i18n";
 import { directionOf, resolveLocale } from "./language";
-import { windowLabel } from "./ipc";
+import { ipc, windowLabel } from "./ipc";
 import { sessionStore } from "./sessionStore";
 import { SettingsWindow } from "./settings/SettingsWindow";
+import { isEditable, ShortcutRouter } from "./settings/shortcutRouter";
 import { settingsStore } from "./settings/store";
 
 const label = windowLabel();
@@ -28,6 +29,32 @@ export function App() {
   }, []);
 
   useEffect(() => applyTheme(settings.theme), [settings.theme]);
+
+  // The capture shortcut inside Snipmunk's own windows: WebView2 takes the keys before the keyboard hook of the backend
+  // sees them, so the page matches the shortcut too. The backend runs each key press once (`shortcut_fired`).
+  // Not while the shortcut dialog records a new shortcut.
+  useEffect(() => {
+    if (label !== "main" && label !== "settings") return;
+    const router = new ShortcutRouter(settings.captureHotkey);
+    const onKey = (e: KeyboardEvent) => {
+      if (document.querySelector(".shortcut-capture")) return;
+      const fired = router.onKey(
+        { code: e.code, repeat: e.repeat, ctrlKey: e.ctrlKey, altKey: e.altKey, shiftKey: e.shiftKey, metaKey: e.metaKey, altGraph: e.getModifierState("AltGraph") },
+        e.type === "keyup" ? "keyup" : "keydown",
+        isEditable(document.activeElement),
+      );
+      if (!fired) return;
+      e.preventDefault();
+      e.stopPropagation();
+      void ipc.shortcutFired("capture");
+    };
+    window.addEventListener("keydown", onKey, true);
+    window.addEventListener("keyup", onKey, true);
+    return () => {
+      window.removeEventListener("keydown", onKey, true);
+      window.removeEventListener("keyup", onKey, true);
+    };
+  }, [settings.captureHotkey]);
 
   useEffect(() => {
     // The direction comes from the locale (language.ts), never from a per-language rule in the CSS or components.

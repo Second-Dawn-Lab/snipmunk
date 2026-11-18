@@ -97,6 +97,7 @@ pub fn countdown(app: &AppHandle, seconds: u32) -> bool {
     let _ = window.set_size(PhysicalSize::new(size, size));
     let _ = window.set_position(PhysicalPosition::new(x, y));
     let _ = window.emit("countdown-tick", seconds);
+    crate::webview::exclude_from_capture(&window); // see capture::begin
     let _ = window.show();
 
     let mut cancelled = false;
@@ -155,6 +156,7 @@ pub fn show_toast(app: &AppHandle, info: ToastInfo) {
     let _ = window.set_size(PhysicalSize::new(size.0, size.1));
     let _ = window.set_position(PhysicalPosition::new(x, y));
     let _ = window.emit("toast-show", &info);
+    crate::webview::exclude_from_capture(&window); // see capture::begin
     let _ = window.show();
 
     let generation = TOAST_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;

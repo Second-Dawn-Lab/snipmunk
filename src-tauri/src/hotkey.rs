@@ -2,6 +2,7 @@
 //! event to a worker thread; the worker starts the capture on yet another thread, so a key press never waits for us.
 
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use dawn_hotkeys::detector::Outcome;
 use dawn_hotkeys::shortcut::Shortcut;
@@ -31,9 +32,19 @@ impl HotkeyStatus {
     }
 }
 
+/// The keyboard hook and the page both see a key press inside Snipmunk's own windows; the later of the two is dropped.
+const FIRE_DEDUPE: Duration = Duration::from_millis(700);
+
+/// Is this press new, given when the shortcut last fired?
+pub fn fire_is_new(last: Option<Instant>, now: Instant) -> bool {
+    last.is_none_or(|t| now.saturating_duration_since(t) >= FIRE_DEDUPE)
+}
+
 pub struct HotkeyManager {
     hook: Mutex<Option<Hotkeys>>,
     status: Mutex<HotkeyStatus>,
+    /// When the capture shortcut last fired, from the keyboard hook or from a page (see `claim_fire`).
+    fired_at: Mutex<Option<Instant>>,
 }
 
 impl HotkeyManager {
@@ -41,7 +52,18 @@ impl HotkeyManager {
         Self {
             hook: Mutex::new(None),
             status: Mutex::new(HotkeyStatus::ok("")),
+            fired_at: Mutex::new(None),
         }
+    }
+
+    /// True for the first of two reports of the same key press (hook and page); false for the echo.
+    pub fn claim_fire(&self, now: Instant) -> bool {
+        let mut last = self.fired_at.lock().unwrap();
+        if !fire_is_new(*last, now) {
+            return false;
+        }
+        *last = Some(now);
+        true
     }
 
     pub fn status(&self) -> HotkeyStatus {
@@ -78,7 +100,10 @@ pub fn apply(app: &AppHandle, text: &str) {
                 let handle = app.clone();
                 let started =
                     Hotkeys::start(vec![("capture".into(), shortcut)], move |_, outcome| {
-                        if outcome == Outcome::Fired {
+                        // A page of a Snipmunk window may have reported the same key press already.
+                        if outcome == Outcome::Fired
+                            && handle.state::<HotkeyManager>().claim_fire(Instant::now())
+                        {
                             crate::capture::trigger(&handle);
                         }
                     });
@@ -104,6 +129,14 @@ pub fn apply(app: &AppHandle, text: &str) {
     };
     if changed {
         let _ = app.emit("hotkey-status", &status);
+    }
+}
+
+/// The capture shortcut seen by the page of a Snipmunk window (the hook sees it too; `claim_fire` keeps only one).
+#[tauri::command]
+pub fn shortcut_fired(app: AppHandle, name: String) {
+    if name == "capture" && app.state::<HotkeyManager>().claim_fire(Instant::now()) {
+        crate::capture::trigger(&app);
     }
 }
 
@@ -200,5 +233,25 @@ mod tests {
         assert_eq!(check("Win+Shift+S").warning.as_deref(), Some("windows"));
         assert_eq!(check("Ctrl+P").warning.as_deref(), Some("shared"));
         assert_eq!(check("Ctrl+C").warning.as_deref(), Some("shared"));
+    }
+
+    #[test]
+    fn a_key_press_seen_by_the_hook_and_the_page_runs_once() {
+        let m = HotkeyManager::new();
+        let t0 = Instant::now();
+        assert!(m.claim_fire(t0));
+        assert!(
+            !m.claim_fire(t0 + Duration::from_millis(30)),
+            "the echo is dropped"
+        );
+        assert!(
+            !m.claim_fire(t0 + Duration::from_millis(699)),
+            "still the same press"
+        );
+        assert!(
+            m.claim_fire(t0 + Duration::from_millis(900)),
+            "a later press runs again"
+        );
+        assert!(fire_is_new(None, t0));
     }
 }

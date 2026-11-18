@@ -102,11 +102,26 @@ pub fn set_language(app: &AppHandle, lang: &str) {
     }
 }
 
+/// Show the main window and bring it to the front (also from the tray, a second launch and a finished capture).
 pub fn show_main(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.show();
         let _ = w.unminimize();
+        // A saved place on a monitor that is gone must not keep the window out of sight.
+        crate::placement::ensure_on_screen(&w);
         let _ = w.set_focus();
+        // Windows may refuse the focus to a program that was not used last (the second launch, the toast): a short stay
+        // on top still brings the window in front of the others.
+        if !w.is_focused().unwrap_or(true) {
+            let _ = w.set_always_on_top(true);
+            let keep = app
+                .state::<crate::commands::AppState>()
+                .settings
+                .lock()
+                .unwrap()
+                .always_on_top;
+            let _ = w.set_always_on_top(keep);
+        }
     }
 }
 
@@ -136,7 +151,6 @@ pub fn open_settings_window(app: &AppHandle) {
         match built {
             Ok(w) => {
                 crate::webview::disable_browser_accelerators(&w);
-                crate::webview::exclude_from_capture(&w);
                 center_over_main(&app, &w);
                 let _ = w.show();
                 let _ = w.set_focus();

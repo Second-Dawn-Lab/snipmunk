@@ -134,6 +134,8 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
         window.open("?window=settings", "snipmunk-settings", "width=620,height=640");
         return null;
       case "start_capture":
+      case "shortcut_fired":
+      case "capture_set_delay":
       case "set_active_group":
       case "open_url":
       case "capture_cancel":

@@ -68,7 +68,7 @@ Magnifier
 - [ ] **Copy each capture to the clipboard** on: Ctrl+V into Paint pastes the latest capture. Off: the clipboard is left alone.
 - [ ] Quit Snipmunk and start it again: all captures are still there (also after killing the process in Task Manager).
 
-## 6. Snipmunk's own windows are never in a capture
+## 6. Snipmunk's own windows are not in Snipmunk's captures
 
 - [ ] Main window open on top of other content, capture a rectangle that covers it: the capture shows what is behind, not Snipmunk.
 - [ ] The same with the Settings window, with the countdown badge (delay) and with the toast (take two captures in a row in background mode).
@@ -96,6 +96,35 @@ Magnifier
 - [ ] Start a capture: the mode bar is mirrored (buttons in right-to-left order), texts are Arabic, the keys 1 to 4 still work.
 - [ ] The toast and the notice are mirrored and readable.
 
-## 10. Clean up
+## 10. Phase 3.1 fixes
+
+Shortcut in Snipmunk's own windows
+- [ ] With the **main window** in front, press **Ctrl+Alt+PrintScreen**: the capture starts (once, not twice).
+- [ ] The same with the **Settings** window in front, and with a text box focused (the search box in Settings, a capture name being renamed).
+- [ ] Press it again right after the capture ends: it starts a new one. Hold the keys down: still only one capture.
+- [ ] Settings, Capture, Change: the dialog records the keys (the shortcut does not start a capture while it records).
+- [ ] After changing the shortcut (for example **Ctrl+Shift+F8**), the new one works in the main window too and the old one does nothing.
+
+Snipmunk is capturable, except during its own capture
+- [ ] Open the **Snipping Tool** (Win+Shift+S or the app) and capture the Snipmunk main window: it is in the picture. Same with Teams/Zoom screen sharing or OBS: Snipmunk is visible.
+- [ ] Do a Snipmunk capture over the main window (rectangle that covers it): the picture shows what is behind, not Snipmunk.
+- [ ] Right after that capture, capture Snipmunk with the Snipping Tool again: it is visible again (the exclusion is not left on).
+- [ ] Cancel a capture with Esc (and one with a delay, Esc during the countdown), then capture Snipmunk with the Snipping Tool: visible.
+
+Normal start shows the window
+- [ ] `run-snipmunk.bat` / `pnpm tauri dev`: the main window is shown, in front.
+- [ ] The desktop or Start menu shortcut: the main window is shown. Run `snipmunk.exe --hidden`: only the tray icon.
+- [ ] Close the window with the X (it goes to the tray), start Snipmunk again: the window comes back to the front.
+- [ ] Put the window on a second monitor, quit, unplug that monitor, start: the window is on the remaining monitor.
+
+Delay in the overlay's mode bar
+- [ ] Start a capture: the mode bar has a clock button with "No delay" next to the mode buttons; it opens a list of No delay, 3 seconds, 5 seconds, 10 seconds.
+- [ ] Choose **3 seconds**: the overlay closes, the badge counts 3, 2, 1, then the screen is grabbed and the overlay opens again in the same mode. What changed on screen during the countdown (open a menu first) is in the new frozen picture.
+- [ ] **Esc** during the countdown cancels; the shortcut works again afterwards.
+- [ ] Choose **No delay**: the overlay stays. The main window's delay dropdown shows the choice, and the other way round.
+- [ ] **Esc** with the list open closes only the list; a click outside it too.
+- [ ] Arabic: the list opens from the right edge of the button and everything reads right to left.
+
+## 11. Clean up
 
 - [ ] Delete `%AppData%\SecondDawn\snipmunk` if you want a fresh start.

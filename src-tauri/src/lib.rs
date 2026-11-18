@@ -13,6 +13,7 @@ mod placement;
 mod popups;
 mod sessions;
 mod settings;
+mod startup;
 mod titlebar;
 mod tray;
 mod webview;
@@ -49,6 +50,7 @@ pub fn run() {
             commands::close_action,
             commands::get_hotkey_status,
             commands::check_shortcut,
+            hotkey::shortcut_fired,
             commands::open_url,
             commands::set_active_group,
             commands::get_current_session,
@@ -66,6 +68,7 @@ pub fn run() {
             capture::capture_overlay_ready,
             capture::capture_cancel,
             capture::capture_set_mode,
+            capture::capture_set_delay,
             capture::capture_finish,
             popups::toast_open,
             popups::toast_close,
@@ -75,15 +78,15 @@ pub fn run() {
             tray::build(app.handle(), &settings.language)?;
             if let Some(main) = app.get_webview_window("main") {
                 webview::disable_browser_accelerators(&main);
-                webview::exclude_from_capture(&main);
                 // The window is created hidden: put it back where it was before it is shown.
                 placement::restore(&main);
             }
             commands::apply(app.handle(), &settings); // also installs the capture shortcut
             capture::precreate(app.handle());
-            // Started by the autostart entry: stay in the tray.
-            if !std::env::args().any(|a| a == "--hidden") {
+            // Only the autostart entry (`--hidden`) stays in the tray; every other start shows the window.
+            if !startup::launched_hidden(std::env::args()) {
                 tray::show_main(app.handle());
+                startup::keep_main_shown(app.handle());
             }
             Ok(())
         })

@@ -87,6 +87,8 @@ export interface OverlayInfo {
   count: number;
   focus: boolean;
   mode: "rectangle" | "window" | "fullscreen" | "freeform";
+  /** Seconds before a capture (0, 3, 5 or 10). */
+  delay: number;
   magnifier: boolean;
   monitor: { x: number; y: number; w: number; h: number };
   scale: number;
@@ -147,6 +149,10 @@ export const ipc = {
 
   // capture
   startCapture: (mode?: string) => call<void>("start_capture", { mode: mode ?? null }),
+  /** The capture shortcut was pressed inside a Snipmunk window (the backend ignores it if the hook saw it too). */
+  shortcutFired: (name: "capture") => call<void>("shortcut_fired", { name }),
+  /** The overlay's delay dropdown: remember the delay; a delay above 0 closes the overlay, counts down and grabs again. */
+  captureSetDelay: (delay: number) => call<void>("capture_set_delay", { delay }),
   setActiveGroup: (groupId: string | null) => call<void>("set_active_group", { groupId }),
   getHotkeyStatus: () => call<HotkeyStatus>("get_hotkey_status"),
   onHotkeyStatus: (cb: (s: HotkeyStatus) => void) => on<HotkeyStatus>("hotkey-status", cb),

@@ -27,24 +27,36 @@ pub fn disable_browser_accelerators(window: &WebviewWindow) {
 #[cfg(not(windows))]
 pub fn disable_browser_accelerators(_: &WebviewWindow) {}
 
-/// Windows can leave a window out of every screen capture (Windows 10 version 2004 and later). Snipmunk's own windows
-/// (main, settings, overlays, toast, countdown) use it, so they never appear in a screenshot. Returns whether it worked.
+/// Windows can leave a window out of every screen capture (Windows 10 version 2004 and later). The overlay, countdown and
+/// toast windows use it for good. The main and settings windows are capturable (Snipping Tool, screen sharing, OBS) and
+/// only leave the screenshot while Snipmunk grabs the screen (see `capture::OwnWindowsHidden`).
+/// Returns whether it worked.
 #[cfg(windows)]
-pub fn exclude_from_capture(window: &WebviewWindow) -> bool {
+pub fn set_capture_excluded(window: &WebviewWindow, excluded: bool) -> bool {
     use windows::Win32::Foundation::HWND;
     use windows::Win32::UI::WindowsAndMessaging::{
-        SetWindowDisplayAffinity, WINDOW_DISPLAY_AFFINITY,
+        SetWindowDisplayAffinity, WDA_NONE, WINDOW_DISPLAY_AFFINITY,
     };
     let Ok(hwnd) = window.hwnd() else {
         return false;
     };
-    // WDA_EXCLUDEFROMCAPTURE
-    unsafe { SetWindowDisplayAffinity(HWND(hwnd.0), WINDOW_DISPLAY_AFFINITY(0x11)).is_ok() }
+    // WDA_EXCLUDEFROMCAPTURE = 0x11
+    let affinity = if excluded {
+        WINDOW_DISPLAY_AFFINITY(0x11)
+    } else {
+        WDA_NONE
+    };
+    unsafe { SetWindowDisplayAffinity(HWND(hwnd.0), affinity).is_ok() }
 }
 
 #[cfg(not(windows))]
-pub fn exclude_from_capture(_: &WebviewWindow) -> bool {
+pub fn set_capture_excluded(_: &WebviewWindow, _: bool) -> bool {
     false
+}
+
+/// Leave a window out of every screen capture for good.
+pub fn exclude_from_capture(window: &WebviewWindow) -> bool {
+    set_capture_excluded(window, true)
 }
 
 /// Whether Esc is held down right now (the countdown window cannot take the keyboard focus, so it polls).

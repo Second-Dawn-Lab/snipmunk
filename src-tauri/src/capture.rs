@@ -91,6 +91,52 @@ fn hide_overlays(app: &AppHandle) {
     }
 }
 
+/// The windows people use Snipmunk in. They are capturable (Snipping Tool, screen sharing, OBS) except while this
+/// program grabs the screen, so a Snipmunk capture never contains Snipmunk.
+const OWN_WINDOWS: [&str; 2] = ["main", "settings"];
+
+/// Make the main and settings windows capturable again. Safe to call at any time; every end of a capture (done, cancelled,
+/// failed, given up) calls it, so the exclusion can never stay on.
+fn release_own_windows(app: &AppHandle) {
+    for label in OWN_WINDOWS {
+        if let Some(w) = app.get_webview_window(label) {
+            crate::webview::set_capture_excluded(&w, false);
+        }
+    }
+}
+
+/// Keeps the main and settings windows out of screen captures while it lives. Dropping it (also when the grab panics)
+/// puts them back.
+struct OwnWindowsHidden {
+    app: AppHandle,
+}
+
+impl OwnWindowsHidden {
+    fn new(app: &AppHandle) -> Self {
+        let mut visible = false;
+        for label in OWN_WINDOWS {
+            if let Some(w) = app.get_webview_window(label) {
+                crate::webview::set_capture_excluded(&w, true);
+                visible |= w.is_visible().unwrap_or(false);
+            }
+        }
+        if visible {
+            // The desktop compositor applies the change with the next frame.
+            std::thread::sleep(AFFINITY_SETTLE);
+        }
+        Self { app: app.clone() }
+    }
+}
+
+impl Drop for OwnWindowsHidden {
+    fn drop(&mut self) {
+        release_own_windows(&self.app);
+    }
+}
+
+/// How long the compositor gets to leave a window out of captures after the change.
+const AFFINITY_SETTLE: Duration = Duration::from_millis(60);
+
 fn ensure_overlay(app: &AppHandle, label: &str) -> tauri::Result<WebviewWindow> {
     if let Some(w) = app.get_webview_window(label) {
         return Ok(w);
@@ -129,6 +175,7 @@ pub fn precreate(app: &AppHandle) {
 }
 
 fn finish_run(app: &AppHandle) {
+    release_own_windows(app);
     let capture = app.state::<Capture>();
     *capture.run.lock().unwrap() = None;
     capture.busy.store(false, Ordering::SeqCst);
@@ -148,6 +195,11 @@ pub fn trigger(app: &AppHandle) {
     if app.state::<Capture>().busy.swap(true, Ordering::SeqCst) {
         return;
     }
+    run_flow(app);
+}
+
+/// The delay (when set), then the grab and the overlays. A capture is marked busy already. Runs on its own thread.
+fn run_flow(app: &AppHandle) {
     let app = app.clone();
     std::thread::spawn(move || {
         let delay = app
@@ -166,7 +218,12 @@ pub fn trigger(app: &AppHandle) {
 
 fn begin(app: &AppHandle) {
     let started = Instant::now();
-    let screens = match dawn_capture::capture_all() {
+    let grab = {
+        // Snipmunk's own windows are not in the picture; they are capturable again as soon as the grab is over.
+        let _hidden = OwnWindowsHidden::new(app);
+        dawn_capture::capture_all()
+    };
+    let screens = match grab {
         Ok(s) => s,
         Err(err) => return fail(app, &err.to_string()),
     };
@@ -206,6 +263,8 @@ fn begin(app: &AppHandle) {
         let _ = window.set_position(PhysicalPosition::new(r.x, r.y));
         let _ = window.set_size(PhysicalSize::new(r.w, r.h));
         let _ = window.set_position(PhysicalPosition::new(r.x, r.y));
+        // Windows can drop the setting while a window is hidden: set it again every time, before the window is shown.
+        crate::webview::exclude_from_capture(&window);
         let _ = app.emit_to(&label, "capture-open", id);
         // Show it at once: the window is transparent until its page has the frozen screenshot, so the screen looks
         // dimmed immediately and the (identical) frozen picture replaces the live one a moment later.
@@ -298,6 +357,8 @@ pub struct OverlayInfo {
     /// This overlay is on the monitor under the pointer: it has the mode bar and the keyboard focus.
     focus: bool,
     mode: String,
+    /// Seconds of delay before a capture: 0, 3, 5 or 10 (the setting the main window's dropdown shows).
+    delay: u32,
     magnifier: bool,
     /// This monitor on the virtual desktop, physical pixels.
     monitor: Rect,
@@ -332,6 +393,7 @@ pub fn capture_overlay_info(
         count: run.screens.len(),
         focus: index == run.focus,
         mode: settings.capture_mode.clone(),
+        delay: settings.capture_delay,
         magnifier: settings.show_magnifier,
         monitor: run.rects[index],
         scale: run.screens[index].scale,
@@ -379,6 +441,29 @@ pub fn capture_set_mode(app: AppHandle, mode: String) -> CmdResult<()> {
     crate::commands::patch_settings(&app, serde_json::json!({ "captureMode": mode }))?;
     let _ = app.emit("capture-mode", &mode);
     Ok(())
+}
+
+/// The delay dropdown of the overlay's mode bar. The choice is remembered (the main window's dropdown follows). A delay
+/// above 0 closes the overlay, counts down, then grabs the screen again and reopens the overlay in the same mode: the
+/// grab happens after the delay. "No delay" only changes the setting; the overlay stays.
+#[tauri::command]
+pub fn capture_set_delay(app: AppHandle, delay: u32) -> CmdResult<()> {
+    if !is_delay(delay) {
+        return Err(CmdError::new("bad_request", "unknown delay"));
+    }
+    crate::commands::patch_settings(&app, serde_json::json!({ "captureDelay": delay }))?;
+    if delay == 0 {
+        return Ok(());
+    }
+    // The capture stays marked busy: the screenshots of this run are dropped and the flow starts over.
+    hide_overlays(&app);
+    *app.state::<Capture>().run.lock().unwrap() = None;
+    run_flow(&app);
+    Ok(())
+}
+
+fn is_delay(seconds: u32) -> bool {
+    [0, 3, 5, 10].contains(&seconds)
 }
 
 /// Start a capture from the page (the Add capture button). Picking a mode in the split menu sets it first.
@@ -613,5 +698,15 @@ mod tests {
         assert_eq!(out.title.as_deref(), Some("Inbox - Chrome"));
         let out = cut(&screens, &windows, 0, &args("rectangle", [70, 10, 20, 20])).unwrap();
         assert_eq!(out.title, None);
+    }
+
+    #[test]
+    fn only_the_known_delays_are_accepted() {
+        for d in [0, 3, 5, 10] {
+            assert!(is_delay(d), "{d}");
+        }
+        for d in [1, 2, 4, 7, 60, u32::MAX] {
+            assert!(!is_delay(d), "{d}");
+        }
     }
 }
