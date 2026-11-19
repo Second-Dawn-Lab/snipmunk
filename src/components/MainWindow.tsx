@@ -1,6 +1,6 @@
 import { useSettings } from "@seconddawn/settings";
 import { Button, Dialog, Icon } from "@seconddawn/ui";
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type DropPlan } from "../gallery/fileTypes";
 import { isGalleryView } from "../gallery/layout";
 import { moveIds, isNoopMove } from "../gallery/reorder";
@@ -22,7 +22,13 @@ import { activeAfterGroupDelete, planGroupDelete, type DeleteChoice } from "../g
 import { dictionaries } from "../i18n";
 import { useT } from "../i18n";
 import { onNotice } from "../notify";
-import { ipc, type CmdError, type Group, type Session } from "../ipc";
+import { ipc, type Capture, type CmdError, type Group, type Session } from "../ipc";
+import { SearchIndex } from "../search";
+import { stageAll } from "../share/exporter";
+import { SaveDialog } from "./SaveDialog";
+import { Toasts, useToasts, type ToastAction } from "./Toasts";
+import { SearchResults, type SearchHit } from "./SearchResults";
+import { useShareActions } from "./useShareActions";
 import {
   activeAfterDeleting,
   deleteTargets,
@@ -75,13 +81,34 @@ export function MainWindow() {
   const { t, locale } = useT();
   const { settings, patch } = useSettings(settingsStore);
   const session = useSession();
+  const shareRef = useRef<ReturnType<typeof useShareActions> | null>(null);
+  const printTargetsRef = useRef<() => Capture[]>(() => []);
   const [groupId, setGroupId] = useState<string | null>(null);
   const [sort, setSort] = useState<SortMode>("newest");
   const [views, setViews] = useState<Record<string, GroupView>>({});
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [copyMode, setCopyMode] = useState<CopyMode>(settings.defaultCopyMode);
-  const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  // Every notice and error is a toast over the content (see Toasts.tsx); nothing pushes the layout down.
+  const { toasts, push: pushToast, close: closeToast } = useToasts();
+  const setError = useCallback(
+    (message: string | null) => {
+      if (message) pushToast({ kind: "error", text: t("session.error", { message }) });
+    },
+    [pushToast, t],
+  );
+  const setNotice = useCallback(
+    (text: string | null, action?: ToastAction) => {
+      if (text) pushToast({ kind: "notice", text, action });
+    },
+    [pushToast],
+  );
+  const [query, setQuery] = useState("");
+  const [applied, setApplied] = useState("");
+  const [scope, setScope] = useState<"group" | "all">("group");
+  const [ixVersion, setIxVersion] = useState(0);
+  const [ocrPending, setOcrPending] = useState(0);
+  const searchBox = useRef<HTMLInputElement>(null);
+  const ix = useRef(new SearchIndex()).current;
   const [confirmNew, setConfirmNew] = useState(false);
   const [groupToDelete, setGroupToDelete] = useState<Group | null>(null);
   const [pendingDelete, setPendingDelete] = useState<string[] | null>(null);
@@ -90,11 +117,83 @@ export function MainWindow() {
   const [zoomMode, setZoomMode] = useState<ZoomMode>("fit");
   const [effectiveZoom, setEffectiveZoom] = useState(1);
 
-  // The setting is the default; the dropdown changes the mode for now.
+  // The setting is the default; the dropdown changes it (and is remembered).
   useEffect(() => setCopyMode(settings.defaultCopyMode), [settings.defaultCopyMode]);
+  const chooseCopyMode = (mode: CopyMode) => {
+    setCopyMode(mode);
+    void patch({ defaultCopyMode: mode });
+  };
+
+  // --- the search index: names, window titles and recognized text, folded once ----------------------------------------
+  useEffect(() => {
+    const t = setTimeout(() => setApplied(query), 120);
+    return () => clearTimeout(t);
+  }, [query]);
+  useEffect(() => {
+    if (!session) return;
+    const ids = new Set<string>();
+    for (const g of session.groups) {
+      for (const c of g.captures) {
+        ids.add(c.id);
+        ix.setMeta(c);
+      }
+    }
+    ix.keepOnly(ids);
+    setIxVersion((v) => v + 1);
+  }, [session, ix]);
+  const sessionId = session?.id;
+  useEffect(() => {
+    let alive = true;
+    void ipc
+      .ocrTexts()
+      .then((all) => {
+        if (!alive) return;
+        for (const [id, text] of Object.entries(all)) ix.setText(id, text);
+        setIxVersion((v) => v + 1);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [sessionId, ix]);
+  useEffect(() => {
+    const ready = ipc.onOcrReady((id) => {
+      void ipc.ocrGet(id).then((r) => {
+        if (!r) return;
+        ix.setText(id, r.lines.map((l) => l.text).join("\n"));
+        setIxVersion((v) => v + 1);
+      });
+    });
+    const queue = ipc.onOcrQueue(setOcrPending);
+    return () => {
+      void ready.then((fn) => fn());
+      void queue.then((fn) => fn());
+    };
+  }, [ix]);
 
   const group = session ? groupOrFirst(session, groupId) : null;
-  const shown = useMemo(() => (group ? sortCaptures(group.captures, sort) : []), [group, sort]);
+  const baseShown = useMemo(() => (group ? sortCaptures(group.captures, sort) : []), [group, sort]);
+  const searching = applied.trim() !== "";
+  // "This group": the list is the matching captures (in the group's order). "All groups": a separate list of results.
+  const shown = useMemo(() => {
+    if (!searching || scope !== "group") return baseShown;
+    const hit = new Set(ix.search(applied, baseShown.map((c) => c.id)));
+    return baseShown.filter((c) => hit.has(c.id));
+  }, [baseShown, searching, scope, applied, ixVersion]);
+  const hits = useMemo<SearchHit[]>(() => {
+    if (!searching || scope !== "all" || !session) return [];
+    const out: SearchHit[] = [];
+    for (const g of session.groups) {
+      const byId = new Map(g.captures.map((c) => [c.id, c]));
+      for (const id of ix.search(applied, g.captures.map((c) => c.id))) out.push({ group: g, capture: byId.get(id) as Capture });
+    }
+    return out;
+  }, [session, searching, scope, applied, ixVersion]);
+  const unread = useMemo(() => {
+    if (!searching || !session) return 0;
+    const ids = (scope === "all" ? session.groups.flatMap((g) => g.captures) : baseShown).map((c) => c.id);
+    return ix.unread(ids);
+  }, [session, searching, scope, baseShown, ixVersion]);
   const shownIds = useMemo(() => shown.map((c) => c.id), [shown]);
   const gid = group?.id ?? "";
   const view: GroupView = views[gid] ?? EMPTY_VIEW;
@@ -188,12 +287,6 @@ export function MainWindow() {
     [],
   );
 
-  // Notices go away by themselves.
-  useEffect(() => {
-    if (!notice) return;
-    const timer = setTimeout(() => setNotice(null), 7000);
-    return () => clearTimeout(timer);
-  }, [notice]);
 
   // A different capture starts fitted.
   useEffect(() => setZoomMode("fit"), [currentId]);
@@ -241,7 +334,23 @@ export function MainWindow() {
         !!target &&
         (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) &&
         !(target instanceof HTMLInputElement && (target.type === "checkbox" || target.type === "range" || target.type === "radio"));
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !dialogOpen && (e.key === "f" || e.key === "F")) {
+        e.preventDefault();
+        searchBox.current?.focus();
+        searchBox.current?.select();
+        return;
+      }
       if (typing || dialogOpen) return;
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === "o" || e.key === "O")) {
+        e.preventDefault();
+        void shareRef.current?.openFile();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === "p" || e.key === "P")) {
+        e.preventDefault();
+        void shareRef.current?.print(printTargetsRef.current());
+        return;
+      }
       if (e.key === "Delete") {
         e.preventDefault();
         askDelete();
@@ -310,11 +419,18 @@ export function MainWindow() {
   };
 
   const reorder = async (ids: string[], slot: number) => {
+    if (searching) return;
     if (isNoopMove(shownIds, ids, slot)) return;
     // Dropping always makes the order the user's own: the list is saved as it now looks.
     const order = moveIds(shownIds, ids, slot);
     setSort("custom");
     await run(ipc.reorderCaptures(gid, order));
+  };
+
+  const dragFiles = useRef<{ ids: string[]; promise: Promise<string[]> } | null>(null);
+  const byIdsInList = (ids: readonly string[]): Capture[] => {
+    const want = new Set(ids);
+    return baseShown.filter((c) => want.has(c.id));
   };
 
   const actions: GalleryActions = useStable({
@@ -338,6 +454,25 @@ export function MainWindow() {
     reorder: (ids: string[], slot: number) => void reorder(ids, slot),
     moveToGroup: (ids: string[], target: string) => void moveToGroup(ids, target),
     dragTarget: (target: string | null) => setCardDropTab(target),
+    prepareDrag: (ids: string[]) => {
+      if (!session) return;
+      const promise = stageAll("drag", session, byIdsInList(ids));
+      promise.catch(() => undefined);
+      dragFiles.current = { ids, promise };
+    },
+    dragOut: (ids: string[]) => {
+      if (!session) return;
+      void (async () => {
+        try {
+          const prepared = dragFiles.current;
+          const same = prepared && prepared.ids.length === ids.length && prepared.ids.every((id, i) => id === ids[i]);
+          const files = await (same ? prepared.promise : stageAll("drag", session, byIdsInList(ids)));
+          if (files.length > 0) await ipc.exportDrag(files, files[0]);
+        } catch (e) {
+          setError(messageOf(e));
+        }
+      })();
+    },
   });
 
   // --- files dropped into the window ----------------------------------------------------------------------------
@@ -362,6 +497,18 @@ export function MainWindow() {
     if (parts.length > 0) setNotice(parts.join(" "));
   };
 
+  const share = useShareActions({
+    session,
+    group,
+    settings,
+    patch: (change) => void patch(change),
+    notify: (text, saved) =>
+      setNotice(text, saved ? { label: t("save.openFolder"), run: () => void ipc.openFolder(saved.first).catch((e) => setError(messageOf(e))) } : undefined),
+    fail: setError,
+    importFiles,
+  });
+  shareRef.current = share;
+
   const fileDrag = useFileDrop((plan: DropPlan<File>, tab) => {
     if (!session || !group) return;
     if (plan.kind === "url") return setNotice(t("drop.saveFirst"));
@@ -373,6 +520,23 @@ export function MainWindow() {
   if (!session || !group) return null;
 
   const count = totalCaptures(session);
+
+  /** The captures with these ids, in the order of the list (the group's current order). */
+  const byIds = (ids: readonly string[]): Capture[] => {
+    const want = new Set(ids);
+    return baseShown.filter((c) => want.has(c.id));
+  };
+  /** The selection, or the capture shown in the preview when nothing is selected (Select all selects everything). */
+  const selectionOrCurrent = (): Capture[] => (view.sel.ids.size > 0 ? byIds([...view.sel.ids]) : capture ? [capture] : []);
+  printTargetsRef.current = () => (view.sel.ids.size > 0 ? byIds([...view.sel.ids]) : capture ? [capture] : []);
+  const clearSearch = () => {
+    setQuery("");
+    setApplied("");
+  };
+  const openHit = (h: SearchHit) => {
+    setGroupId(h.group.id);
+    setViews((prev) => ({ ...prev, [h.group.id]: { sel: emptySelection, active: h.capture.id } }));
+  };
 
   const startNewSession = async (discard: boolean) => {
     setConfirmNew(false);
@@ -454,22 +618,12 @@ export function MainWindow() {
         ),
       },
       { kind: "separator", id: "sep1" },
-      { kind: "item", id: "copy", label: t("ctx.copy"), icon: "copy", disabled: true, tip: t("soon.label"), onSelect: () => {} },
-      { kind: "item", id: "save", label: t("ctx.save"), icon: "save", disabled: true, tip: t("soon.label"), onSelect: () => {} },
+      { kind: "item", id: "copy", label: t("ctx.copy"), icon: "copy", onSelect: () => void share.copy(byIds(m.ids), copyMode) },
+      { kind: "item", id: "save", label: t("ctx.save"), icon: "save", onSelect: () => share.save(byIds(m.ids)) },
       { kind: "separator", id: "sep2" },
       { kind: "item", id: "delete", label: t("ctx.delete"), icon: "trash", danger: true, onSelect: () => setPendingDelete(m.ids) },
     ];
   };
-
-  const banner = (kind: "error" | "notice", text: ReactNode, close: () => void) => (
-    <div className={kind === "error" ? "errorbar" : "errorbar noticebar"} role={kind === "error" ? "alert" : "status"}>
-      <Icon name={kind === "error" ? "alert" : "check"} size={16} />
-      <span>{text}</span>
-      <button type="button" className="errorbar__close" onClick={close} aria-label={t("session.dismiss")}>
-        <Icon name="close" size={14} />
-      </button>
-    </div>
-  );
 
   return (
     <div className="shell">
@@ -482,12 +636,23 @@ export function MainWindow() {
         onOpenSettings={() => void ipc.openSettings()}
         onCapture={(mode) => void ipc.startCapture(mode).catch((e) => setError(messageOf(e)))}
         zoom={zoom}
+        share={{
+          hasCapture: capture !== null,
+          busy: share.busy,
+          canShare: share.canShare,
+          onPaint: () => capture && void share.paint(capture),
+          onSave: () => capture && share.save([capture]),
+          onCopy: () => capture && void share.copy([capture], copyMode),
+          onShare: () => capture && void share.share(view.sel.ids.size > 0 ? byIds([...view.sel.ids]) : [capture]),
+          onOpenFile: () => void share.openFile(),
+          onOpenFolder: () => void share.openFolder(),
+          onPrint: () => void share.print(printTargetsRef.current()),
+        }}
       />
 
       <HotkeyNotice onOpenSettings={() => void ipc.openSettings()} />
 
-      {error && banner("error", t("session.error", { message: error }), () => setError(null))}
-      {notice && banner("notice", notice, () => setNotice(null))}
+      <Toasts toasts={toasts} onClose={closeToast} />
 
       <main className="panels">
         <div className={`panel panel--left panel--${galleryView}`}>
@@ -503,6 +668,51 @@ export function MainWindow() {
             onColor={(id, color) => void run(ipc.setGroupColor(id, color))}
             onEmoji={(id, emoji) => void run(ipc.setGroupEmoji(id, emoji))}
           />
+          <div className="searchbar" role="search">
+            <input
+              ref={searchBox}
+              className="searchbar__input"
+              type="search"
+              value={query}
+              placeholder={t("search.placeholder")}
+              aria-label={t("search.placeholder")}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  clearSearch();
+                }
+              }}
+            />
+            {query && (
+              <button type="button" className="searchbar__clear" aria-label={t("search.clear")} title={t("search.clear")} onClick={clearSearch}>
+                <Icon name="close" size={14} />
+              </button>
+            )}
+            <span className="segmented" role="group" aria-label={t("search.scope")}>
+              <button type="button" className="segmented__btn" aria-pressed={scope === "group"} onClick={() => setScope("group")}>
+                {t("search.scopeGroup")}
+              </button>
+              <button type="button" className="segmented__btn" aria-pressed={scope === "all"} onClick={() => setScope("all")}>
+                {t("search.scopeAll")}
+              </button>
+            </span>
+          </div>
+          {searching && unread > 0 && ocrPending > 0 && (
+            <p className="searchbar__hint" role="status">
+              {t("search.reading")}
+            </p>
+          )}
+          {searching && scope === "all" ? (
+            hits.length > 0 ? (
+              <SearchResults session={session} hits={hits} activeId={currentId} onOpen={openHit} />
+            ) : (
+              <p className="searchbar__none">{t("search.none", { query: applied.trim() })}</p>
+            )
+          ) : searching && shown.length === 0 ? (
+            <p className="searchbar__none">{t("search.none", { query: applied.trim() })}</p>
+          ) : (
           <CaptureList
             session={session}
             groupId={group.id}
@@ -519,6 +729,7 @@ export function MainWindow() {
             onSelectAll={() => applyChange(selectEvery(view.sel, shownIds, currentId))}
             onClearAll={() => applyChange({ selection: clearSelection(), active: undefined })}
           />
+          )}
         </div>
         <div className="panel panel--right">
           <Preview
@@ -531,6 +742,7 @@ export function MainWindow() {
             onError={(e) => setError(messageOf(e))}
             settings={settings}
             onPatch={(change) => void patch(change)}
+            searchQuery={searching ? applied : ""}
           />
         </div>
         {dropGroup && (
@@ -542,7 +754,47 @@ export function MainWindow() {
         )}
       </main>
 
-      <BottomBar selectedCount={view.sel.ids.size} copyMode={copyMode} onCopyMode={setCopyMode} />
+      <BottomBar
+        selectedCount={view.sel.ids.size}
+        hasCapture={capture !== null}
+        copyMode={copyMode}
+        onCopyMode={chooseCopyMode}
+        busy={share.busy}
+        onCopy={() => void share.copy(selectionOrCurrent(), copyMode)}
+        onSave={() => share.save(selectionOrCurrent())}
+      />
+
+      <SaveDialog
+        captures={share.saving}
+        settings={settings}
+        onCancel={() => share.setSaving(null)}
+        onSave={(captures, o) => void share.doSave(captures, o)}
+      />
+
+      <Dialog
+        open={share.tooLarge !== null}
+        title={t("bottom.copyMode")}
+        onClose={() => share.setTooLarge(null)}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => share.setTooLarge(null)}>
+              {t("session.cancel")}
+            </Button>
+            <Button
+              variant="primary"
+              onClick={() => {
+                const big = share.tooLarge;
+                share.setTooLarge(null);
+                if (big) void share.copy(big.captures, "separate");
+              }}
+            >
+              {t("copy.separateInstead")}
+            </Button>
+          </>
+        }
+      >
+        <p>{share.tooLarge ? t("copy.tooLarge", { width: share.tooLarge.width, height: share.tooLarge.height }) : ""}</p>
+      </Dialog>
 
       {menu && <ContextMenu x={menu.x} y={menu.y} label={t("captures.title", { count: menu.ids.length })} entries={cardMenuEntries(menu)} onClose={closeMenu} />}
 

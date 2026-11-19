@@ -1,6 +1,6 @@
 # Snipmunk roadmap
 
-Status: Phases 1 to 5 (including the 3.1 and 4.1 fixes) are done. Phase 5.5 (text recognition and the Phase 5 fixes) is the current one.
+Status: Phases 1 to 5.5 (including the 3.1 and 4.1 fixes) are done. Phase 6 (copy and share, gallery search, fixes from Phase 5.5 testing) is the current one.
 
 ## Phase 1: Repo setup ✅
 Project folder, README, license, `.gitignore`, roadmap and icon placeholder.
@@ -51,7 +51,7 @@ UI and UI state only: buttons for later features are in their final place, with 
 - Plain canvas, no drawing library: the renderer is pure and tested.
 - Still to come: copy and share of the annotated picture (Phase 6), text recognition and quick redact (Phase 5.5). See `docs/manual-tests-phase-5.md`.
 
-## Phase 5.5: Text recognition and Phase 5 fixes (in progress)
+## Phase 5.5: Text recognition and Phase 5 fixes ✅ (with the fixes of Phase 6, part A)
 Fixes to Phase 5:
 - **Text boxes resize properly**: corner handles scale the text (font size, box and size popover together), left and right handles change the width and the text wraps again, the height always fits; works rotated, at any zoom, with a label background, right-to-left and CJK; one undo step per resize.
 - **Mouse wheel**: the wheel zooms at the pointer (also Ctrl + wheel and a touchpad pinch), Shift + wheel pans sideways, Space + drag and middle-button drag still pan. Setting "Mouse wheel": Zoom (default) or Scroll (the wheel pans, Ctrl + wheel zooms). Zoom steps are smooth, and the first zoom no longer stalls (the window is told about the new zoom once the movement has settled).
@@ -66,13 +66,35 @@ Text recognition, local and offline:
 - **Settings → Text recognition**: engine, installed languages, language choice, automatic recognition, model state ("none needed"), Quick redact defaults.
 - See `docs/manual-tests-phase-5.5.md`.
 
-## Phase 6: Copy and share
-- Copy / paste all or only the selected captures
-- **Copy modes**: Separate (each screenshot is its own picture), Stack (one tall picture), Grid (one picture with a grid)
-- Drag screenshots out into other apps
-- Save, Share, Edit in Paint, Print and Open file
+Fixes from Phase 5.5 testing (done in Phase 6, part A):
+- **Text actions look like the Snipping Tool**: the picture is dimmed and the recognized text lines stay bright with a light outline; the selection is on top.
+- **Quick redact with more types** (all remembered in the settings): e-mail addresses, phone numbers, credit card numbers (13 to 19 digits, Luhn check), IBANs (country, length, mod-97), passwords and secrets (only the value after a label, labels in all interface languages and common English ones), and the user's own words (Settings, Text recognition; also "Always redact this" in the text layer's menu). No address detection.
+- **Text tool rework**: click on empty canvas makes a box at a normal size with a cursor; a click elsewhere finishes it and starts the next; a click on an existing text edits it, a drag moves it; handles scale, rewrap and rotate; Esc / Ctrl+Enter / another tool finish; empty boxes disappear (a small state machine in `src/annotate/textTool.ts`).
+- **Screen-based sizes for every tool**: the size popovers mean what is seen on the screen at the current zoom; marks get picture pixels when they are made; existing marks do not change.
+- **Apply redactions permanently**: tooltip hint, "n redactions applied permanently", a short flash on the baked areas, "Redactions restored" on undo.
 
-## Phase 7: Screen recording
+## Phase 6: Copy and share, gallery search ✅ (with 6.1 and the 7 retest fixes)
+Everything that leaves the app uses the shared renderer (marks, crop, rotation, flip, redactions with destroyed pixels), in the group's current order. Temp files live only in `%AppData%\SecondDawn\snipmunk\temp` and are deleted at the next copy of that kind and at quit.
+- **Copy** (bottom bar: "Copy all (n)" or "Copy 3"; top bar: the capture shown; card menu): Separate (files + HTML + PNG + bitmap on the clipboard), Stack (one picture, 16 px gap, white, centred) and Grid (2 / 3 / 4 columns by count, 16 px gap, white, cells as big as the largest capture of the row). Extremely large pictures (over 16k pixels a side or 200 megapixels) are refused with an offer to copy separately.
+- **Drag out**: dragging a card out of the window starts a native drag of the rendered PNG files (the `drag` crate); internal reorder and move drags are unchanged.
+- **Save**: PNG, JPEG, WebP (quality), BMP, ZIP; file names by capture name, group + number + name, or date and time; Windows-safe names; never overwrites; remembers format, naming, quality and folder; "Open folder" in the notice.
+- **Share** (Windows share sheet), **Edit in Paint** (rendered temp PNG, default editor as fallback), **Print** (Ctrl+P, one capture per page), **Open file** (Ctrl+O, several files), **Open screenshots folder**.
+- **Gallery search** (Ctrl+F): capture name, window title and recognized text; accent, case and Arabic-spelling insensitive, CJK substrings, all words must match; "This group" or "All groups" with group badges; the matching words are marked in the preview.
+- **6.1 fixes** (from the Phase 6 manual tests): Grid pastes in Word and Paint (24-bit padded clipboard bitmap), an option to leave the file list off the clipboard so Outlook gets the pictures inline, the Text tool makes one box per activation and goes back to Select, small and monospace text is read again enlarged and lines only one pass found are kept, card and IBAN detection tolerates O/l/S/B read for digits (checksums still decide), the Quick redact main button redacts at once, the text layer's right-click menu works, "Open folder" opens the real folder, the list view's check box and trash no longer overlap, every notice is a toast, a clear page when the dev server is gone, the caret goes where the user clicked, and `tauri-plugin-dialog` replaces `rfd`.
+- See `docs/manual-tests-phase-6.md`.
+
+## Phase 7: Screen recording (in progress)
+Done (Part A, fixes from the 6.1 retest): Copy ▾ with "Copy as files" (replaces the 6.1 setting), "Redact only this" in the text layer's menu, the Save dialog's folder row with "Change…", marks that lock like the Snipping Tool's (only the mark just made is editable; Undo, Eraser and "Erase all mark-ups" remove committed ones), hold-to-shape for the pen and highlighter (line, arrow, ellipse, rectangle, triangle, star).
+
+Scope of Part B (screen recording, Windows first, behind a platform abstraction so macOS ScreenCaptureKit can follow in Phase 9):
+- The screen is recorded **without the cursor** (Windows.Graphics.Capture); system audio (WASAPI loopback), microphone, webcam and the cursor track (positions, shapes, buttons) are separate tracks; cursor effects, webcam overlay and trim are applied when playing and rendering, so everything can be changed afterwards.
+- Hardware H.264 through Media Foundation, written to disk as it goes in a crash-safe layout; recovery offered at the next start.
+- A recording is a "video" capture in the group (cards with a 🎥 icon and the duration); a player with live effects and a side panel; trim; render, copy, save as MP4; convert to GIF.
+- Built so far: the pure logic in `src/recording/` (cursor track and click effects, webcam layout, trim and pause timeline, disk space levels, render cache key, GIF plan). The native recorder, the recording UI, the player, render and GIF export are not built yet. See `docs/manual-tests-phase-7.md`.
+
+## Phase 7.5: Snipmunk Studio and copy options
+- **Snipmunk Studio**: auto-zoom on clicks, cursor smoothing, more effects, an editor for recordings (Windows and macOS).
+- Stack and Grid options: numbers and labels on the captures, the gap, the background colour, the number of columns.
 
 ## Phase 8: Polish, installer and the first release
 - **Auto-keep sessions**: every change is saved at once (storage foundation: Phase 2)

@@ -89,6 +89,88 @@ pub fn upscale_factor(width: u32, height: u32) -> u32 {
     }
 }
 
+/// The median height of the words of a result (in the pixels of the picture they are in); 0 without words.
+pub fn median_word_height(lines: &[OcrLine]) -> f32 {
+    let mut hs: Vec<f32> = lines
+        .iter()
+        .flat_map(|l| l.words.iter().map(|w| w.h))
+        .filter(|h| *h > 0.0)
+        .collect();
+    if hs.is_empty() {
+        return 0.0;
+    }
+    hs.sort_by(|a, b| a.total_cmp(b));
+    hs[hs.len() / 2]
+}
+
+/// Text this tall (pixels) is read best; smaller text is read again enlarged.
+const GOOD_WORD_HEIGHT: f32 = 26.0;
+
+/// The enlargement for a second pass when the text of the first pass is small (e.g. monospace text in a screenshot), or 1.
+/// `done` is the factor the first pass used; `max` the largest picture side the engine takes.
+pub fn second_pass_factor(median_h: f32, done: u32, width: u32, height: u32, max: u32) -> u32 {
+    if median_h <= 0.0 || median_h >= GOOD_WORD_HEIGHT * 0.85 {
+        return 1;
+    }
+    let want = ((GOOD_WORD_HEIGHT / median_h * done as f32).ceil() as u32).clamp(2, 4);
+    let mut f = want;
+    while f > done && (width * f > max || height * f > max) {
+        f -= 1;
+    }
+    if f > done {
+        f
+    } else {
+        1
+    }
+}
+
+fn line_box(l: &OcrLine) -> Option<(f32, f32, f32, f32)> {
+    let first = l.words.first()?;
+    let (mut x0, mut y0, mut x1, mut y1) = (first.x, first.y, first.x + first.w, first.y + first.h);
+    for w in &l.words {
+        x0 = x0.min(w.x);
+        y0 = y0.min(w.y);
+        x1 = x1.max(w.x + w.w);
+        y1 = y1.max(w.y + w.h);
+    }
+    Some((x0, y0, x1, y1))
+}
+
+fn overlap_fraction(a: (f32, f32, f32, f32), b: (f32, f32, f32, f32)) -> f32 {
+    let w = (a.2.min(b.2) - a.0.max(b.0)).max(0.0);
+    let h = (a.3.min(b.3) - a.1.max(b.1)).max(0.0);
+    let area = ((a.2 - a.0) * (a.3 - a.1)).max(f32::EPSILON);
+    w * h / area
+}
+
+/// `base` plus the lines of `extra` that lie where `base` has no line (a line one pass missed and the other found), in reading
+/// order (top to bottom).
+pub fn merge_missing(mut base: Vec<OcrLine>, extra: Vec<OcrLine>) -> Vec<OcrLine> {
+    let boxes: Vec<_> = base.iter().filter_map(line_box).collect();
+    for l in extra {
+        let Some(b) = line_box(&l) else { continue };
+        if boxes.iter().all(|o| overlap_fraction(b, *o) < 0.3) {
+            base.push(l);
+        }
+    }
+    base.sort_by(|a, c| {
+        let (ay, cy) = (
+            line_box(a).map_or(0.0, |b| b.1),
+            line_box(c).map_or(0.0, |b| b.1),
+        );
+        ay.total_cmp(&cy)
+    });
+    base
+}
+
+/// How much was read: every letter and digit.
+fn read_count(lines: &[OcrLine]) -> usize {
+    lines
+        .iter()
+        .map(|l| l.text.chars().filter(|c| c.is_alphanumeric()).count())
+        .sum()
+}
+
 /// The languages to try: all that are available for "auto" (the user's own first), else the requested ones that are
 /// available.
 pub fn choose_languages(setting: &str, available: &[String]) -> Vec<String> {
@@ -234,7 +316,62 @@ pub fn recognize(
             "the picture is too large for text recognition ({width} x {height}, at most {max})"
         ));
     }
+    // First pass (small pictures are enlarged); when its text is small, a second pass reads it enlarged more and the lines
+    // only one pass found are kept.
     let factor = upscale_factor(width, height);
+    let (language, mut lines) = read_pass(rgba, width, height, factor, &tags)?;
+    let second = second_pass_factor(median_word_height(&lines), factor, width, height, max);
+    let mut language = language;
+    if second > 1 {
+        // Other scales read other lines (the engine drops a line of small digits at one scale and reads it at the next), so a
+        // neighbouring scale is tried too; every pass only adds the lines the others missed.
+        let alt = if second > 2 { second - 1 } else { 3 };
+        let mut factors = vec![second];
+        if alt != factor && alt != second && width * alt <= max && height * alt <= max {
+            factors.push(alt);
+        }
+        for f in factors {
+            if let Ok((lang2, lines2)) = read_pass(rgba, width, height, f, &tags) {
+                // The pass that read more is the base; the other one only adds lines the base missed.
+                if read_count(&lines2) > read_count(&lines) {
+                    lines = merge_missing(lines2, lines);
+                    language = lang2;
+                } else {
+                    lines = merge_missing(lines, lines2);
+                }
+            }
+        }
+    }
+    Ok(finish(key, language, width, height, lines, started))
+}
+
+fn finish(
+    key: String,
+    language: String,
+    width: u32,
+    height: u32,
+    lines: Vec<OcrLine>,
+    started: Instant,
+) -> OcrResult {
+    OcrResult {
+        key,
+        engine: "windows".into(),
+        language,
+        width,
+        height,
+        lines,
+        took_ms: started.elapsed().as_millis() as u64,
+    }
+}
+
+/// One recognition pass at a scale: the best language, the boxes mapped back to the pixels of the original picture.
+fn read_pass(
+    rgba: &[u8],
+    width: u32,
+    height: u32,
+    factor: u32,
+    tags: &[String],
+) -> Result<(String, Vec<OcrLine>), String> {
     let (data, w, h): (std::borrow::Cow<[u8]>, u32, u32) = if factor > 1 {
         let img = image::RgbaImage::from_raw(width, height, rgba.to_vec())
             .ok_or("the picture has an unexpected size")?;
@@ -250,7 +387,7 @@ pub fn recognize(
     };
     let mut best: Option<(String, Vec<OcrLine>)> = None;
     let mut last_error = None;
-    for tag in &tags {
+    for tag in tags {
         match win::recognize(&data, w, h, tag) {
             Ok(lines) => {
                 if best
@@ -277,15 +414,7 @@ pub fn recognize(
             }
         }
     }
-    Ok(OcrResult {
-        key,
-        engine: "windows".into(),
-        language,
-        width,
-        height,
-        lines,
-        took_ms: started.elapsed().as_millis() as u64,
-    })
+    Ok((language, lines))
 }
 
 /// Write a result next to its session (a temporary file renamed over, never half a file).
@@ -436,6 +565,32 @@ pub fn ocr_get(state: State<'_, AppState>, capture_id: String) -> Option<OcrResu
     serde_json::from_slice(&std::fs::read(path).ok()?).ok()
 }
 
+/// The recognized text of every capture of the session that has one, by capture id (for the gallery search, which
+/// keeps its own index; one call instead of one per capture).
+#[tauri::command]
+pub fn ocr_texts(state: State<'_, AppState>) -> std::collections::HashMap<String, String> {
+    let store = state.sessions.lock().unwrap();
+    let mut out = std::collections::HashMap::new();
+    for g in &store.session().groups {
+        for c in &g.captures {
+            let Ok(bytes) = std::fs::read(store.ocr_path(&c.id)) else {
+                continue;
+            };
+            if let Ok(r) = serde_json::from_slice::<OcrResult>(&bytes) {
+                let text: Vec<&str> = r.lines.iter().map(|l| l.text.as_str()).collect();
+                out.insert(
+                    c.id.clone(),
+                    text.join(
+                        "
+",
+                    ),
+                );
+            }
+        }
+    }
+    out
+}
+
 /// Recognize the picture the page sends (a PNG as the raw body; `x-capture-id`, `x-key` headers) and keep the result.
 #[tauri::command]
 pub async fn ocr_recognize(
@@ -557,6 +712,58 @@ mod tests {
     #[test]
     fn the_key_of_a_fresh_capture_has_the_languages() {
         assert_eq!(plain_key("auto"), "plain|auto");
+    }
+
+    fn at(text: &str, x: f32, y: f32, w: f32, h: f32) -> OcrLine {
+        OcrLine {
+            text: text.into(),
+            words: vec![OcrWord {
+                text: text.into(),
+                x,
+                y,
+                w,
+                h,
+            }],
+        }
+    }
+
+    #[test]
+    fn small_text_is_read_again_enlarged() {
+        let small = vec![
+            at("Card:", 0.0, 0.0, 40.0, 12.0),
+            at("4111", 0.0, 20.0, 40.0, 12.0),
+        ];
+        assert_eq!(median_word_height(&small), 12.0);
+        // 12 px text: a second pass at 3x (26 / 12 rounded up).
+        assert_eq!(second_pass_factor(12.0, 1, 1000, 800, 10000), 3);
+        // Already enlarged 2x by the first pass: the second goes further, but not over the engine's limit.
+        assert_eq!(second_pass_factor(12.0, 2, 1000, 800, 10000), 4);
+        assert_eq!(second_pass_factor(12.0, 1, 4000, 800, 10000), 2);
+        assert_eq!(
+            second_pass_factor(12.0, 1, 6000, 800, 10000),
+            1,
+            "no room to enlarge"
+        );
+        // Text that is tall enough, or no text at all: no second pass.
+        assert_eq!(second_pass_factor(24.0, 1, 1000, 800, 10000), 1);
+        assert_eq!(second_pass_factor(0.0, 1, 1000, 800, 10000), 1);
+    }
+
+    #[test]
+    fn a_line_only_one_pass_found_is_kept() {
+        let first = vec![
+            at("Title", 0.0, 0.0, 80.0, 12.0),
+            at("Total", 0.0, 40.0, 60.0, 12.0),
+        ];
+        // The second pass found all three lines (the middle one is new) and a copy of "Title" a little shifted.
+        let second = vec![
+            at("Title", 2.0, 1.0, 80.0, 12.0),
+            at("Card: 4111 1111 1111 1111", 0.0, 20.0, 200.0, 12.0),
+            at("Total", 0.0, 40.0, 60.0, 12.0),
+        ];
+        let merged = merge_missing(first, second);
+        let texts: Vec<&str> = merged.iter().map(|l| l.text.as_str()).collect();
+        assert_eq!(texts, ["Title", "Card: 4111 1111 1111 1111", "Total"]);
     }
 
     #[test]

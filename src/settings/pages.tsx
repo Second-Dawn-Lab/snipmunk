@@ -139,9 +139,78 @@ export function OcrPage({ settings, set }: PageProps) {
           <span>{t("ocr.redactEmail")}</span>
           <Switch label={t("ocr.redactPhone")} checked={settings.quickRedactPhone} onChange={(quickRedactPhone) => set({ quickRedactPhone })} />
           <span>{t("ocr.redactPhone")}</span>
+          <Switch label={t("ocr.redactCard")} checked={settings.quickRedactCard} onChange={(quickRedactCard) => set({ quickRedactCard })} />
+          <span>{t("ocr.redactCard")}</span>
+          <Switch label={t("ocr.redactIban")} checked={settings.quickRedactIban} onChange={(quickRedactIban) => set({ quickRedactIban })} />
+          <span>{t("ocr.redactIban")}</span>
+          <Switch label={t("ocr.redactSecret")} checked={settings.quickRedactSecret} onChange={(quickRedactSecret) => set({ quickRedactSecret })} />
+          <span>{t("ocr.redactSecret")}</span>
+          <Switch label={t("ocr.redactCustom")} checked={settings.quickRedactCustom} onChange={(quickRedactCustom) => set({ quickRedactCustom })} />
+          <span>{t("ocr.redactCustom")}</span>
         </div>
       </Setting>
+      <Setting id="ocrWords" title={t("settings.ocrWords")} description={t("settings.ocrWordsDesc")}>
+        <WordList settings={settings} set={set} />
+      </Setting>
     </Section>
+  );
+}
+
+/** The words Quick redact always covers: add, remove, whole words only. */
+function WordList({ settings, set }: PageProps) {
+  const { t } = useT();
+  const [text, setText] = useState("");
+  const words = settings.quickRedactWords;
+  const add = () => {
+    const w = text.trim();
+    if (!w || words.some((x) => x.toLowerCase() === w.toLowerCase())) return setText("");
+    set({ quickRedactWords: [...words, w], quickRedactCustom: true });
+    setText("");
+  };
+  return (
+    <div className="wordlist">
+      <div className="wordlist__add">
+        <input
+          className="wordlist__input"
+          value={text}
+          placeholder={t("settings.ocrWordPlaceholder")}
+          aria-label={t("settings.ocrWordPlaceholder")}
+          maxLength={100}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              add();
+            }
+          }}
+        />
+        <Button onClick={add}>{t("settings.ocrWordAdd")}</Button>
+      </div>
+      <div className="ocrlangs">
+        <Switch label={t("settings.ocrWordWhole")} checked={settings.quickRedactWholeWord} onChange={(quickRedactWholeWord) => set({ quickRedactWholeWord })} />
+        <span>{t("settings.ocrWordWhole")}</span>
+      </div>
+      {words.length === 0 ? (
+        <p className="wordlist__none">{t("settings.ocrWordsNone")}</p>
+      ) : (
+        <ul className="wordlist__list">
+          {words.map((w) => (
+            <li key={w}>
+              <span className="wordlist__word">{w}</span>
+              <button
+                type="button"
+                className="wordlist__remove"
+                aria-label={t("settings.ocrWordRemove", { word: w })}
+                title={t("settings.ocrWordRemove", { word: w })}
+                onClick={() => set({ quickRedactWords: words.filter((x) => x !== w) })}
+              >
+                <Icon name="close" size={14} />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 

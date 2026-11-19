@@ -20,6 +20,8 @@ export function Preview(props: {
   settings: Settings;
   onPatch: (change: Partial<Settings>) => void;
   onError: (e: unknown) => void;
+  /** The gallery search: the words that match are marked in the picture. */
+  searchQuery?: string;
   /** The zoom in effect, for the badge. */
   zoom: number;
 }) {
@@ -59,6 +61,7 @@ export function Preview(props: {
             settings={props.settings}
             onPatch={props.onPatch}
             onError={props.onError}
+            searchQuery={props.searchQuery}
           />
         ) : (
           <p className="preview__none">{t("preview.none")}</p>

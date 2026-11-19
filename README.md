@@ -80,3 +80,7 @@ Snipmunk is a [Second Dawn](https://github.com/Second-Dawn-Lab) app. Second Dawn
 ## License
 
 Snipmunk is MIT licensed. See [LICENSE](LICENSE).
+
+## Copy, save and share: where files go
+
+Copying, dragging out, printing, sharing and "Edit in Paint" render the capture (marks, crop, rotation and redactions applied) into temporary PNG files in `%AppData%\SecondDawn\snipmunk\temp`. Nothing is written anywhere else unless you save. The temporary files of a kind are deleted at the next copy of that kind and when Snipmunk quits. The clipboard holds the file list, an HTML fragment and the first picture; other programs may read the files from the temp folder until then.

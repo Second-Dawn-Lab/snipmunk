@@ -4,6 +4,7 @@ import type { RedactMode } from "../annotate/schema";
 import { pickValues, type ToolValues } from "../annotate/styles";
 import { keyOf, type ShapeKind, type Tool } from "../annotate/tools";
 import { useT } from "../i18n";
+import { anythingChosen, optionsFromSettings } from "../ocr/quickRedact";
 import type { Settings } from "../settings/defaults";
 import { AppIcon, type AppIconName } from "./AppIcons";
 import { MenuItem } from "./MenuItem";
@@ -64,7 +65,8 @@ export function AnnotationBar(props: { settings: Settings; onPatch: (change: Par
   const ui = useEditorUi();
   const [open, setOpen] = useState<Open>(null);
   const [sub, setSub] = useState<Sub>(null);
-  const redact = { email: props.settings.quickRedactEmail, phone: props.settings.quickRedactPhone };
+  const redact = optionsFromSettings(props.settings);
+  const redactAny = anythingChosen(redact);
   const [values, change] = useToolValues(props.settings, props.onPatch);
   const on = ui.enabled;
   // The text layer lies over the picture while the Text actions toolbar is open.
@@ -297,7 +299,7 @@ export function AnnotationBar(props: { settings: Settings; onPatch: (change: Par
           <MenuItem
             label={t("tools.redactBake")}
             disabled={!ui.hasRedactions}
-            soon={ui.hasRedactions ? undefined : t("tools.redactBakeNone")}
+            soon={ui.hasRedactions ? undefined : t("bake.hint")}
             onSelect={() => {
               close();
               editorStore.actions.askBake();
@@ -497,19 +499,31 @@ export function AnnotationBar(props: { settings: Settings; onPatch: (change: Par
             kind="menu"
             label={label("ocr.redact")}
             trigger={
-              <button
-                type="button"
-                className="tool tool--labelled"
-                aria-haspopup="menu"
-                aria-expanded={open === "redact"}
-                aria-disabled={!on || undefined}
-                title={t("ocr.redact")}
-                onClick={() => on && toggle("redact")}
-              >
-                <AppIcon name="redact" size={17} />
-                <span>{t("ocr.redact")}</span>
-                <AppIcon name="chevron" size={12} />
-              </button>
+              <span className="splitbtn splitbtn--tool">
+                <button
+                  type="button"
+                  className="splitbtn__main tool--labelled"
+                  aria-disabled={!on || !redactAny || undefined}
+                  title={t("ocr.redactTip")}
+                  onClick={() => {
+                    if (on && redactAny) editorStore.actions.quickRedact(redact);
+                  }}
+                >
+                  <AppIcon name="redact" size={17} />
+                  <span>{t("ocr.redact")}</span>
+                </button>
+                <button
+                  type="button"
+                  className="splitbtn__more"
+                  aria-haspopup="menu"
+                  aria-expanded={open === "redact"}
+                  aria-label={label("ocr.redact")}
+                  title={t("ocr.redactOptions")}
+                  onClick={() => toggle("redact")}
+                >
+                  <AppIcon name="chevron" size={12} />
+                </button>
+              </span>
             }
           >
             <MenuItem
@@ -525,13 +539,28 @@ export function AnnotationBar(props: { settings: Settings; onPatch: (change: Par
               onSelect={() => props.onPatch({ quickRedactPhone: !redact.phone })}
             />
             <MenuItem
-              label={t("ocr.redactRun")}
-              icon="redact"
-              disabled={!on || (!redact.email && !redact.phone)}
-              onSelect={() => {
-                close();
-                editorStore.actions.quickRedact(redact);
-              }}
+              role="menuitemcheckbox"
+              label={t("ocr.redactCard")}
+              checked={!!redact.card}
+              onSelect={() => props.onPatch({ quickRedactCard: !redact.card })}
+            />
+            <MenuItem
+              role="menuitemcheckbox"
+              label={t("ocr.redactIban")}
+              checked={!!redact.iban}
+              onSelect={() => props.onPatch({ quickRedactIban: !redact.iban })}
+            />
+            <MenuItem
+              role="menuitemcheckbox"
+              label={t("ocr.redactSecret")}
+              checked={!!redact.secret}
+              onSelect={() => props.onPatch({ quickRedactSecret: !redact.secret })}
+            />
+            <MenuItem
+              role="menuitemcheckbox"
+              label={t("ocr.redactCustom")}
+              checked={!!redact.custom}
+              onSelect={() => props.onPatch({ quickRedactCustom: !props.settings.quickRedactCustom })}
             />
             <MenuItem
               label={t("ocr.redactClear")}

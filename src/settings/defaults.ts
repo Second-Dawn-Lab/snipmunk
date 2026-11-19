@@ -48,7 +48,25 @@ export interface Settings {
   /** Quick redact: cover e-mail addresses / phone numbers. */
   quickRedactEmail: boolean;
   quickRedactPhone: boolean;
+  /** Quick redact: credit cards, IBANs, passwords / secrets, the user's own words. */
+  quickRedactCard: boolean;
+  quickRedactIban: boolean;
+  quickRedactSecret: boolean;
+  quickRedactCustom: boolean;
+  /** The user's own words to cover. */
+  quickRedactWords: string[];
+  /** A custom word must be a whole word. */
+  quickRedactWholeWord: boolean;
+  saveFormat: SaveFormat;
+  saveNaming: Naming;
+  /** JPEG / WebP quality, 10 to 100. */
+  saveQuality: number;
+  /** The folder of the last save (used when no export folder is set). */
+  lastSaveFolder: string;
 }
+
+export type SaveFormat = "png" | "jpeg" | "webp" | "bmp" | "zip";
+export type Naming = "capture" | "group" | "dateTime";
 
 export type CaptureMode = "rectangle" | "window" | "fullscreen" | "freeform";
 export type CaptureDelay = 0 | 3 | 5 | 10;
@@ -90,4 +108,14 @@ export const defaultSettings: Settings = {
   ocrLanguages: "auto",
   quickRedactEmail: true,
   quickRedactPhone: true,
+  quickRedactCard: true,
+  quickRedactIban: true,
+  quickRedactSecret: true,
+  quickRedactCustom: true,
+  quickRedactWords: [],
+  quickRedactWholeWord: true,
+  saveFormat: "png",
+  saveNaming: "capture",
+  saveQuality: 90,
+  lastSaveFolder: "",
 };

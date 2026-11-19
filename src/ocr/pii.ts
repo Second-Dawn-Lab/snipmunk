@@ -2,7 +2,9 @@
 // times, prices, version numbers, IP addresses and plain ids: it asks for the shape of a phone number (a +, 00 or national
 // 0 prefix, brackets, or the 3-3-4 digit groups of North America) and for 7 to 15 digits.
 
-export type MatchKind = "email" | "phone";
+import { findCards, findCustom, findIbans, findSecrets, type CustomWords } from "./sensitive";
+
+export type MatchKind = "email" | "phone" | "card" | "iban" | "secret" | "custom";
 
 export interface Match {
   kind: MatchKind;
@@ -64,16 +66,26 @@ export function findPhones(text: string): Match[] {
 export interface FindOptions {
   email: boolean;
   phone: boolean;
+  card?: boolean;
+  iban?: boolean;
+  secret?: boolean;
+  custom?: CustomWords | null;
 }
 
-/** All matches of the chosen kinds, in text order, without overlaps (an address wins over a number inside it). */
+/** Who wins when two matches overlap (an address beats a number inside it, a card beats a phone number). */
+const PRIORITY: Record<MatchKind, number> = { secret: 0, iban: 1, card: 2, email: 3, custom: 4, phone: 5 };
+
+/** All matches of the chosen kinds, in text order, without overlaps. */
 export function findMatches(text: string, options: FindOptions): Match[] {
-  const all = [...(options.email ? findEmails(text) : []), ...(options.phone ? findPhones(text) : [])].sort((a, b) => a.start - b.start || b.end - a.end);
-  const out: Match[] = [];
-  for (const m of all) {
-    const last = out[out.length - 1];
-    if (last && m.start < last.end) continue;
-    out.push(m);
-  }
-  return out;
+  const all = [
+    ...(options.email ? findEmails(text) : []),
+    ...(options.card ? findCards(text) : []),
+    ...(options.iban ? findIbans(text) : []),
+    ...(options.secret ? findSecrets(text) : []),
+    ...(options.custom ? findCustom(text, options.custom) : []),
+    ...(options.phone ? findPhones(text) : []),
+  ].sort((a, b) => PRIORITY[a.kind] - PRIORITY[b.kind] || a.start - b.start || b.end - a.end);
+  const taken: Match[] = [];
+  for (const m of all) if (!taken.some((t) => m.start < t.end && t.start < m.end)) taken.push(m);
+  return taken.sort((a, b) => a.start - b.start);
 }

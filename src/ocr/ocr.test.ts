@@ -347,7 +347,7 @@ describe("redaction from matches", () => {
 
   it("counts what it found", () => {
     expect(quickRects(doc, { email: true, phone: true })).toMatchObject({ emails: 1, phones: 1 });
-    expect(quickRects(doc, { email: false, phone: false })).toEqual({ rects: [], emails: 0, phones: 0 });
+    expect(quickRects(doc, { email: false, phone: false })).toEqual({ rects: [], emails: 0, phones: 0, counts: {} });
   });
 
   it("cuts a word in the middle: only the characters of the match", () => {

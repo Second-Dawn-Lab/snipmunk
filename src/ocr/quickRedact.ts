@@ -2,7 +2,8 @@
 // marks that cover them.
 import { newId, type RedactAnnotation } from "../annotate/schema";
 import { apply, invert, transformRect, type Matrix } from "../annotate/transform";
-import { findMatches, type FindOptions, type Match } from "./pii";
+import { findMatches, type FindOptions, type Match, type MatchKind } from "./pii";
+import type { Settings } from "../settings/defaults";
 import type { Line, OcrDoc, Rect, Word } from "./types";
 
 /** The part of a word's box that holds characters `i` to `j` of its text (characters run right to left in an RTL line). */
@@ -37,10 +38,41 @@ export function matchRect(line: Line, match: Match, pad = 2): Rect | null {
   return { x: u.x - pad, y: u.y - pad, w: u.w + 2 * pad, h: u.h + 2 * pad };
 }
 
+type RedactSettings = Pick<
+  Settings,
+  | "quickRedactEmail"
+  | "quickRedactPhone"
+  | "quickRedactCard"
+  | "quickRedactIban"
+  | "quickRedactSecret"
+  | "quickRedactCustom"
+  | "quickRedactWords"
+  | "quickRedactWholeWord"
+>;
+
+/** What Quick redact covers, from the settings. */
+export function optionsFromSettings(s: RedactSettings): FindOptions {
+  return {
+    email: s.quickRedactEmail,
+    phone: s.quickRedactPhone,
+    card: s.quickRedactCard,
+    iban: s.quickRedactIban,
+    secret: s.quickRedactSecret,
+    custom: s.quickRedactCustom ? { words: s.quickRedactWords, wholeWord: s.quickRedactWholeWord } : null,
+  };
+}
+
+/** Is anything to look for? (Custom words count only when the list is not empty.) */
+export function anythingChosen(o: FindOptions): boolean {
+  return o.email || o.phone || !!o.card || !!o.iban || !!o.secret || (!!o.custom && o.custom.words.some((w) => w.trim() !== ""));
+}
+
 export interface QuickResult {
   rects: Rect[];
   emails: number;
   phones: number;
+  /** The number of hits per kind. */
+  counts: Partial<Record<MatchKind, number>>;
 }
 
 /** Everything to cover in a recognized text, in the pixels of the recognized picture. */
@@ -48,16 +80,18 @@ export function quickRects(doc: OcrDoc, options: FindOptions): QuickResult {
   const rects: Rect[] = [];
   let emails = 0;
   let phones = 0;
+  const counts: Partial<Record<MatchKind, number>> = {};
   for (const line of doc.lines) {
     for (const m of findMatches(line.text, options)) {
       const r = matchRect(line, m);
       if (!r) continue;
       rects.push(r);
       if (m.kind === "email") emails++;
-      else phones++;
+      else if (m.kind === "phone") phones++;
+      counts[m.kind] = (counts[m.kind] ?? 0) + 1;
     }
   }
-  return { rects, emails, phones };
+  return { rects, emails, phones, counts };
 }
 
 /**

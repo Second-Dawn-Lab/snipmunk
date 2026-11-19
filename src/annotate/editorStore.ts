@@ -2,6 +2,7 @@
 // component (the editor is made again for every capture; its history is not lost).
 import { useSyncExternalStore } from "react";
 import { ipc } from "../ipc";
+import type { FindOptions } from "../ocr/pii";
 import { sessionStore } from "../sessionStore";
 import type { AspectId } from "./crop";
 import { History } from "./history";
@@ -56,7 +57,7 @@ export interface EditorActions {
   copyAllText(): void;
   copyTable(): void;
   /** Cover e-mail addresses and phone numbers (`options` say which). */
-  quickRedact(options: { email: boolean; phone: boolean }): void;
+  quickRedact(options: FindOptions): void;
   removeQuickRedactions(): void;
   /** Ask whether to burn the redactions into the stored picture. */
   askBake(): void;
@@ -145,7 +146,7 @@ export const editorStore = {
     restyle: (patch: Partial<ToolValues>) => registered?.restyle(patch),
     copyAllText: () => registered?.copyAllText(),
     copyTable: () => registered?.copyTable(),
-    quickRedact: (options: { email: boolean; phone: boolean }) => registered?.quickRedact(options),
+    quickRedact: (options: FindOptions) => registered?.quickRedact(options),
     removeQuickRedactions: () => registered?.removeQuickRedactions(),
     askBake: () => registered?.askBake(),
   } satisfies EditorActions,

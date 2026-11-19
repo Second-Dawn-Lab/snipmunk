@@ -1507,6 +1507,39 @@ body.is-dragging * {
 .ocrline {
   display: contents;
 }
+.ocrlayer--passive {
+  pointer-events: none;
+  user-select: none;
+}
+.ocrdim {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+}
+.ocrdim__shade {
+  fill: rgba(0, 0, 0, 0.55);
+}
+.ocrdim__text {
+  fill: rgba(255, 255, 255, 0.12);
+  stroke: rgba(255, 255, 255, 0.55);
+  stroke-width: 1;
+}
+.ocrdim__hit {
+  fill: rgba(255, 214, 0, 0.45);
+  stroke: #e0a100;
+  stroke-width: 1.5;
+}
+.searchbar { display: flex; align-items: center; gap: 6px; padding: 6px 8px; }
+.searchbar__input { flex: 1; min-width: 0; padding: 5px 8px; border-radius: 6px; border: 1px solid var(--dw-border, rgba(128,128,128,.4)); background: var(--dw-surface, transparent); color: inherit; font: inherit; }
+.searchbar__clear { background: none; border: 0; color: inherit; cursor: pointer; padding: 2px; }
+.searchbar__hint, .searchbar__none { margin: 4px 12px; font-size: 12px; opacity: 0.75; }
+.searchhits { list-style: none; margin: 0; padding: 0 6px; overflow: auto; flex: 1; }
+.searchhit { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px; border: 0; border-radius: 6px; background: none; color: inherit; cursor: pointer; text-align: start; font: inherit; }
+.searchhit:hover, .searchhit.is-active { background: var(--dw-hover, rgba(128,128,128,.18)); }
+.searchhit__thumb { width: 56px; height: 36px; object-fit: cover; border-radius: 4px; }
+.searchhit__name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.searchhit__badge { font-size: 11px; padding: 1px 6px; border-radius: 10px; border-inline-start: 3px solid var(--gc, transparent); background: var(--dw-hover, rgba(128,128,128,.18)); white-space: nowrap; max-width: 40%; overflow: hidden; text-overflow: ellipsis; }
 .ocrword {
   position: absolute;
   white-space: pre;
@@ -1540,3 +1573,42 @@ body.is-dragging * {
     animation-duration: 2.4s;
   }
 }
+
+/* --- Phase 6: save dialog, search, copy bar --------------------------------------------------------------------------- */
+.savedlg { display: grid; gap: 12px; min-width: min(420px, 80vw); }
+.savedlg__row { display: grid; grid-template-columns: 120px 1fr auto; align-items: center; gap: 8px; }
+.savedlg__folder { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dw-text-muted, inherit); }
+.noticebar__action { margin-inline-start: 8px; text-decoration: underline; background: none; border: 0; color: inherit; cursor: pointer; font: inherit; }
+.searchbar { flex-wrap: wrap; }
+.searchbar__input { flex: 1 1 140px; }
+.searchbar .segmented { flex: 1 1 100%; display: flex; }
+.searchbar .segmented__btn { flex: 1 1 0; width: auto; min-width: 0; height: auto; padding: 4px 8px; font-size: 12px; white-space: nowrap; }
+
+/* Quick redact: the main part redacts, the arrow opens the options. */
+.splitbtn--tool { display: inline-flex; align-items: stretch; border: 1px solid transparent; border-radius: 8px; }
+.splitbtn--tool .splitbtn__main { display: inline-flex; align-items: center; gap: 6px; padding: 0 8px; background: none; border: 0; color: inherit; font: inherit; cursor: pointer; border-radius: 8px 0 0 8px; min-height: 32px; }
+.splitbtn--tool .splitbtn__more { display: inline-flex; align-items: center; padding: 0 5px; background: none; border: 0; color: inherit; cursor: pointer; border-inline-start: 1px solid var(--dw-border); border-radius: 0 8px 8px 0; }
+.splitbtn--tool .splitbtn__main:hover, .splitbtn--tool .splitbtn__more:hover { background: var(--dw-hover, rgba(128,128,128,.18)); }
+.splitbtn--tool [aria-disabled="true"] { opacity: 0.5; cursor: default; }
+[dir="rtl"] .splitbtn--tool .splitbtn__main { border-radius: 0 8px 8px 0; }
+[dir="rtl"] .splitbtn--tool .splitbtn__more { border-radius: 8px 0 0 8px; }
+
+/* List view: the check box and the trash icon sit side by side (the trash used to float over the check box). */
+.card:not(.card--medium):not(.card--large) { grid-template-columns: 84px minmax(0, 1fr) auto auto; grid-template-areas: "thumb text check trash"; }
+.card:not(.card--medium):not(.card--large) .card__trash { position: static; grid-area: trash; inset: auto; }
+
+/* Toasts: floating notices over the content, bottom right (bottom left in right-to-left), no layout shift. */
+.toasts { position: fixed; inset-block-end: 56px; inset-inline-end: 16px; z-index: 60; display: flex; flex-direction: column; gap: 8px; max-width: min(420px, calc(100vw - 32px)); pointer-events: none; }
+.toast { pointer-events: auto; display: flex; align-items: center; gap: 8px; padding: 9px 10px 9px 12px; border-radius: 10px; background: var(--dw-surface); color: var(--dw-text); border: 1px solid var(--dw-border-strong, var(--dw-border)); box-shadow: 0 6px 22px rgba(0, 0, 0, 0.22); font-size: 13.5px; animation: toast-in 0.16s ease-out; }
+.toast--error { border-color: var(--dw-danger); background: var(--dw-danger-soft, var(--dw-surface)); }
+.toast__text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.toast__action { background: none; border: 0; padding: 2px 4px; color: var(--dw-brand); font: inherit; font-weight: 600; cursor: pointer; text-decoration: underline; white-space: nowrap; }
+.toast__close { background: none; border: 0; padding: 2px; color: inherit; cursor: pointer; display: inline-flex; opacity: 0.7; }
+.toast__close:hover { opacity: 1; }
+@keyframes toast-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .toast { animation: none; } }
+
+/* The folder row of the Save dialog: label, the path (cut with an ellipsis, full path in the tooltip), the Change button. */
+.savedlg__row--folder { grid-template-columns: 120px minmax(0, 1fr) auto; }
+.savedlg__row--folder .savedlg__folder { min-width: 0; text-align: start; unicode-bidi: plaintext; }
+.savedlg__row--folder .dw-btn { align-self: center; white-space: nowrap; }

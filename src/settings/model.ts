@@ -50,6 +50,7 @@ export const INDEX: SettingEntry[] = [
   { id: "ocrInstalled", tab: "ocr", title: "settings.ocrInstalled", desc: "settings.ocrAddLanguageDesc" },
   { id: "ocrModels", tab: "ocr", title: "settings.ocrModels", desc: "settings.ocrModelsDesc" },
   { id: "quickRedact", tab: "ocr", title: "settings.quickRedact", desc: "settings.quickRedactDesc" },
+  { id: "ocrWords", tab: "ocr", title: "settings.ocrWords", desc: "settings.ocrWordsDesc" },
 
   { id: "updates", tab: "about", title: "about.updates", desc: "about.updatesDesc" },
   { id: "github", tab: "about", title: "about.github", desc: "about.githubDesc" },

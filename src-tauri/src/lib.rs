@@ -3,6 +3,7 @@
 mod capture;
 mod commands;
 mod error;
+mod export;
 mod freeform;
 mod gallery;
 mod geometry;
@@ -41,7 +42,12 @@ pub fn run() {
         // The only network access: asks GitHub for latest.json when an update check is run (see docs/releasing.md).
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
-        .manage(AppState::load())
+        .plugin(tauri_plugin_dialog::init())
+        .manage({
+            // What a crash left in the temp folder (staged copies, drags, prints) goes now.
+            export::clear_temp();
+            AppState::load()
+        })
         .manage(capture::Capture::new())
         .manage(hotkey::HotkeyManager::new())
         .register_uri_scheme_protocol("snipmunk-img", commands::serve_image)
@@ -75,8 +81,25 @@ pub fn run() {
             gallery::set_annotations,
             gallery::set_capture_thumbnail,
             gallery::replace_capture_image,
+            export::export_begin,
+            export::export_stage,
+            export::export_save,
+            export::export_zip,
+            export::export_clipboard,
+            export::clipboard_formats,
+            export::export_open_editor,
+            export::open_folder,
+            export::session_images_folder,
+            export::share_supported,
+            export::pictures_folder,
+            export::export_share,
+            export::export_drag,
+            export::pick_folder,
+            export::pick_images,
+            export::read_picked_file,
             ocr::ocr_status,
             ocr::ocr_get,
+            ocr::ocr_texts,
             ocr::ocr_recognize,
             ocr::copy_text,
             ocr::copy_table,
@@ -153,6 +176,7 @@ pub fn run() {
             if let tauri::RunEvent::Exit = event {
                 placement::flush();
                 hotkey::stop(app);
+                export::clear_temp();
                 let state = app.state::<AppState>();
                 if state.settings.lock().unwrap().clear_on_exit {
                     state.sessions.lock().unwrap().delete_current();

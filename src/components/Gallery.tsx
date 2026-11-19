@@ -26,6 +26,10 @@ export interface GalleryActions {
   moveToGroup(ids: string[], groupId: string): void;
   /** The group tab a drag is over (to highlight it), or `null`. */
   dragTarget(groupId: string | null): void;
+  /** A card drag began: render these captures into temp files now, so a native drag out can start at once. */
+  prepareDrag(ids: string[]): void;
+  /** The pointer left the window during a card drag: start the native drag of these captures (files) into other apps. */
+  dragOut(ids: string[]): void;
 }
 
 type DragTarget = { kind: "slot"; slot: number } | { kind: "tab"; groupId: string };
@@ -202,17 +206,26 @@ export function Gallery(props: {
       );
       if (ids.length === 0) return;
       targetRef.current = null;
-      beginPointerDrag(
+      let leftWindow = false;
+      const cancelDrag = beginPointerDrag(
         { x: e.clientX, y: e.clientY },
         {
           onStart: (p) => {
             pointer.current = p;
             setDrag({ ids, target: null });
+            latest.current.actions.prepareDrag(ids);
             autoScroll.current = requestAnimationFrame(tick);
             updateTarget();
           },
           onMove: (p) => {
             pointer.current = p;
+            if (p.outside && !leftWindow) {
+              // Out of the window: the internal drag ends and the system takes over (the files go to the app under the pointer).
+              leftWindow = true;
+              cancelDrag();
+              latest.current.actions.dragOut(ids);
+              return;
+            }
             moveGhost(p);
             updateTarget();
           },

@@ -1,4 +1,4 @@
-import { forwardRef, useMemo } from "react";
+import { forwardRef, useId, useMemo } from "react";
 import { FONT_STACK } from "../annotate/render";
 import { fitScale, fontSizeFor, selectionText } from "../ocr/layer";
 import type { OcrDoc } from "../ocr/types";
@@ -33,9 +33,16 @@ export const TextLayer = forwardRef<
     doc: OcrDoc;
     onCopy: (text: string) => void;
     onMenu: (x: number, y: number) => void;
+    /** Dim the whole picture and leave the recognized text bright (Text actions is open). */
+    dim?: boolean;
+    /** Words to mark (the gallery search found them). */
+    hits?: ReadonlySet<number>;
+    /** Only shows the marks: no selection, no menu. */
+    passive?: boolean;
   }
 >(function TextLayer(props, ref) {
   const { doc } = props;
+  const maskId = useId();
   const lines = useMemo(
     () =>
       doc.lines.map((line) => ({
@@ -51,7 +58,7 @@ export const TextLayer = forwardRef<
   return (
     <div
       ref={ref}
-      className="ocrlayer"
+      className={props.passive ? "ocrlayer ocrlayer--passive" : "ocrlayer"}
       style={{ width: doc.width, height: doc.height }}
       tabIndex={-1}
       onPointerDown={(e) => e.stopPropagation()}
@@ -69,6 +76,30 @@ export const TextLayer = forwardRef<
         props.onMenu(e.clientX, e.clientY);
       }}
     >
+      {(props.dim || (props.hits && props.hits.size > 0)) && (
+        <svg className="ocrdim" width={doc.width} height={doc.height} aria-hidden="true">
+          {props.dim && (
+            <>
+              <defs>
+                <mask id={maskId}>
+                  <rect width="100%" height="100%" fill="#fff" />
+                  {doc.lines.map((l) => (
+                    <rect key={l.index} x={l.x - 4} y={l.y - 3} width={l.w + 8} height={l.h + 6} rx={4} fill="#000" />
+                  ))}
+                </mask>
+              </defs>
+              <rect width="100%" height="100%" className="ocrdim__shade" mask={`url(#${maskId})`} />
+              {doc.lines.map((l) => (
+                <rect key={l.index} className="ocrdim__text" x={l.x - 4} y={l.y - 3} width={l.w + 8} height={l.h + 6} rx={4} />
+              ))}
+            </>
+          )}
+          {props.hits &&
+            doc.words
+              .filter((w) => props.hits?.has(w.n))
+              .map((w) => <rect key={w.n} className="ocrdim__hit" x={w.x - 2} y={w.y - 1} width={w.w + 4} height={w.h + 2} rx={3} />)}
+        </svg>
+      )}
       {lines.map((l) => (
         <div key={l.index} className="ocrline" dir={l.rtl ? "rtl" : "ltr"}>
           {l.words.map(({ w, fontSize, scale }) => (

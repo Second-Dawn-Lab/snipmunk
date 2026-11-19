@@ -186,3 +186,11 @@
   justify-content: flex-end;
   max-width: 420px;
 }
+
+.wordlist { display: grid; gap: 8px; min-width: 260px; }
+.wordlist__add { display: flex; gap: 6px; }
+.wordlist__input { flex: 1; min-width: 0; padding: 5px 8px; border-radius: 6px; border: 1px solid var(--dw-border, rgba(128,128,128,.4)); background: transparent; color: inherit; font: inherit; }
+.wordlist__none { margin: 0; opacity: 0.7; font-size: 12px; }
+.wordlist__list { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.wordlist__list li { display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px 2px 10px; border-radius: 12px; background: var(--dw-hover, rgba(128,128,128,.18)); }
+.wordlist__remove { background: none; border: 0; color: inherit; cursor: pointer; padding: 2px; display: inline-flex; }

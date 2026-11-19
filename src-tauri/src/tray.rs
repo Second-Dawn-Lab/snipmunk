@@ -125,6 +125,50 @@ pub fn show_main(app: &AppHandle) {
     }
 }
 
+/// In a development build the settings window loads its page from the Vite server when it is opened (the main window loaded
+/// its page once, at start). When that server is gone (stopped, or another dev session took its port) the web view shows
+/// "localhost refused to connect"; a short page that says what is wrong is shown instead.
+#[cfg(debug_assertions)]
+fn settings_url(app: &AppHandle) -> tauri::WebviewUrl {
+    use std::net::{TcpStream, ToSocketAddrs};
+    use std::time::Duration;
+    if let Some(dev) = app.config().build.dev_url.clone() {
+        let host = dev.host_str().unwrap_or("localhost").to_string();
+        let port = dev.port_or_known_default().unwrap_or(80);
+        let up = (host.as_str(), port)
+            .to_socket_addrs()
+            .map(|mut a| {
+                a.any(|addr| TcpStream::connect_timeout(&addr, Duration::from_millis(400)).is_ok())
+            })
+            .unwrap_or(false);
+        if !up {
+            let html = format!(
+                "<body style='font-family:Segoe UI,sans-serif;padding:32px'><h2>The dev server is not running</h2><p>Nothing answers at {host}:{port}, so the settings page cannot load. Close Snipmunk and start run-snipmunk.bat again (it starts the Vite server on port {port}).</p></body>"
+            );
+            let encoded: String = html
+                .chars()
+                .flat_map(|c| match c {
+                    ' ' => "%20".chars().collect::<Vec<_>>(),
+                    '#' => "%23".chars().collect(),
+                    '%' => "%25".chars().collect(),
+                    '<' => "%3C".chars().collect(),
+                    '>' => "%3E".chars().collect(),
+                    other => vec![other],
+                })
+                .collect();
+            if let Ok(url) = format!("data:text/html,{encoded}").parse() {
+                return tauri::WebviewUrl::External(url);
+            }
+        }
+    }
+    tauri::WebviewUrl::default()
+}
+
+#[cfg(not(debug_assertions))]
+fn settings_url(_: &AppHandle) -> tauri::WebviewUrl {
+    tauri::WebviewUrl::default()
+}
+
 /// Open (or focus) the settings window.
 ///
 /// The window is built on a separate thread: building a window from the main thread
@@ -139,15 +183,14 @@ pub fn open_settings_window(app: &AppHandle) {
             let _ = w.set_focus();
             return;
         }
-        let built =
-            tauri::WebviewWindowBuilder::new(&app, "settings", tauri::WebviewUrl::default())
-                .title("Snipmunk Settings")
-                .inner_size(880.0, 640.0)
-                .min_inner_size(700.0, 460.0)
-                .decorations(false)
-                .shadow(true)
-                .visible(false)
-                .build();
+        let built = tauri::WebviewWindowBuilder::new(&app, "settings", settings_url(&app))
+            .title("Snipmunk Settings")
+            .inner_size(880.0, 640.0)
+            .min_inner_size(700.0, 460.0)
+            .decorations(false)
+            .shadow(true)
+            .visible(false)
+            .build();
         match built {
             Ok(w) => {
                 crate::webview::disable_browser_accelerators(&w);

@@ -67,6 +67,23 @@ pub struct Settings {
     /// Quick redact: cover e-mail addresses / phone numbers.
     pub quick_redact_email: bool,
     pub quick_redact_phone: bool,
+    /// Quick redact: credit card numbers, IBANs, passwords and secrets, the user's own words.
+    pub quick_redact_card: bool,
+    pub quick_redact_iban: bool,
+    pub quick_redact_secret: bool,
+    pub quick_redact_custom: bool,
+    /// The user's own words to cover (Settings, Text recognition).
+    pub quick_redact_words: Vec<String>,
+    /// A custom word must be a whole word.
+    pub quick_redact_whole_word: bool,
+    /// Save: "png" | "jpeg" | "webp" | "bmp" | "zip"
+    pub save_format: String,
+    /// File names: "capture" | "group" | "dateTime"
+    pub save_naming: String,
+    /// JPEG / WebP quality, 10 to 100.
+    pub save_quality: u32,
+    /// The folder the last save went to (when no export folder is set).
+    pub last_save_folder: String,
 }
 
 /// The interface languages (the language setting may also be "system").
@@ -111,8 +128,30 @@ impl Default for Settings {
             ocr_languages: "auto".into(),
             quick_redact_email: true,
             quick_redact_phone: true,
+            quick_redact_card: true,
+            quick_redact_iban: true,
+            quick_redact_secret: true,
+            quick_redact_custom: true,
+            quick_redact_words: Vec::new(),
+            quick_redact_whole_word: true,
+            save_format: "png".into(),
+            save_naming: "capture".into(),
+            save_quality: 90,
+            last_save_folder: String::new(),
         }
     }
+}
+
+/// Custom words: trimmed, not empty, not longer than 100 characters, no duplicates (case-insensitive), at most 200.
+fn clean_words(words: Vec<String>) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    words
+        .into_iter()
+        .map(|w| w.trim().to_string())
+        .filter(|w| !w.is_empty() && w.chars().count() <= 100)
+        .filter(|w| seen.insert(w.to_lowercase()))
+        .take(200)
+        .collect()
 }
 
 /// Use `value` if it is one of `allowed`, else `fallback`.
@@ -195,6 +234,18 @@ impl Settings {
         }
         color_or(&mut self.last_text_color, false, &d.last_text_color);
         one_of(
+            &mut self.save_format,
+            &["png", "jpeg", "webp", "bmp", "zip"],
+            &d.save_format,
+        );
+        one_of(
+            &mut self.save_naming,
+            &["capture", "group", "dateTime"],
+            &d.save_naming,
+        );
+        self.save_quality = self.save_quality.clamp(10, 100);
+        self.quick_redact_words = clean_words(std::mem::take(&mut self.quick_redact_words));
+        one_of(
             &mut self.close_action,
             &["background", "quit", "ask"],
             &d.close_action,
@@ -243,6 +294,16 @@ mod tests {
         assert_eq!(s.retention_days, 30);
         assert_eq!(s.default_copy_mode, "separate");
         assert!(!s.clear_on_exit && !s.launch_at_login && !s.always_on_top);
+    }
+
+    #[test]
+    fn copying_each_capture_is_on_for_new_installs_and_fresh_files() {
+        assert!(Settings::default().auto_copy_to_clipboard);
+        // A settings file without the key (an older version, or an empty file) gets the default: on.
+        let fresh: Settings = serde_json::from_str("{}").unwrap();
+        assert!(fresh.auto_copy_to_clipboard);
+        let old: Settings = serde_json::from_str(r#"{"theme":"dark"}"#).unwrap();
+        assert!(old.auto_copy_to_clipboard);
     }
 
     #[test]
@@ -411,5 +472,44 @@ mod tests {
         assert!(s
             .merge(serde_json::json!({"retentionDays": "many"}))
             .is_err());
+    }
+
+    #[test]
+    fn the_phase_6_settings_are_checked() {
+        let mut s = Settings::default();
+        assert!(
+            s.quick_redact_card
+                && s.quick_redact_iban
+                && s.quick_redact_secret
+                && s.quick_redact_custom
+        );
+        assert_eq!(
+            (
+                s.save_format.as_str(),
+                s.save_naming.as_str(),
+                s.save_quality
+            ),
+            ("png", "capture", 90)
+        );
+        s.merge(serde_json::json!({
+            "saveFormat": "tiff", "saveNaming": "random", "saveQuality": 3,
+            "quickRedactWords": ["  Falcon ", "falcon", "", "Project X"]
+        }))
+        .unwrap();
+        assert_eq!(
+            (
+                s.save_format.as_str(),
+                s.save_naming.as_str(),
+                s.save_quality
+            ),
+            ("png", "capture", 10)
+        );
+        assert_eq!(
+            s.quick_redact_words,
+            vec!["Falcon".to_string(), "Project X".to_string()]
+        );
+        s.merge(serde_json::json!({"saveFormat": "zip", "saveQuality": 500}))
+            .unwrap();
+        assert_eq!((s.save_format.as_str(), s.save_quality), ("zip", 100));
     }
 }

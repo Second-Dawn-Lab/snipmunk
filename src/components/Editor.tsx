@@ -9,7 +9,8 @@ import { centred, clampPan, clampZoom, fitZoom, toPicture, toStage, zoomAt, type
 import { hasRedactions, planImageSync } from "../annotate/imageRevs";
 import { nextTarget, stepZoom, wheelAction, type ZoomTarget } from "../annotate/wheel";
 import { isEmpty } from "../ocr/layout";
-import { quickRects, redactionsFor } from "../ocr/quickRedact";
+import type { FindOptions } from "../ocr/pii";
+import { anythingChosen, quickRects, redactionsFor } from "../ocr/quickRedact";
 import { detectTable, toHtml, toTsv } from "../ocr/table";
 import { notify } from "../notify";
 import {
@@ -18,6 +19,12 @@ import {
 import type { Annotation, AnnotationDoc, PenAnnotation, HighlighterAnnotation, TextAnnotation } from "../annotate/schema";
 import { straighten } from "../annotate/strokes";
 import { fitted, resizeText } from "../annotate/textLayout";
+import { brushCursor, eraserCursor, resizeCursor, rotateCursor, thinCrosshairCursor } from "../annotate/cursors";
+import { recognize } from "../annotate/shapeRecognizer";
+import { snappedAnnotation } from "../annotate/snapShape";
+import { commitAll, made as madeLive, restrict, selectable, unlocked, type LockState } from "../annotate/lock";
+import { created as createdBox, textStep, type TextState } from "../annotate/textTool";
+import { emojiImageSize, imagePatch, imageValues, toScreenPx } from "../annotate/screenSize";
 import { isBoxShape, newEmoji, newHighlighter, newLine, newPen, newShape, newText, pickValues, restyle, styleKey, type ToolValues } from "../annotate/styles";
 import { toolForKey, undoKeyFor } from "../annotate/tools";
 import { apply, cropFromFrame, docGeometry, flippedOnScreen, frameFromCrop, invert, turned, uncroppedGeometry } from "../annotate/transform";
@@ -27,14 +34,20 @@ import type { Settings } from "../settings/defaults";
 import { THUMB_BOUNDS } from "./thumbBounds";
 import type { ZoomMode } from "./Preview";
 import { ContextMenu, type MenuEntry } from "./ContextMenu";
+import { matchingWords } from "../search";
+import { caretIndexAt } from "./caretAt";
 import { TextLayer, selectedText } from "./TextLayer";
 import { useOcr } from "./useOcr";
 import { TEXT_SIZE_RANGE } from "./palettes";
 import { Button, Dialog } from "@seconddawn/ui";
 
+const FLASH_MS = 700;
+/** How long the pen must rest before its stroke snaps to a shape. */
+const HOLD_MS = 1000;
+
 type Interaction =
   | { kind: "pan"; sx: number; sy: number; ox: number; oy: number }
-  | { kind: "stroke"; ann: PenAnnotation | HighlighterAnnotation; raw: number[] }
+  | { kind: "stroke"; ann: PenAnnotation | HighlighterAnnotation; raw: number[]; snapped?: Annotation }
   | { kind: "shape"; start: Pt; ann: Annotation | null }
   | { kind: "erase"; ids: Set<string> }
   | { kind: "move"; ids: string[]; start: Pt; base: AnnotationDoc; moved: boolean }
@@ -49,6 +62,8 @@ const sameSet = (a: ReadonlySet<string>, b: ReadonlySet<string>) => a.size === b
 interface TextEdit {
   id: string;
   isNew: boolean;
+  /** Where the user clicked into an existing text (client pixels): the caret goes there. */
+  click?: { x: number; y: number };
 }
 
 function makeCanvas(w: number, h: number): WorkCanvas {
@@ -87,6 +102,8 @@ export function Editor(props: {
   settings: Settings;
   onPatch?: (change: Partial<Settings>) => void;
   onError: (e: unknown) => void;
+  /** The gallery search: its matching words are marked until the search is cleared. */
+  searchQuery?: string;
 }) {
   const { t } = useT();
   const tRef = useRef(t);
@@ -102,6 +119,25 @@ export function Editor(props: {
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [bakeAsk, setBakeAsk] = useState(false);
   const jobs = useRef<Promise<void>>(Promise.resolve());
+  const holdTimer = useRef(0);
+  /** Replace the stroke being drawn by the clean shape it was meant to be, with a short flash. */
+  const snapStroke = (ia: Extract<Interaction, { kind: "stroke" }>) => {
+    if (interaction.current !== ia || ia.snapped) return;
+    const zoom = viewRef.current.zoom;
+    const snap = recognize(ia.raw, 20 / zoom);
+    if (!snap) return;
+    const ann = ia.ann;
+    const shape = snappedAnnotation(snap, ann);
+    ia.snapped = shape;
+    draft.current = shape;
+    const b = boundsOf(shape);
+    flash.current = { rects: [{ x: b.x, y: b.y, w: b.w, h: b.h }], start: performance.now() };
+    requestDraw();
+  };
+  /** What the Text tool is doing (see src/annotate/textTool.ts). */
+  const textSM = useRef<TextState>({ kind: "idle" });
+  /** The areas that were just burned in flash for a moment (picture pixels). */
+  const flash = useRef<{ rects: { x: number; y: number; w: number; h: number }[]; start: number } | null>(null);
 
   const history = useMemo(() => historyOf(capture.id, capture.annotations), [capture.id]);
   const docRef = useRef<AnnotationDoc>(history.current.doc);
@@ -117,7 +153,12 @@ export function Editor(props: {
   const eraseIds = useRef<Set<string>>(new Set());
   const frame = useRef<{ x: number; y: number; w: number; h: number } | null>(null); // the crop frame while cropping
   const spaceDown = useRef(false);
-  const [cursor, setCursor] = useState("default");
+  const [cursor, setCursorState] = useState("default");
+  const cursorRef = useRef("default");
+  const setCursor = (c: string) => {
+    cursorRef.current = c;
+    setCursorState(c);
+  };
   const [textEdit, setTextEdit] = useState<TextEdit | null>(null);
   const values = useRef<ToolValues>(pickValues(settings));
   values.current = pickValues(settings);
@@ -182,9 +223,14 @@ export function Editor(props: {
     });
   }, []);
 
+  /** Which marks can still be edited (see src/annotate/lock.ts). */
+  const lockRef = useRef<LockState>(unlocked);
+  /** The Text tool and the emoji tool hand over to Select with their new mark still editable. */
+  const keepLiveOnToolChange = useRef(false);
   const setSelection = useCallback(
     (ids: Iterable<string>) => {
-      const next = new Set(ids);
+      // A selection can only hold marks that were just made; committed marks cannot be selected.
+      const next = new Set(restrict(lockRef.current, ids));
       if (sameSet(next, selRef.current)) return;
       selRef.current = next;
       setSelectionState([...next]);
@@ -322,6 +368,21 @@ export function Editor(props: {
     ctx.transform(g.matrix[0], g.matrix[1], g.matrix[2], g.matrix[3], g.matrix[4], g.matrix[5]);
     const px = 1 / v.zoom;
     overlays(ctx, d, px);
+    const fl = flash.current;
+    if (fl) {
+      const age = (performance.now() - fl.start) / FLASH_MS;
+      if (age >= 1) flash.current = null;
+      else {
+        ctx.fillStyle = `rgba(255, 214, 0, ${(0.55 * (1 - age)).toFixed(3)})`;
+        ctx.strokeStyle = `rgba(255, 255, 255, ${(1 - age).toFixed(3)})`;
+        ctx.lineWidth = 2 * px;
+        for (const r of fl.rects) {
+          ctx.fillRect(r.x, r.y, r.w, r.h);
+          ctx.strokeRect(r.x, r.y, r.w, r.h);
+        }
+        requestAnimationFrame(() => requestDraw());
+      }
+    }
     ctx.restore();
 
     if (cropping && frame.current) drawCropOverlay(ctx, frame.current, g.width, g.height, px);
@@ -469,6 +530,17 @@ export function Editor(props: {
   );
 
   // --- the tools: what the toolbar asks for ---------------------------------------------------------------------------------------
+  /** A mark was just made: it is the one that can be edited now, the earlier ones are committed. */
+  const makeLive = (ids: string[]) => {
+    lockRef.current = madeLive(ids);
+    setSelection(ids);
+  };
+  /** Commit the live marks: they stay, but cannot be selected or edited any more. */
+  const commitLive = () => {
+    if (lockRef.current.live.size === 0 && selRef.current.size === 0) return;
+    lockRef.current = commitAll(lockRef.current);
+    setSelection([]);
+  };
   const selectedItems = () => docRef.current.items.filter((a) => selRef.current.has(a.id));
 
   /** Jobs that touch the stored picture run one after the other (a permanent redaction, and undoing it). */
@@ -518,6 +590,7 @@ export function Editor(props: {
             if (!bytes) throw new Error("The earlier picture is no longer in memory.");
             await putImage(bytes);
             revs.setDisk(plan.rev);
+            if (dir === "undo") notify(tRef.current("bake.restored"));
           } catch (e) {
             // The picture could not be brought back: stay where we were.
             if (dir === "undo") history.redo();
@@ -528,7 +601,9 @@ export function Editor(props: {
         const next = entry.doc;
         docRef.current = next;
         setDocState(next);
-        setSelection([...selRef.current].filter((id) => next.items.some((a) => a.id === id)));
+        // Undo and redo commit whatever was being edited.
+        lockRef.current = commitAll(lockRef.current);
+        setSelection([]);
         void saveAnnotations(capture.id, next, props.onError);
         scheduleThumbnail(capture, imgRef.current, next, props.onError);
         syncStore();
@@ -560,12 +635,14 @@ export function Editor(props: {
         await putImage(bytes);
         revs.setDisk(rev);
         const ids = new Set(redacts.map((a) => a.id));
+        flash.current = { rects: redacts.map((a) => ({ x: a.x, y: a.y, w: a.w, h: a.h })), start: performance.now() };
+        requestDraw();
         const now = docRef.current;
         setSelection([...selRef.current].filter((id) => !ids.has(id)));
         commit({ ...now, items: now.items.filter((a) => !ids.has(a.id)) });
-        notify(tRef.current("bake.done"));
+        notify(tRef.current("bake.doneCount", { count: redacts.length }));
       }),
-    [enqueue, putImage, capture, props.session, commit, setSelection],
+    [enqueue, putImage, capture, props.session, commit, setSelection, requestDraw],
   );
 
   /** The picture the text is read from: crop, rotation and flip applied, redactions burned in, no other marks. */
@@ -587,7 +664,7 @@ export function Editor(props: {
     doc,
     docRef,
     languages: settings.ocrLanguages,
-    active: ui.textMode,
+    active: ui.textMode || !!props.searchQuery,
     render: renderForOcr,
     onError: (message) => notify(tRef.current("ocr.failed", { message }), true),
   });
@@ -595,7 +672,13 @@ export function Editor(props: {
   useEffect(() => {
     editorStore.set({ hasText: !!ocr && !isEmpty(ocr), hasTable: !!ocr && detectTable(ocr) !== null });
   }, [ocr]);
-  useLayoutEffect(() => placeLayer(), [ocr, ui.textMode]);
+
+  const searchHits = useMemo(() => {
+    if (!props.searchQuery || !ocr) return undefined;
+    const hits = matchingWords(ocr, props.searchQuery);
+    return hits.size > 0 ? hits : undefined;
+  }, [props.searchQuery, ocr]);
+  useLayoutEffect(() => placeLayer(), [ocr, ui.textMode, searchHits]);
 
   const enterCrop = useCallback(() => {
     const d = docRef.current;
@@ -681,15 +764,15 @@ export function Editor(props: {
           notify(tRef.current("ocr.tableCopied"));
         })().catch(props.onError);
       },
-      quickRedact: (options: { email: boolean; phone: boolean }) => {
+      quickRedact: (options: FindOptions) => {
         void (async () => {
-          if (!options.email && !options.phone) return;
+          if (!anythingChosen(options)) return;
           const o = await ensure();
           if (!o) return;
           const found = quickRects(o, options);
           const d = docRef.current;
           const marks = redactionsFor(found.rects, docGeometry(d, W, H).matrix, { width: W, height: H });
-          if (marks.length === 0) return notify(tRef.current(isEmpty(o) ? "ocr.none" : "ocr.nothingToRedact"));
+          if (marks.length === 0) return notify(tRef.current(isEmpty(o) ? "ocr.none" : "ocr.nothingFound"));
           commit({ ...d, items: [...d.items, ...marks] });
           notify(tRef.current("ocr.redacted", { count: marks.length }));
         })().catch(props.onError);
@@ -710,7 +793,7 @@ export function Editor(props: {
         const d = docRef.current;
         const items = d.items.map((a) => {
           if (!selRef.current.has(a.id)) return a;
-          const next = restyle(a, patch);
+          const next = restyle(a, imagePatch(patch, viewRef.current.zoom));
           // A text box is measured again when its size, label or colour changed.
           return next.type === "text" && next !== a ? measuredText(next) : next;
         });
@@ -730,23 +813,35 @@ export function Editor(props: {
   useEffect(() => {
     if (ui.tool === "crop" && !frame.current && img) enterCrop();
     if (ui.tool !== "crop" && frame.current) leaveCrop();
-    if (ui.tool !== "select") setSelection([]);
+    // Changing the tool commits the live marks (except the hand-over of the Text and emoji tools to Select).
+    if (keepLiveOnToolChange.current) keepLiveOnToolChange.current = false;
+    else commitLive();
     if (ui.tool !== "text") endText(true);
     hover.current = null;
-    setCursor(ui.tool === "select" ? "default" : "crosshair");
+    setCursor(cursorFor(null));
   }, [ui.tool, img]);
 
   // --- text ---------------------------------------------------------------------------------------------------------------------------
-  const startText = (id: string, isNew: boolean) => setTextEdit({ id, isNew });
+  const startText = (id: string, isNew: boolean, click?: { x: number; y: number }) => setTextEdit({ id, isNew, click });
+  const lastDown = useRef<{ x: number; y: number } | null>(null);
 
   /** Finish the text box: keep the text (measured), or remove the mark when it is empty. */
   function endText(commitIt: boolean) {
     const te = textEditRef.current;
     if (!te) return;
+    // One text per activation of the Text tool: when the box is finished the tool goes back to Select, with the box selected.
+    const backToSelect = latest.current.ui.tool === "text";
+    const finishTool = (keep: boolean) => {
+      if (!backToSelect) return;
+      if (keep) makeLive([te.id]);
+      keepLiveOnToolChange.current = keep;
+      editorStore.setTool("select");
+    };
+    if (textSM.current.kind === "editing") textSM.current = { kind: "idle" };
     const area = textArea.current;
     textEditRef.current = null;
     setTextEdit(null);
-    if (!commitIt) return;
+    if (!commitIt) return finishTool(false);
     const d = docRef.current;
     const text = area?.value ?? "";
     const existing = d.items.find((a) => a.id === te.id) as TextAnnotation | undefined;
@@ -761,11 +856,11 @@ export function Editor(props: {
           requestDraw();
         } else commit({ ...d, items });
       }
-      return;
+      return finishTool(false);
     }
-    if (text === existing.text && !te.isNew) return;
+    if (text === existing.text && !te.isNew) return finishTool(true);
     commit({ ...d, items: d.items.map((a) => (a.id === te.id ? measuredText({ ...existing, text }) : a)) });
-    setSelection([te.id]);
+    finishTool(true);
   }
 
   const textEditRef = useRef<TextEdit | null>(null);
@@ -780,18 +875,73 @@ export function Editor(props: {
       a.style.height = "auto";
       a.style.height = `${a.scrollHeight}px`;
       a.focus();
+      // The caret goes where the user clicked into an existing text (at the end for a new one).
+      const at = textEdit.click ? caretIndexAt(a, textEdit.click.x, textEdit.click.y) : a.value.length;
+      a.setSelectionRange(at, at);
     });
   }, [textEdit]);
 
   // --- pointer -------------------------------------------------------------------------------------------------------------------------
   const tolerance = () => 6 / viewRef.current.zoom;
 
-  const onPointerDown = (e: React.PointerEvent) => {
-    stage.current?.focus({ preventScroll: true });
-    if (!img || textEditRef.current) {
-      if (textEditRef.current) endText(true);
-      if (!img) return;
+  /** The marks made last that may be moved by pressing their body: not a freehand stroke, which the pen draws next to. */
+  const snappedId = useRef<string | null>(null);
+  const movableLive = (a: Annotation) => (a.type !== "pen" && a.type !== "highlighter") || a.id === snappedId.current;
+  /** Is the point on the body or the border of the mark that was just made (also inside an outline without fill)? */
+  const onLiveBody = (a: Annotation, p: Pt) => {
+    const tol = tolerance();
+    if (hitTest(a, p, tol)) return true;
+    const b = boundsOf(a);
+    const r = "rotation" in a && typeof a.rotation === "number" ? a.rotation : 0;
+    if (r === 0) return p.x >= b.x - tol && p.x <= b.x + b.w + tol && p.y >= b.y - tol && p.y <= b.y + b.h + tol;
+    return false;
+  };
+
+  /** The cursor for a tool (and for a point on the picture: the handles and body of the mark that was just made). */
+  const cursorFor = (p: Pt | null): string => {
+    const tool = latest.current.ui.tool;
+    if (spaceDown.current) return "grab";
+    if (p && !frame.current && tool !== "eraser") {
+      const live = docRef.current.items.filter((a) => selRef.current.has(a.id));
+      if (live.length === 1) {
+        const a = live[0];
+        const h = handleAt(handlesOf(a, 26 / viewRef.current.zoom), p, 10 / viewRef.current.zoom);
+        if (h) {
+          if (h.kind === "rotate") return rotateCursor();
+          return resizeCursor(h.kind, "rotation" in a && typeof a.rotation === "number" ? a.rotation : 0, docRef.current.rotation);
+        }
+        if (tool !== "text" && movableLive(a) && onLiveBody(a, p)) return "move";
+      }
     }
+    const v = values.current;
+    switch (tool) {
+      case "select":
+        return "default";
+      case "pen":
+        return brushCursor(v.lastPenColor, v.lastPenSize);
+      case "highlighter":
+        return brushCursor(v.lastHighlighterColor, v.lastHighlighterSize);
+      case "eraser":
+        return eraserCursor();
+      case "text":
+        return "text";
+      default:
+        return thinCrosshairCursor();
+    }
+  };
+
+  const onPointerDown = (e: React.PointerEvent) => {
+    // A press inside the box being typed in belongs to the text field (the caret moves; the box neither moves nor ends).
+    if (textArea.current && e.target === textArea.current) return;
+    // Presses on the context menu belong to the menu (the stage would capture the pointer and the menu items never get their click).
+    if ((e.target as HTMLElement).closest?.(".ctxmenu")) return;
+    lastDown.current = { x: e.clientX, y: e.clientY };
+    stage.current?.focus({ preventScroll: true });
+    const wasTyping = !!textEditRef.current;
+    if (wasTyping) endText(true);
+    if (!img) return;
+    // A press that finishes a text box with the Text tool does nothing else (no second box).
+    if (wasTyping && latest.current.ui.tool === "text") return;
     const s = stagePoint(e);
     stage.current?.setPointerCapture(e.pointerId);
     // Pan: middle button, or Space held.
@@ -805,7 +955,8 @@ export function Editor(props: {
     const p = toImage(s.x, s.y);
     const tool = latest.current.ui.tool;
     const d = docRef.current;
-    const v = values.current;
+    // The popovers show sizes as they look on the screen; the mark gets the picture pixels they come to at this zoom.
+    const v = imageValues(values.current, viewRef.current.zoom);
 
     if (frame.current) {
       const out = toPicture(viewRef.current, s.x, s.y);
@@ -814,33 +965,32 @@ export function Editor(props: {
       return;
     }
 
-    if (tool === "select") {
-      const sel = d.items.filter((a) => selRef.current.has(a.id));
-      if (sel.length === 1) {
-        const h = handleAt(handlesOf(sel[0], 26 / viewRef.current.zoom), p, 10 / viewRef.current.zoom);
-        if (h) {
-          interaction.current = { kind: "handle", id: sel[0].id, handle: h.kind, base: d, moved: false };
-          return;
-        }
+    // The mark that was just made (if any) can be resized or rotated by its handles, in any tool.
+    const liveSel = d.items.filter((a) => selRef.current.has(a.id));
+    if (liveSel.length === 1 && tool !== "eraser" && tool !== "crop") {
+      const h = handleAt(handlesOf(liveSel[0], 26 / viewRef.current.zoom), p, 10 / viewRef.current.zoom);
+      if (h) {
+        interaction.current = { kind: "handle", id: liveSel[0].id, handle: h.kind, base: d, moved: false };
+        return;
       }
-      const hit = topmostAt(d.items, p, tolerance());
-      if (hit) {
-        if (e.ctrlKey || e.metaKey || e.shiftKey) {
-          const next = new Set(selRef.current);
-          if (!next.delete(hit)) next.add(hit);
-          setSelection(next);
-          return;
-        }
-        if (!selRef.current.has(hit)) setSelection([hit]);
-        interaction.current = { kind: "move", ids: [...selRef.current], start: p, base: d, moved: false };
-        setCursor("move");
-      } else {
-        const add = e.ctrlKey || e.metaKey || e.shiftKey;
-        if (!add) setSelection([]);
-        interaction.current = { kind: "marquee", start: p, add, before: [...selRef.current] };
-      }
+    }
+    // Pressing the body or the border of the mark that was just made moves it, with any tool.
+    if (liveSel.length === 1 && tool !== "eraser" && tool !== "crop" && tool !== "text" && movableLive(liveSel[0]) && onLiveBody(liveSel[0], p)) {
+      interaction.current = { kind: "move", ids: [liveSel[0].id], start: p, base: d, moved: false };
+      setCursor("move");
       return;
     }
+    if (tool === "select") {
+      // The Select tool is the neutral pointer: it moves the mark that was just made, and a press anywhere else commits it.
+      const hit = topmostAt(selectable(lockRef.current, d.items), p, tolerance());
+      if (hit) {
+        interaction.current = { kind: "move", ids: [...selRef.current], start: p, base: d, moved: false };
+        setCursor("move");
+      } else commitLive();
+      return;
+    }
+    // Drawing with another tool commits the mark that was just made (unless the press is on that mark's handle, above).
+    if (tool !== "text" && tool !== "eraser") commitLive();
     if (tool === "pen" || tool === "highlighter") {
       const pressure = e.pointerType === "pen" ? e.pressure || 0.5 : 0.5;
       const pts = [p.x, p.y, pressure];
@@ -859,28 +1009,37 @@ export function Editor(props: {
     if (tool === "shapes") {
       const kind = latest.current.ui.shape;
       if (kind === "emoji") {
-        const size = Math.max(40, Math.round(Math.max(W, H) * 0.05));
+        const size = emojiImageSize(viewRef.current.zoom);
         const e2 = newEmoji(latest.current.ui.emoji, p, size);
         commit({ ...d, items: [...d.items, e2] });
+        makeLive([e2.id]);
+        keepLiveOnToolChange.current = true;
         editorStore.setTool("select");
-        setSelection([e2.id]);
         return;
       }
       interaction.current = { kind: "shape", start: p, ann: null };
       return;
     }
     if (tool === "text") {
-      const hit = topmostAt(d.items.filter((a) => a.type === "text"), p, tolerance());
-      if (hit) {
-        setSelection([hit]);
-        startText(hit, false);
-        return;
+      // The handles of the selected text work in the Text tool too (scale, wrap, rotate).
+      const hit = topmostAt(selectable(lockRef.current, d.items).filter((a) => a.type === "text"), p, tolerance());
+      const step = textStep(textSM.current, { type: "down", hit, inEditBox: false });
+      textSM.current = step.state;
+      for (const eff of step.effects) {
+        if (eff.type === "create") {
+          const a = newText(p, v);
+          // The new mark exists in the document (without a history step) while it is typed.
+          docRef.current = { ...d, items: [...d.items, a] };
+          setDocState(docRef.current);
+          makeLive([a.id]);
+          startText(a.id, true);
+          textSM.current = createdBox(textSM.current, a.id);
+        } else if (eff.type === "select") {
+          // Pressing a text selects it; a drag moves it, letting go without dragging edits it.
+          setSelection([eff.id]);
+          interaction.current = { kind: "move", ids: [eff.id], start: p, base: d, moved: false };
+        }
       }
-      const a = newText(p, v);
-      // The new mark exists in the document (without a history step) while it is typed.
-      docRef.current = { ...d, items: [...d.items, a] };
-      setDocState(docRef.current);
-      startText(a.id, true);
       return;
     }
     if (tool === "blur") {
@@ -900,6 +1059,10 @@ export function Editor(props: {
     const ia = interaction.current;
     const s = stagePoint(e);
     if (!ia) {
+      if (img) {
+        const c = cursorFor(toImage(s.x, s.y));
+        if (c !== cursorRef.current) setCursor(c);
+      }
       if (latest.current.ui.tool === "eraser" && img) {
         const id = topmostAt(docRef.current.items, toImage(s.x, s.y), tolerance());
         if (id !== hover.current) {
@@ -920,6 +1083,7 @@ export function Editor(props: {
         return;
       }
       case "stroke": {
+        if (ia.snapped) return;
         const events = typeof e.nativeEvent.getCoalescedEvents === "function" ? e.nativeEvent.getCoalescedEvents() : [];
         const list = events.length > 0 ? events : [e.nativeEvent];
         for (const ev of list) {
@@ -932,13 +1096,16 @@ export function Editor(props: {
         const raw = ia.raw;
         ia.ann = { ...ia.ann, points: shift ? straighten([raw[0], raw[1], raw[2], ...raw.slice(-3)]) : raw.slice() };
         draft.current = ia.ann;
+        // Held still for about a second: the stroke may snap to a clean shape (see src/annotate/shapeRecognizer.ts).
+        window.clearTimeout(holdTimer.current);
+        holdTimer.current = window.setTimeout(() => snapStroke(ia), HOLD_MS);
         requestDraw();
         return;
       }
       case "shape": {
         const p = toImage(s.x, s.y);
         const kind = latest.current.ui.shape;
-        const v = values.current;
+        const v = imageValues(values.current, viewRef.current.zoom);
         if (isBoxShape(kind)) ia.ann = newShape(kind, dragRect(ia.start, p, shift), v);
         else {
           const [a, b] = dragLine(ia.start, p, shift);
@@ -1003,14 +1170,31 @@ export function Editor(props: {
   const finish = (cancel: boolean) => {
     const ia = interaction.current;
     interaction.current = null;
-    setCursor(latest.current.ui.tool === "select" ? "default" : "crosshair");
+    setCursor(cursorFor(null));
+    if (textSM.current.kind === "pressed") {
+      // The press on a text ended: without a drag the text is edited.
+      const moved = ia?.kind === "move" && ia.moved;
+      const step = textStep(textSM.current, { type: "up", moved: cancel || moved });
+      textSM.current = step.state;
+      if (!cancel) {
+        // The move (if any) is committed below; editing starts after it.
+        window.setTimeout(() => {
+          for (const eff of step.effects) if (eff.type === "edit") startText(eff.id, false, lastDown.current ?? undefined);
+        }, 0);
+      }
+    }
     if (!ia) return;
     const d = docRef.current;
     switch (ia.kind) {
       case "stroke": {
         draft.current = null;
+        window.clearTimeout(holdTimer.current);
         if (cancel) break;
-        commit({ ...d, items: [...d.items, ia.ann] });
+        // A stroke that was held still became a clean shape; that one is kept.
+        const made = ia.snapped ?? ia.ann;
+        snappedId.current = ia.snapped ? made.id : null;
+        commit({ ...d, items: [...d.items, made] });
+        makeLive([made.id]);
         break;
       }
       case "shape": {
@@ -1018,7 +1202,10 @@ export function Editor(props: {
         const a = ia.ann;
         if (!cancel && a) {
           const b = boundsOf(a);
-          if (Math.max(b.w, b.h) * viewRef.current.zoom >= 4) commit({ ...d, items: [...d.items, a] });
+          if (Math.max(b.w, b.h) * viewRef.current.zoom >= 4) {
+            commit({ ...d, items: [...d.items, a] });
+            makeLive([a.id]);
+          }
         }
         break;
       }
@@ -1038,7 +1225,7 @@ export function Editor(props: {
           // The size popover of the text tool shows the size the text has now.
           const grown = ia.kind === "handle" ? next.items.find((a) => a.id === ia.id) : undefined;
           if (grown?.type === "text") {
-            const size = Math.min(TEXT_SIZE_RANGE.max, Math.max(TEXT_SIZE_RANGE.min, Math.round(grown.fontSize)));
+            const size = Math.min(TEXT_SIZE_RANGE.max, Math.max(TEXT_SIZE_RANGE.min, Math.round(toScreenPx(grown.fontSize, viewRef.current.zoom))));
             if (size !== latest.current.props.settings.lastTextSize) latest.current.props.onPatch?.({ lastTextSize: size });
           }
         }
@@ -1051,6 +1238,7 @@ export function Editor(props: {
         if (!cancel && r && Math.min(r.w, r.h) * viewRef.current.zoom >= 4) {
           const item = { type: "redact" as const, id: `r${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`, ...r, mode: latest.current.ui.redactMode };
           commit({ ...d, items: [...d.items, item] });
+          makeLive([item.id]);
         }
         break;
       }
@@ -1111,8 +1299,13 @@ export function Editor(props: {
       e.stopPropagation();
       if (interaction.current) finish(true);
       else if (frame.current) leaveCrop();
-      else if (selRef.current.size > 0) setSelection([]);
+      else if (selRef.current.size > 0 || lockRef.current.live.size > 0) commitLive();
       else editorStore.setTool("select");
+      return;
+    }
+    if (e.key === "Enter" && !frame.current && lockRef.current.live.size > 0) {
+      e.preventDefault();
+      commitLive();
       return;
     }
     if (e.key === "Enter" && frame.current) {
@@ -1154,7 +1347,7 @@ export function Editor(props: {
     const up = (e: KeyboardEvent) => {
       if (e.key === " ") {
         spaceDown.current = false;
-        setCursor(latest.current.ui.tool === "select" ? "default" : "crosshair");
+        setCursor(cursorFor(null));
       }
     };
     // Ctrl+Z / Ctrl+Y work wherever the focus is, except while typing in a box.
@@ -1278,10 +1471,42 @@ export function Editor(props: {
     };
   })();
 
+  /** Redact just the selected text (one undo step); the list of words stays as it is. */
+  function redactSelection() {
+    const o = ocr;
+    const layer = layerRef.current;
+    if (!o || !layer) return;
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed) return;
+    const touched: number[] = [];
+    layer.querySelectorAll<HTMLElement>("[data-n]").forEach((el) => {
+      if (sel.containsNode(el, true)) touched.push(Number(el.dataset.n));
+    });
+    const rects = touched.map((n) => o.words[n]).filter(Boolean).map((w) => ({ x: w.x - 2, y: w.y - 2, w: w.w + 4, h: w.h + 4 }));
+    if (rects.length === 0) return;
+    const d = docRef.current;
+    const marks = redactionsFor(rects, docGeometry(d, W, H).matrix, { width: W, height: H });
+    if (marks.length === 0) return;
+    commit({ ...d, items: [...d.items, ...marks] });
+    notify(tRef.current("ocr.redacted", { count: marks.length }));
+  }
+
+  /** Add the selected text to the words Quick redact always covers (Settings, Text recognition). */
+  function alwaysRedact() {
+    const text = (layerRef.current && ocr ? selectedText(layerRef.current, ocr) : "").replace(/\s+/g, " ").trim();
+    if (!text) return;
+    const words = props.settings.quickRedactWords;
+    if (!words.some((w) => w.toLowerCase() === text.toLowerCase())) props.onPatch?.({ quickRedactWords: [...words, text], quickRedactCustom: true });
+    notify(t("ocr.wordAdded", { word: text }));
+  }
+
   const menuEntries: MenuEntry[] = [
     { kind: "item", id: "copy", label: t("ocr.menuCopy"), icon: "copytext", onSelect: copySelection },
     { kind: "item", id: "all", label: t("ocr.copyAll"), icon: "copytext", onSelect: () => actions.copyAllText() },
     { kind: "item", id: "sel", label: t("ocr.selectAll"), onSelect: selectAllText },
+    { kind: "separator", id: "sepAlways" },
+    { kind: "item", id: "only", label: t("ocr.menuRedactOnly"), icon: "redact", onSelect: redactSelection },
+    { kind: "item", id: "always", label: t("ocr.menuAlways"), icon: "redact", onSelect: alwaysRedact },
   ];
 
   const label = capture.name;
@@ -1302,20 +1527,29 @@ export function Editor(props: {
         if (latest.current.ui.tool !== "select") return;
         const s = stagePoint(e);
         const p = toImage(s.x, s.y);
-        const hit = topmostAt(docRef.current.items.filter((a) => a.type === "text"), p, tolerance());
+        const hit = topmostAt(selectable(lockRef.current, docRef.current.items).filter((a) => a.type === "text"), p, tolerance());
         if (hit) {
           setSelection([hit]);
-          startText(hit, false);
+          startText(hit, false, { x: e.clientX, y: e.clientY });
         }
       }}
       onContextMenu={(e) => e.preventDefault()}
     >
       <canvas ref={canvas} className="editor__canvas" style={{ width: box.width, height: box.height }} />
-      {ui.textMode && ocr && !ui.cropping && (
-        <TextLayer ref={layerRef} doc={ocr} onCopy={() => notify(t("ocr.copied"))} onMenu={(x, y) => setMenu({ x, y })} />
+      {(ui.textMode || searchHits) && ocr && !ui.cropping && (
+        <TextLayer
+          ref={layerRef}
+          doc={ocr}
+          dim={ui.textMode}
+          hits={searchHits}
+          passive={!ui.textMode}
+          onCopy={() => notify(t("ocr.copied"))}
+          onMenu={(x, y) => setMenu({ x, y })}
+        />
       )}
       {editing && textBoxStyle && (
         <textarea
+          key={editing.id}
           ref={textArea}
           className="editor__text"
           style={textBoxStyle}

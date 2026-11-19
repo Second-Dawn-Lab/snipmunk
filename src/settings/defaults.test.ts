@@ -25,3 +25,10 @@ describe("defaultSettings", () => {
     expect(Object.keys(defaultSettings).sort()).toEqual(fields);
   });
 });
+
+describe("copy each capture to the clipboard", () => {
+  it("is on by default in the app and in the Rust defaults, for new installs and fresh settings files", () => {
+    expect(defaultSettings.autoCopyToClipboard).toBe(true);
+    expect(rust).toMatch(/auto_copy_to_clipboard: true,/);
+  });
+});

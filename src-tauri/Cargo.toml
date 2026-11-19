@@ -32,6 +32,13 @@ dawn-capture = { path = "../../dawn-core/crates/dawn-capture" }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "bmp", "gif"] }
 arboard = { version = "3", default-features = false, features = ["image-data"] }
 
+# Phase 6: drag captures out into other apps (native drag), the ZIP export (stored, no compression: PNGs are compressed
+# already) and the folder / file pickers (see below).
+drag = "2"
+zip = { version = "2", default-features = false }
+# The file and folder pickers (the same plugin Owl-L uses); only its Rust side is used.
+tauri-plugin-dialog = "2"
+
 [dev-dependencies]
 tempfile = "3"
 
@@ -40,6 +47,8 @@ tempfile = "3"
 [target.'cfg(windows)'.dependencies]
 webview2-com = "0.39"
 windows-core = "0.62"
+# The collections of the Windows share sheet (the version the windows crate uses).
+windows-collections = "0.2"
 
 # Snap Layouts for the custom title bar (see src/titlebar.rs): window hit testing needs Win32.
 [target.'cfg(windows)'.dependencies.windows]
@@ -52,6 +61,12 @@ features = [
   "Graphics_Imaging",
   "Media_Ocr",
   "Storage_Streams",
+  # Clipboard with several formats, the Windows share sheet.
+  "ApplicationModel_DataTransfer",
+  "Storage",
+  "Win32_System_DataExchange",
+  "Win32_System_Memory",
+  "Win32_System_Ole",
   "Win32_System_Com",
   "Win32_Foundation",
   "Win32_Globalization",

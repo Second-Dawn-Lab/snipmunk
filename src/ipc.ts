@@ -208,6 +208,29 @@ export const ipc = {
   copyText: (text: string) => call<void>("copy_text", { text }),
   copyTable: (html: string, text: string) => call<void>("copy_table", { html, text }),
   openOsSettings: (page: "language") => call<void>("open_os_settings", { page }),
+  /** The recognized text of every capture that has one (for the gallery search). */
+  ocrTexts: () => call<Record<string, string>>("ocr_texts"),
+  // copy, save, share (Phase 6): the page renders, the backend stages the files in its temp folder and hands them out
+  /** Empty the temp folder of a kind of export ("copy", "drag", "paint", "print", "share", "save"). */
+  exportBegin: (kind: ExportKind) => call<string>("export_begin", { kind }),
+  /** Stage one rendered picture; returns its path. `convert: "bmp"` turns a PNG into a BMP on white. */
+  exportStage: (kind: ExportKind, name: string, data: Blob, convert?: "bmp") => stageFile(kind, name, data, convert),
+  exportClipboard: (files: string[], html: string | null, image: string | null) =>
+    call<void>("export_clipboard", { files, html, image }),
+  clipboardFormats: () => call<string[]>("clipboard_formats"),
+  exportSave: (files: string[], names: string[], folder: string) => call<string[]>("export_save", { files, names, folder }),
+  exportZip: (files: string[], names: string[], folder: string, zipName: string) =>
+    call<string>("export_zip", { files, names, folder, zipName }),
+  exportOpenEditor: (path: string) => call<void>("export_open_editor", { path }),
+  exportShare: (files: string[]) => call<void>("export_share", { files }),
+  shareSupported: () => call<boolean>("share_supported"),
+  exportDrag: (files: string[], preview: string) => call<void>("export_drag", { files, preview }),
+  openFolder: (path: string) => call<void>("open_folder", { path }),
+  sessionImagesFolder: () => call<string>("session_images_folder"),
+  picturesFolder: () => call<string>("pictures_folder"),
+  pickFolder: (start?: string) => call<string | null>("pick_folder", { start: start ?? null }),
+  pickImages: () => call<string[]>("pick_images"),
+  readPickedFile: (path: string) => readPicked(path),
   /** Replace a capture's thumbnail with a PNG rendered by the editor (the picture with its annotations). */
   setCaptureThumbnail: (captureId: string, png: Blob) => setThumbnail(captureId, png),
   createGroup: (name?: string) => call<Session>("create_group", { name: name ?? null }),
@@ -244,6 +267,21 @@ async function importImage(groupId: string, file: File): Promise<Session> {
   return invoke<Session>("import_image", new Uint8Array(await file.arrayBuffer()), {
     headers: { "x-group-id": encodeURIComponent(groupId), "x-file-name": encodeURIComponent(file.name) },
   });
+}
+
+export type ExportKind = "copy" | "drag" | "paint" | "print" | "share" | "save";
+
+async function stageFile(kind: ExportKind, name: string, data: Blob, convert?: "bmp"): Promise<string> {
+  if (!isTauri) return `mock/${kind}/${name}`;
+  const headers: Record<string, string> = { "x-kind": kind, "x-name": encodeURIComponent(name) };
+  if (convert) headers["x-convert"] = convert;
+  return invoke<string>("export_stage", new Uint8Array(await data.arrayBuffer()), { headers });
+}
+
+async function readPicked(path: string): Promise<File> {
+  if (!isTauri) throw { code: "unsupported", message: "needs the Snipmunk app" };
+  const buf = await invoke<ArrayBuffer>("read_picked_file", { path });
+  return new File([buf], path.split(/[\\/]/).pop() ?? "image", { type: "" });
 }
 
 export interface OcrStatus {

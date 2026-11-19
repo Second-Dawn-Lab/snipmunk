@@ -28,7 +28,7 @@ describe("searchSettings", () => {
 
   it("finds settings by title and groups them by page", () => {
     const found = searchSettings("capture", en, "en");
-    expect(found.map((g) => g.tab)).toEqual(["capture", "sessions"]);
+    expect(found.map((g) => g.tab)).toEqual(["capture", "sessions", "ocr"]);
     const ids = found.flatMap((g) => g.entries.map((e) => e.id));
     expect(ids).toContain("captureHotkey");
     expect(ids).toContain("autoCopy");

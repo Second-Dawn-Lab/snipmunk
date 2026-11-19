@@ -8,6 +8,19 @@ import { MenuItem } from "./MenuItem";
 import { SubmenuItem } from "./SubmenuItem";
 import { Pop } from "./Pop";
 
+export interface ShareApi {
+  hasCapture: boolean;
+  busy: boolean;
+  canShare: boolean;
+  onPaint: () => void;
+  onSave: () => void;
+  onCopy: () => void;
+  onShare: () => void;
+  onOpenFile: () => void;
+  onOpenFolder: () => void;
+  onPrint: () => void;
+}
+
 export interface ZoomApi {
   percent: number;
   enabled: boolean;
@@ -40,14 +53,16 @@ export function TopBar(props: {
   /** Start a capture, optionally in this mode (picked from the mode menu). */
   onCapture: (mode?: CaptureMode) => void;
   zoom: ZoomApi;
+  /** What the buttons on the right do with the capture shown in the preview. */
+  share: ShareApi;
 }) {
   const { t, locale } = useT();
-  const { settings, zoom } = props;
+  const { settings, zoom, share } = props;
+  const off = !share.hasCapture || share.busy;
   const [modeOpen, setModeOpen] = useState(false);
   const [zoomOpen, setZoomOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
 
-  const soon = (text: string) => `${text} – ${t("soon.label")}`;
   const hotkey = hotkeyLabel(settings.captureHotkey, locale);
   const mode = MODES.find((m) => m.id === settings.captureMode) ?? MODES[0];
   const key = (k: string) => hotkeyLabel(k, locale);
@@ -150,15 +165,22 @@ export function TopBar(props: {
         <button
           type="button"
           className="editbtn"
-          aria-disabled="true"
-          title={soon(isWindows ? t("actions.editPaintTip") : t("actions.openEditorTip"))}
+          disabled={off}
+          onClick={share.onPaint}
+          title={isWindows ? t("actions.editPaintTip") : t("actions.openEditorTip")}
         >
           <AppIcon name="paint" size={17} />
           <span>{isWindows ? t("actions.editPaint") : t("actions.openEditor")}</span>
         </button>
-        <SoonIconButton icon="save" label={t("actions.save")} tip={soon(t("actions.saveTip"))} />
-        <SoonIconButton icon="copy" label={t("actions.copy")} tip={soon(t("actions.copyTip"))} />
-        <SoonIconButton icon="share" label={t("actions.share")} tip={soon(t("actions.shareTip"))} />
+        <ActionButton icon="save" label={t("actions.save")} tip={t("actions.saveTip")} disabled={off} onClick={share.onSave} />
+        <ActionButton icon="copy" label={t("actions.copy")} tip={t("actions.copyTip")} disabled={off} onClick={share.onCopy} />
+        <ActionButton
+          icon="share"
+          label={t("actions.share")}
+          tip={share.canShare ? t("actions.shareTip") : t("share.unsupported")}
+          disabled={off || !share.canShare}
+          onClick={share.onShare}
+        />
 
         <Pop
           open={zoomOpen}
@@ -203,9 +225,9 @@ export function TopBar(props: {
           <SubmenuItem label={t("menu.zoom")} icon="zoom">
             {zoomItems(() => setMoreOpen(false))}
           </SubmenuItem>
-          <MenuItem label={t("menu.openFile")} icon="openfile" hint={key("Ctrl+O")} soon={soon(t("menu.openFile"))} />
-          <MenuItem label={t("menu.openFolder")} icon="window" soon={soon(t("menu.openFolder"))} />
-          <MenuItem label={t("menu.print")} icon="print" hint={key("Ctrl+P")} soon={soon(t("menu.print"))} />
+          <MenuItem label={t("menu.openFile")} icon="openfile" hint={key("Ctrl+O")} disabled={share.busy} onSelect={() => { setMoreOpen(false); share.onOpenFile(); }} />
+          <MenuItem label={t("menu.openFolder")} icon="window" onSelect={() => { setMoreOpen(false); share.onOpenFolder(); }} />
+          <MenuItem label={t("menu.print")} icon="print" hint={key("Ctrl+P")} disabled={off} onSelect={() => { setMoreOpen(false); share.onPrint(); }} />
           <MenuItem
             label={t("menu.settings")}
             icon="settings"
@@ -220,10 +242,10 @@ export function TopBar(props: {
   );
 }
 
-/** An icon-only button for a feature that comes later: it keeps its tooltip (a disabled button may not show one). */
-function SoonIconButton(props: { icon: AppIconName; label: string; tip: string }) {
+/** An icon-only button with a tooltip (also while it is disabled). */
+function ActionButton(props: { icon: AppIconName; label: string; tip: string; disabled: boolean; onClick: () => void }) {
   return (
-    <button type="button" className="dw-iconbtn" aria-disabled="true" aria-label={props.label} title={props.tip}>
+    <button type="button" className="dw-iconbtn" disabled={props.disabled} aria-label={props.label} title={props.tip} onClick={props.onClick}>
       <AppIcon name={props.icon} size={17} />
     </button>
   );
