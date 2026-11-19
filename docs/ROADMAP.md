@@ -90,6 +90,7 @@ Scope of Part B (screen recording, Windows first, behind a platform abstraction 
 - The screen is recorded **without the cursor** (Windows.Graphics.Capture); system audio (WASAPI loopback), microphone, webcam and the cursor track (positions, shapes, buttons) are separate tracks; cursor effects, webcam overlay and trim are applied when playing and rendering, so everything can be changed afterwards.
 - Hardware H.264 through Media Foundation, written to disk as it goes in a crash-safe layout; recovery offered at the next start.
 - A recording is a "video" capture in the group (cards with a 🎥 icon and the duration); a player with live effects and a side panel; trim; render, copy, save as MP4; convert to GIF.
+- Native recorder status: M0 (text frame) and M1 (full screen or one of Snipmunk's own windows to MP4 through windows-capture, Media Foundation H.264, stop makes a video card) are done; M2 to M9 (areas and countdown, floating bar, audio, cursor track, crash recovery, player, render, Ctrl+Alt+R) are next.
 - Built so far: the pure logic in `src/recording/` (cursor track and click effects, webcam layout, trim and pause timeline, disk space levels, render cache key, GIF plan). The native recorder, the recording UI, the player, render and GIF export are not built yet. See `docs/manual-tests-phase-7.md`.
 
 ## Phase 7.5: Snipmunk Studio and copy options

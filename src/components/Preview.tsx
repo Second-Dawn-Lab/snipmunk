@@ -47,10 +47,12 @@ export function Preview(props: {
         )}
       </div>
 
-      <AnnotationBar settings={props.settings} onPatch={props.onPatch} />
+      {capture?.kind !== "video" && <AnnotationBar settings={props.settings} onPatch={props.onPatch} />}
 
       <div className="preview__stage">
-        {capture ? (
+        {capture?.kind === "video" ? (
+          <p className="preview__none">{t("rec.noPlayer")}</p>
+        ) : capture ? (
           <Editor
             key={capture.id}
             session={props.session}

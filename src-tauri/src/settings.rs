@@ -76,6 +76,16 @@ pub struct Settings {
     pub quick_redact_words: Vec<String>,
     /// A custom word must be a whole word.
     pub quick_redact_whole_word: bool,
+    /// The top bar mode: "screenshot" | "video"
+    pub capture_kind: String,
+    /// Screen recording: the area ("rectangle" | "window" | "fullscreen"), the countdown (0, 3, 5, 10 s), the frame rate (30 | 60),
+    /// the quality ("standard" | "high"), system sound, microphone.
+    pub rec_mode: String,
+    pub rec_countdown: u32,
+    pub rec_fps: u32,
+    pub rec_quality: String,
+    pub rec_system_sound: bool,
+    pub rec_mic: bool,
     /// Save: "png" | "jpeg" | "webp" | "bmp" | "zip"
     pub save_format: String,
     /// File names: "capture" | "group" | "dateTime"
@@ -134,6 +144,13 @@ impl Default for Settings {
             quick_redact_custom: true,
             quick_redact_words: Vec::new(),
             quick_redact_whole_word: true,
+            capture_kind: "screenshot".into(),
+            rec_mode: "rectangle".into(),
+            rec_countdown: 3,
+            rec_fps: 30,
+            rec_quality: "standard".into(),
+            rec_system_sound: true,
+            rec_mic: false,
             save_format: "png".into(),
             save_naming: "capture".into(),
             save_quality: 90,
@@ -244,6 +261,23 @@ impl Settings {
             &d.save_naming,
         );
         self.save_quality = self.save_quality.clamp(10, 100);
+        one_of(
+            &mut self.capture_kind,
+            &["screenshot", "video"],
+            &d.capture_kind,
+        );
+        one_of(
+            &mut self.rec_mode,
+            &["rectangle", "window", "fullscreen"],
+            &d.rec_mode,
+        );
+        one_of(&mut self.rec_quality, &["standard", "high"], &d.rec_quality);
+        if ![0, 3, 5, 10].contains(&self.rec_countdown) {
+            self.rec_countdown = d.rec_countdown;
+        }
+        if ![30, 60].contains(&self.rec_fps) {
+            self.rec_fps = d.rec_fps;
+        }
         self.quick_redact_words = clean_words(std::mem::take(&mut self.quick_redact_words));
         one_of(
             &mut self.close_action,
@@ -304,6 +338,39 @@ mod tests {
         assert!(fresh.auto_copy_to_clipboard);
         let old: Settings = serde_json::from_str(r#"{"theme":"dark"}"#).unwrap();
         assert!(old.auto_copy_to_clipboard);
+    }
+
+    #[test]
+    fn the_recording_settings_are_checked() {
+        let mut s = Settings::default();
+        assert_eq!(
+            (
+                s.capture_kind.as_str(),
+                s.rec_fps,
+                s.rec_countdown,
+                s.rec_system_sound,
+                s.rec_mic
+            ),
+            ("screenshot", 30, 3, true, false)
+        );
+        s.merge(serde_json::json!({"captureKind": "video", "recFps": 60, "recQuality": "high", "recMode": "fullscreen", "recCountdown": 10}))
+            .unwrap();
+        assert_eq!(
+            (s.capture_kind.as_str(), s.rec_fps, s.rec_quality.as_str()),
+            ("video", 60, "high")
+        );
+        s.merge(serde_json::json!({"captureKind": "gif", "recFps": 24, "recQuality": "x", "recMode": "freeform", "recCountdown": 7}))
+            .unwrap();
+        assert_eq!(
+            (
+                s.capture_kind.as_str(),
+                s.rec_fps,
+                s.rec_quality.as_str(),
+                s.rec_mode.as_str(),
+                s.rec_countdown
+            ),
+            ("screenshot", 30, "standard", "rectangle", 3)
+        );
     }
 
     #[test]

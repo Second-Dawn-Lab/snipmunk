@@ -53,6 +53,12 @@ pub struct Capture {
     pub source: Option<String>,
     /// Placeholder for the annotation tools (Phase 5): a JSON array of marks, `null` until then.
     pub annotations: Value,
+    /// "image" (also `None` in sessions of earlier versions) or "video" (a screen recording, see `recording.rs`).
+    pub kind: Option<String>,
+    /// The length of a recording in milliseconds.
+    pub duration_ms: u64,
+    /// The screen video of a recording, relative to the session folder (`recordings/<id>/screen.mp4`).
+    pub video_file: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -604,6 +610,9 @@ impl SessionStore {
                 source_window_title: new.source_window_title.clone(),
                 source: Some(new.source.to_string()),
                 annotations: Value::Null,
+                kind: Some("image".into()),
+                duration_ms: 0,
+                video_file: None,
             };
             s.group_mut(group_id)?.captures.push(capture.clone());
             Ok(capture)
@@ -634,14 +643,34 @@ impl SessionStore {
                 .find_capture(id)
                 .ok_or_else(|| StoreError::NotFound(format!("capture {id}")))?;
             let c = s.groups[g].captures.remove(c);
-            Ok((c.file, c.thumbnail))
+            Ok((c.file, c.thumbnail, c.video_file))
         })?;
+        // A recording's folder (the video and what belongs to it) goes with its card.
+        if let Some(v) = &removed.2 {
+            if let Some(dir) = Path::new(v).parent() {
+                let _ = fs::remove_dir_all(self.session_dir().join(dir));
+            }
+        }
         self.remove_file(&removed.0);
         if let Some(t) = &removed.1 {
             self.remove_file(t);
         }
         self.remove_ocr(id);
         Ok(())
+    }
+
+    /// Make a capture a recording: its screen video (relative to the session folder) and its length.
+    pub fn set_video(&mut self, id: &str, video_file: &str, duration_ms: u64) -> StoreResult<()> {
+        self.change(|s| {
+            let (g, c) = s
+                .find_capture(id)
+                .ok_or_else(|| StoreError::NotFound(format!("capture {id}")))?;
+            let cap = &mut s.groups[g].captures[c];
+            cap.kind = Some("video".into());
+            cap.video_file = Some(video_file.to_string());
+            cap.duration_ms = duration_ms;
+            Ok(())
+        })
     }
 
     /// Put the captures of a group in a new order. `ids` must be exactly the group's captures.
@@ -787,6 +816,9 @@ impl SessionStore {
                         source_window_title: original.source_window_title.clone(),
                         source: original.source.clone(),
                         annotations: original.annotations.clone(),
+                        kind: original.kind.clone(),
+                        duration_ms: original.duration_ms,
+                        video_file: None,
                     },
                 ));
             }

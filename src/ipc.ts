@@ -27,6 +27,12 @@ export interface Capture {
   width: number;
   height: number;
   sourceWindowTitle: string | null;
+  /** "image" or "video" (a screen recording); `null` in sessions of earlier versions. */
+  kind?: "image" | "video" | null;
+  /** The length of a recording in milliseconds. */
+  durationMs?: number;
+  /** The screen video of a recording, relative to the session folder. */
+  videoFile?: string | null;
   /** "screenshot" (taken by Snipmunk), "imported" (dropped in); `null` in sessions of earlier versions. */
   source: "screenshot" | "imported" | null;
   /** The editable marks, crop and rotation (see src/annotate/schema.ts); `null` for a capture nobody edited. */
@@ -164,6 +170,12 @@ export const ipc = {
   onMaximizeHover: (cb: (hovering: boolean) => void) => on<boolean>("maximize-hover", cb),
 
   // capture
+  /** Start a screen recording of an area. Fails with code "unsupported" while the recorder is not part of this build. */
+  startRecording: (mode: string, window?: string) => call<void>("start_recording", { mode, window: window ?? null }),
+  stopRecording: () => call<Session>("stop_recording"),
+  recordingState: () => call<{ recording: boolean; startedAt: number }>("recording_state"),
+  onRecordingState: (cb: (s: { recording: boolean; startedAt: number }) => void) => on<{ recording: boolean; startedAt: number }>("recording-state", cb),
+  onStartRecording: (cb: () => void) => on<null>("start-recording", () => cb()),
   startCapture: (mode?: string) => call<void>("start_capture", { mode: mode ?? null }),
   /** The capture shortcut was pressed inside a Snipmunk window (the backend ignores it if the hook saw it too). */
   shortcutFired: (name: "capture") => call<void>("shortcut_fired", { name }),

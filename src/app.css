@@ -1612,3 +1612,28 @@ body.is-dragging * {
 .savedlg__row--folder { grid-template-columns: 120px minmax(0, 1fr) auto; }
 .savedlg__row--folder .savedlg__folder { min-width: 0; text-align: start; unicode-bidi: plaintext; }
 .savedlg__row--folder .dw-btn { align-self: center; white-space: nowrap; }
+
+/* The frame of a text box that can be edited: a visible border and a grab zone (8 px) that moves the box. */
+.editor__textbox { position: absolute; z-index: 4; box-sizing: border-box; border: 2px solid var(--dw-brand); border-radius: 3px; cursor: move; background: transparent; }
+.editor__textbox .editor__text { border: 0; cursor: text; display: block; }
+
+/* Recording mode: the red Record button and the recording options. */
+.splitbtn--record { display: inline-flex; align-items: stretch; border-radius: 8px; overflow: hidden; background: #d32f2f; color: #fff; }
+.splitbtn--record .splitbtn__main { display: inline-flex; align-items: center; gap: 8px; padding: 0 14px; min-height: 34px; background: none; border: 0; color: inherit; font: inherit; font-weight: 600; cursor: pointer; }
+.splitbtn--record .splitbtn__more { display: inline-flex; align-items: center; padding: 0 8px; background: none; border: 0; border-inline-start: 1px solid rgba(255, 255, 255, 0.4); color: inherit; cursor: pointer; }
+.recdot { width: 11px; height: 11px; border-radius: 50%; background: #fff; box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.4); }
+.recopts { display: grid; gap: 10px; padding: 12px; min-width: 260px; }
+.recopts__row { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 10px; }
+.recopts__check { display: flex; align-items: center; gap: 8px; }
+.recopts__note, .recopts__soon em { margin: 0; font-size: 12px; opacity: 0.7; }
+.recopts__soon { display: flex; justify-content: space-between; gap: 10px; opacity: 0.55; padding-top: 4px; border-top: 1px solid var(--dw-border); }
+.card__video { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; opacity: 0.8; }
+
+/* The text box being edited looks like a selected shape: the thin blue frame and the white handles are drawn on the picture. */
+.editor__textbox { border-color: transparent !important; }
+.editor__textbox .editor__text { border: 0 !important; outline: none; }
+
+.recbar { position: fixed; top: 52px; inset-inline-start: 50%; transform: translateX(-50%); z-index: 70; display: flex; align-items: center; gap: 10px; padding: 6px 8px 6px 12px; border-radius: 22px; background: var(--dw-surface); border: 1px solid var(--dw-border-strong, var(--dw-border)); box-shadow: 0 6px 22px rgba(0,0,0,.25); }
+[dir="rtl"] .recbar { transform: translateX(50%); }
+.recdot--live { background: #d32f2f; box-shadow: none; animation: recpulse 1.2s infinite; }
+@keyframes recpulse { 50% { opacity: .35; } }

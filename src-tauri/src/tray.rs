@@ -7,8 +7,27 @@ use tauri::{AppHandle, Manager, Wry};
 pub struct TrayLabels {
     open: MenuItem<Wry>,
     capture: MenuItem<Wry>,
+    record: MenuItem<Wry>,
     settings: MenuItem<Wry>,
     quit: MenuItem<Wry>,
+}
+
+/// "Start recording" in the interface language.
+fn record_label(lang: &str) -> &'static str {
+    match lang {
+        "de" => "Aufnahme starten",
+        "es" => "Iniciar grabación",
+        "fr" => "Démarrer l’enregistrement",
+        "it" => "Avvia registrazione",
+        "nl" => "Opname starten",
+        "pl" => "Rozpocznij nagrywanie",
+        "tr" => "Kaydı başlat",
+        "zh-Hans" => "开始录制",
+        "zh-Hant" => "開始錄製",
+        "ar" => "بدء التسجيل",
+        "ur" => "ریکارڈنگ شروع کریں",
+        _ => "Start recording",
+    }
 }
 
 /// Open, Add capture, Settings, Quit
@@ -53,9 +72,10 @@ pub fn build(app: &AppHandle, lang: &str) -> tauri::Result<()> {
     let [o, c, s, q] = labels(lang);
     let open = MenuItem::with_id(app, "open", o, true, None::<&str>)?;
     let capture = MenuItem::with_id(app, "capture", c, true, None::<&str>)?;
+    let record = MenuItem::with_id(app, "record", record_label(lang), true, None::<&str>)?;
     let settings = MenuItem::with_id(app, "settings", s, true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", q, true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&open, &capture, &settings, &quit])?;
+    let menu = Menu::with_items(app, &[&open, &capture, &record, &settings, &quit])?;
 
     let mut builder = TrayIconBuilder::with_id("main")
         .tooltip("Snipmunk")
@@ -64,6 +84,11 @@ pub fn build(app: &AppHandle, lang: &str) -> tauri::Result<()> {
         .on_menu_event(|app, event| match event.id.as_ref() {
             "open" => show_main(app),
             "capture" => crate::capture::trigger(app),
+            // The page starts the recording flow (the area is chosen in the overlay).
+            "record" => {
+                show_main(app);
+                let _ = tauri::Emitter::emit(app, "start-recording", ());
+            }
             "settings" => open_settings_window(app),
             "quit" => app.exit(0),
             _ => {}
@@ -86,6 +111,7 @@ pub fn build(app: &AppHandle, lang: &str) -> tauri::Result<()> {
     app.manage(TrayLabels {
         open,
         capture,
+        record,
         settings,
         quit,
     });
@@ -97,6 +123,7 @@ pub fn set_language(app: &AppHandle, lang: &str) {
         let [o, c, s, q] = labels(lang);
         let _ = l.open.set_text(o);
         let _ = l.capture.set_text(c);
+        let _ = l.record.set_text(record_label(lang));
         let _ = l.settings.set_text(s);
         let _ = l.quit.set_text(q);
     }

@@ -23,6 +23,7 @@ import { dictionaries } from "../i18n";
 import { useT } from "../i18n";
 import { onNotice } from "../notify";
 import { ipc, type Capture, type CmdError, type Group, type Session } from "../ipc";
+import { formatTime as formatDuration } from "../recording/timeline";
 import { SearchIndex } from "../search";
 import { stageAll } from "../share/exporter";
 import { SaveDialog } from "./SaveDialog";
@@ -82,6 +83,8 @@ export function MainWindow() {
   const { settings, patch } = useSettings(settingsStore);
   const session = useSession();
   const shareRef = useRef<ReturnType<typeof useShareActions> | null>(null);
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
   const printTargetsRef = useRef<() => Capture[]>(() => []);
   const [groupId, setGroupId] = useState<string | null>(null);
   const [sort, setSort] = useState<SortMode>("newest");
@@ -263,6 +266,35 @@ export function MainWindow() {
   useEffect(() => {
     void ipc.setActiveGroup(shownGroupId);
   }, [shownGroupId]);
+
+  // The recorder: a bar with the time and Stop while a recording runs (the floating bar of a later step replaces it).
+  const [recStart, setRecStart] = useState(0);
+  const [recNow, setRecNow] = useState(0);
+  useEffect(() => {
+    void ipc.recordingState().then((s) => setRecStart(s.recording ? s.startedAt : 0)).catch(() => undefined);
+    const sub = ipc.onRecordingState((s) => setRecStart(s.recording ? s.startedAt : 0));
+    return () => {
+      void sub.then((fn) => fn());
+    };
+  }, []);
+  useEffect(() => {
+    if (!recStart) return;
+    setRecNow(Date.now());
+    const timer = setInterval(() => setRecNow(Date.now()), 500);
+    return () => clearInterval(timer);
+  }, [recStart]);
+  const stopRecording = () => void ipc.stopRecording().then((s) => sessionStore.apply(s)).catch((e) => setError(messageOf(e)));
+
+  // "Start recording" from the tray: the recording mode starts the same way as the Record button.
+  useEffect(() => {
+    const started = ipc.onStartRecording(() => {
+      void patch({ captureKind: "video" });
+      void ipc.startRecording(settingsRef.current.recMode).catch((e) => setError(messageOf(e)));
+    });
+    return () => {
+      void started.then((fn) => fn());
+    };
+  }, [patch, setError]);
 
   // A capture was taken (by the shortcut, the button or the tray): show it, in its group.
   useEffect(() => {
@@ -636,6 +668,7 @@ export function MainWindow() {
         onOpenSettings={() => void ipc.openSettings()}
         onCapture={(mode) => void ipc.startCapture(mode).catch((e) => setError(messageOf(e)))}
         zoom={zoom}
+        onRecord={(area) => void ipc.startRecording(area).catch((e) => setError(messageOf(e)))}
         share={{
           hasCapture: capture !== null,
           busy: share.busy,
@@ -653,6 +686,15 @@ export function MainWindow() {
       <HotkeyNotice onOpenSettings={() => void ipc.openSettings()} />
 
       <Toasts toasts={toasts} onClose={closeToast} />
+      {recStart > 0 && (
+        <div className="recbar" role="status">
+          <span className="recdot recdot--live" aria-hidden="true" />
+          <span dir="ltr">{formatDuration(Math.max(0, recNow - recStart) / 1000)}</span>
+          <button type="button" className="dw-btn dw-btn--danger" onClick={stopRecording}>
+            {t("rec.stop")}
+          </button>
+        </div>
+      )}
 
       <main className="panels">
         <div className={`panel panel--left panel--${galleryView}`}>

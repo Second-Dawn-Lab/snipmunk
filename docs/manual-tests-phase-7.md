@@ -54,3 +54,21 @@ cache key, GIF plan and size estimate). The B tests below are for when the nativ
    - [ ] Select: arrow. Over the mark just made: move cursor. On its corner / side handles: the matching resize cursor (a rotated mark uses the nearest direction); on the rotate handle: a rotate cursor.
    - [ ] Pen and Highlighter: a ring the size the stroke has on the screen, in the tool's colour (change size and colour in the popover and zoom). Eraser: a dashed ring. Text: I-beam. Shapes, Blur, Crop: a thin crosshair. Space or middle button: hand, closed hand while dragging.
    - [ ] At 25 %, 100 % and 400 % zoom, at 125 % / 150 % display scaling, and in Arabic. The red screenshot crosshair appears only in the capture overlay.
+
+## 7-B1 (recording core): what exists and what to test
+
+Built in this step: the 📷/🎥 mode switch, the red **Record** split button (Rectangle / Window / Full screen), the countdown (None / 3 / 5 / 10 s), the ⚙ recording options (frame rate 30 / 60, quality, system sound, microphone; webcam, cursor and click effect are listed as "Coming in the next update"), the tray item **Start recording**, the settings and the data model (a capture of kind "video" with a duration, a 🎥 badge and duration on the card, no editor for videos). **Starting a recording says that the recorder is not part of this version yet**: Windows.Graphics.Capture, Media Foundation H.264, WASAPI audio, the cursor track, the floating bar, the player, MP4 render, crash recovery and Ctrl+Alt+R are not built (see the report of this step).
+
+- [ ] The switch changes the top bar: Record button, Countdown, ⚙ (and back). The choice is remembered after a restart. Arabic: the bar is mirrored.
+- [ ] ⚙ options are remembered (frame rate, quality, sound, microphone). The webcam / cursor / click effect rows are greyed out with the "Coming in the next update" hint.
+- [ ] Record (or an area from the ▾ menu, or the tray item) shows an error toast that the recorder is missing; nothing else happens.
+
+### Text box frame (7-A.1)
+- [ ] **[REAL INPUT]** While a text box is being edited it has a visible border with a grab zone of about 8 px around it: pressing and dragging there moves the box (move cursor on hover); inside the text the I-beam and caret work as before; the handles still resize and rotate. Check at 25 %, 100 % and 400 % zoom, with a rotated text, and in Arabic.
+
+## 7-B1 native recorder: M0 and M1 (done), M2 to M9 (not built)
+
+- [ ] **M0** Text tool: while a text is being edited its frame and handles look like those of a selected shape (thin blue frame, white square handles, round rotate handle; no red border). **[REAL INPUT]** Dragging the frame, a handle or the rotate handle moves, resizes or turns the box live (frame, text and caret follow the pointer), also at 25 % and 400 % zoom and rotated.
+- [ ] **M1** **[REAL INPUT]** Switch to 🎥, press Record: the monitor under the pointer is recorded (no mouse cursor in the picture); the red bar shows the time and **Stop recording**; after Stop a card "Recording <date>" with 🎥 and the duration appears in the active group; the preview says the recording cannot be played yet. Deleting the card removes its folder `sessions\<id>\recordings\<rec>\` (screen.mp4, first.png, recording.json).
+- Checked in the test instance (own window only): 6.0 s of a 1056x708 window with a moving counter gave a valid MP4 (`ftyp mp42`, Windows reads a length of 6 s), 357 frames, 861 KB; recording.json written.
+- Not built yet: areas and countdown (M2), floating bar, pause, discard (M3), audio (M4), cursor track (M5), crash recovery, disk checks (M6), player (M7), render / save / copy (M8), Ctrl+Alt+R (M9).

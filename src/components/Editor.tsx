@@ -21,6 +21,7 @@ import { straighten } from "../annotate/strokes";
 import { fitted, resizeText } from "../annotate/textLayout";
 import { brushCursor, eraserCursor, resizeCursor, rotateCursor, thinCrosshairCursor } from "../annotate/cursors";
 import { recognize } from "../annotate/shapeRecognizer";
+import { editBoxSize, frameZone, grabInPicture, TEXT_GRAB_PX } from "../annotate/textFrame";
 import { snappedAnnotation } from "../annotate/snapShape";
 import { commitAll, made as madeLive, restrict, selectable, unlocked, type LockState } from "../annotate/lock";
 import { created as createdBox, textStep, type TextState } from "../annotate/textTool";
@@ -259,6 +260,8 @@ export function Editor(props: {
   const preview = useCallback(
     (next: AnnotationDoc) => {
       docRef.current = next;
+      // The text box being edited (a DOM element) follows the pointer while it is dragged, resized or turned.
+      if (textEditRef.current) setDocState(next);
       requestDraw();
     },
     [requestDraw],
@@ -456,7 +459,8 @@ export function Editor(props: {
       }
     }
     // Selection: an outline per mark and handles for a single one.
-    const sel = d.items.filter((a) => selRef.current.has(a.id));
+    // (The text being edited is not in `d`, which is drawn without it: its frame and handles come from the document.)
+    const sel = docRef.current.items.filter((a) => selRef.current.has(a.id)).map(withEditSize);
     for (const a of sel) {
       const corners = boxCorners(a.type === "line" || a.type === "arrow" ? { ...boxOf(a), rotation: 0 } : boxOf(a));
       ctx.strokeStyle = "#1e88e5";
@@ -884,12 +888,20 @@ export function Editor(props: {
   // --- pointer -------------------------------------------------------------------------------------------------------------------------
   const tolerance = () => 6 / viewRef.current.zoom;
 
+  /** The text being edited has the size of its text area (its measured size is from the last time it was finished). */
+  const withEditSize = <T extends Annotation>(a: T): T => {
+    const area = textArea.current;
+    if (a.type !== "text" || !area || textEditRef.current?.id !== a.id) return a;
+    return { ...a, ...editBoxSize(a, { w: area.offsetWidth, h: area.offsetHeight }, viewRef.current.zoom) };
+  };
+
   /** The marks made last that may be moved by pressing their body: not a freehand stroke, which the pen draws next to. */
   const snappedId = useRef<string | null>(null);
   const movableLive = (a: Annotation) => (a.type !== "pen" && a.type !== "highlighter") || a.id === snappedId.current;
   /** Is the point on the body or the border of the mark that was just made (also inside an outline without fill)? */
   const onLiveBody = (a: Annotation, p: Pt) => {
     const tol = tolerance();
+    if (a.type === "text") return frameZone({ x: a.x, y: a.y, w: a.w, h: a.h, rotation: a.rotation }, p, grabInPicture(viewRef.current.zoom)) !== "outside";
     if (hitTest(a, p, tol)) return true;
     const b = boundsOf(a);
     const r = "rotation" in a && typeof a.rotation === "number" ? a.rotation : 0;
@@ -933,10 +945,32 @@ export function Editor(props: {
   const onPointerDown = (e: React.PointerEvent) => {
     // A press inside the box being typed in belongs to the text field (the caret moves; the box neither moves nor ends).
     if (textArea.current && e.target === textArea.current) return;
+    if ((e.target as HTMLElement).classList?.contains("editor__textbox") && textEditRef.current && e.button === 0) {
+      // The frame of the text being edited: drag it to move the box (the text keeps being edited).
+      const s0 = stagePoint(e);
+      stage.current?.setPointerCapture(e.pointerId);
+      interaction.current = { kind: "move", ids: [textEditRef.current.id], start: toImage(s0.x, s0.y), base: docRef.current, moved: false };
+      setCursor("move");
+      return;
+    }
     // Presses on the context menu belong to the menu (the stage would capture the pointer and the menu items never get their click).
     if ((e.target as HTMLElement).closest?.(".ctxmenu")) return;
     lastDown.current = { x: e.clientX, y: e.clientY };
     stage.current?.focus({ preventScroll: true });
+    if (textEditRef.current && e.button === 0 && img) {
+      // A press on a handle of the text being edited resizes or turns it; the text stays in edit mode.
+      const item = docRef.current.items.find((a) => a.id === textEditRef.current?.id);
+      if (item) {
+        const s1 = stagePoint(e);
+        const p1 = toImage(s1.x, s1.y);
+        const h1 = handleAt(handlesOf(withEditSize(item), 26 / viewRef.current.zoom), p1, 10 / viewRef.current.zoom);
+        if (h1) {
+          stage.current?.setPointerCapture(e.pointerId);
+          interaction.current = { kind: "handle", id: item.id, handle: h1.kind, base: docRef.current, moved: false };
+          return;
+        }
+      }
+    }
     const wasTyping = !!textEditRef.current;
     if (wasTyping) endText(true);
     if (!img) return;
@@ -1548,11 +1582,25 @@ export function Editor(props: {
         />
       )}
       {editing && textBoxStyle && (
-        <textarea
+        <div
           key={editing.id}
+          className="editor__textbox"
+          style={{
+            left: textBoxStyle.left - TEXT_GRAB_PX,
+            top: textBoxStyle.top - TEXT_GRAB_PX,
+            padding: TEXT_GRAB_PX - 2,
+            transform: textBoxStyle.transform,
+            transformOrigin: `${TEXT_GRAB_PX}px ${TEXT_GRAB_PX}px`,
+          }}
+          // The frame around the text (a visible border with a grab zone) moves the box; the text area inside keeps the I-beam.
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) e.preventDefault();
+          }}
+        >
+        <textarea
           ref={textArea}
           className="editor__text"
-          style={textBoxStyle}
+          style={{ ...textBoxStyle, position: "static", transform: "none", left: undefined, top: undefined }}
           defaultValue={editing.text}
           dir="auto"
           aria-label={t("tools.text")}
@@ -1561,9 +1609,11 @@ export function Editor(props: {
             const el = e.currentTarget;
             el.style.height = "auto";
             el.style.height = `${el.scrollHeight}px`;
+            requestDraw();
             if (editing.fixedWidth) return;
             el.style.width = "auto";
             el.style.width = `${Math.max(el.scrollWidth + 4, editing.fontSize * viewRef.current.zoom)}px`;
+            requestDraw();
           }}
           onKeyDown={(e) => {
             e.stopPropagation();
@@ -1576,6 +1626,7 @@ export function Editor(props: {
           onBlur={() => endText(true)}
           onPointerDown={(e) => e.stopPropagation()}
         />
+        </div>
       )}
       {ui.cropping && <CropBar />}
       {menu && (

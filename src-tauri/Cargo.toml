@@ -49,6 +49,8 @@ webview2-com = "0.39"
 windows-core = "0.62"
 # The collections of the Windows share sheet (the version the windows crate uses).
 windows-collections = "0.2"
+# Screen recording: Windows.Graphics.Capture and the Media Foundation H.264 encoder (MIT; brings parking_lot, rayon, thiserror).
+windows-capture = "2"
 
 # Snap Layouts for the custom title bar (see src/titlebar.rs): window hit testing needs Win32.
 [target.'cfg(windows)'.dependencies.windows]

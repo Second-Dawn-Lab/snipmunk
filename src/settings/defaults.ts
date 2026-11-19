@@ -57,6 +57,15 @@ export interface Settings {
   quickRedactWords: string[];
   /** A custom word must be a whole word. */
   quickRedactWholeWord: boolean;
+  /** The top bar mode. */
+  captureKind: "screenshot" | "video";
+  /** Screen recording (the recording options menu in the top bar). */
+  recMode: "rectangle" | "window" | "fullscreen";
+  recCountdown: 0 | 3 | 5 | 10;
+  recFps: 30 | 60;
+  recQuality: "standard" | "high";
+  recSystemSound: boolean;
+  recMic: boolean;
   saveFormat: SaveFormat;
   saveNaming: Naming;
   /** JPEG / WebP quality, 10 to 100. */
@@ -114,6 +123,13 @@ export const defaultSettings: Settings = {
   quickRedactCustom: true,
   quickRedactWords: [],
   quickRedactWholeWord: true,
+  captureKind: "screenshot",
+  recMode: "rectangle",
+  recCountdown: 3,
+  recFps: 30,
+  recQuality: "standard",
+  recSystemSound: true,
+  recMic: false,
   saveFormat: "png",
   saveNaming: "capture",
   saveQuality: 90,

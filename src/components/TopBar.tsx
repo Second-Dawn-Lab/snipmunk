@@ -2,6 +2,9 @@ import { Button, IconButton, Select } from "@seconddawn/ui";
 import { useState } from "react";
 import { useT } from "../i18n";
 import type { CaptureDelay, CaptureMode, Settings } from "../settings/defaults";
+import { RecordControls } from "./RecordControls";
+
+type CaptureSettings = Settings;
 import { AppIcon, type AppIconName } from "./AppIcons";
 import { hotkeyLabel } from "./hotkeyLabel";
 import { MenuItem } from "./MenuItem";
@@ -53,11 +56,14 @@ export function TopBar(props: {
   /** Start a capture, optionally in this mode (picked from the mode menu). */
   onCapture: (mode?: CaptureMode) => void;
   zoom: ZoomApi;
+  /** Start a recording of an area (the recording mode). */
+  onRecord: (area: CaptureSettings["recMode"]) => void;
   /** What the buttons on the right do with the capture shown in the preview. */
   share: ShareApi;
 }) {
   const { t, locale } = useT();
   const { settings, zoom, share } = props;
+  const video = settings.captureKind === "video";
   const off = !share.hasCapture || share.busy;
   const [modeOpen, setModeOpen] = useState(false);
   const [zoomOpen, setZoomOpen] = useState(false);
@@ -85,6 +91,10 @@ export function TopBar(props: {
   return (
     <div className="topbar" role="toolbar" aria-label={t("app.name")}>
       <div className="topbar__group">
+        {video ? (
+          <RecordControls settings={settings} onPatch={props.onPatch} onRecord={props.onRecord} />
+        ) : (
+          <>
         <Pop
           open={modeOpen}
           onClose={() => setModeOpen(false)}
@@ -139,18 +149,27 @@ export function TopBar(props: {
             }))}
           />
         </label>
+          </>
+        )}
 
         <div className="segmented" role="group" aria-label={t("kind.label")}>
-          <button type="button" className="segmented__btn" aria-pressed="true" title={t("kind.screenshot")} aria-label={t("kind.screenshot")}>
+          <button
+            type="button"
+            className="segmented__btn"
+            aria-pressed={!video}
+            title={t("kind.screenshot")}
+            aria-label={t("kind.screenshot")}
+            onClick={() => props.onPatch({ captureKind: "screenshot" })}
+          >
             <AppIcon name="camera" size={17} />
           </button>
           <button
             type="button"
             className="segmented__btn"
-            aria-pressed="false"
-            aria-disabled="true"
-            title={t("kind.recordingSoon")}
-            aria-label={t("kind.recordingSoon")}
+            aria-pressed={video}
+            title={t("kind.recording")}
+            aria-label={t("kind.recording")}
+            onClick={() => props.onPatch({ captureKind: "video" })}
           >
             <AppIcon name="video" size={17} />
           </button>

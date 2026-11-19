@@ -5,6 +5,7 @@ import { beginPointerDrag, type DragPoint } from "../gallery/pointerDrag";
 import { autoScrollDelta, draggedIds, hitTest, insideRect, isNoopMove } from "../gallery/reorder";
 import { navStep, type ClickMods } from "../gallery/selection";
 import { useT } from "../i18n";
+import { formatTime as formatDuration0 } from "../recording/timeline";
 import { thumbUrl, type Capture, type Session } from "../ipc";
 import { formatTime } from "../sessionModel";
 import { RenameInput } from "./GroupTabs";
@@ -332,6 +333,9 @@ interface CardProps {
   onPointerDown: (e: React.PointerEvent, id: string) => void;
 }
 
+/** The length of a recording on its card: "1:05". */
+const formatDuration = (ms: number) => formatDuration0(ms / 1000);
+
 const Card = memo(function Card(p: CardProps) {
   const { t, locale } = useT();
   const { capture: c, actions } = p;
@@ -379,6 +383,12 @@ const Card = memo(function Card(p: CardProps) {
             }}
           >
             {c.name}
+          </div>
+        )}
+        {c.kind === "video" && (
+          <div className="card__video" dir="ltr">
+            <span aria-hidden="true">🎥</span>
+            {formatDuration(c.durationMs ?? 0)}
           </div>
         )}
         {(p.view === "list" || p.view === "large") && <div className="card__time">{formatTime(c.createdAt, locale)}</div>}

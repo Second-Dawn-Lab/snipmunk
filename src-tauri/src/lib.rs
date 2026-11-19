@@ -15,6 +15,7 @@ mod ocr;
 mod output;
 mod placement;
 mod popups;
+mod recording;
 mod sessions;
 mod settings;
 mod startup;
@@ -49,6 +50,7 @@ pub fn run() {
             AppState::load()
         })
         .manage(capture::Capture::new())
+        .manage(recording::Recorder::new())
         .manage(hotkey::HotkeyManager::new())
         .register_uri_scheme_protocol("snipmunk-img", commands::serve_image)
         .register_uri_scheme_protocol("snipmunk-cap", capture::serve)
@@ -81,6 +83,9 @@ pub fn run() {
             gallery::set_annotations,
             gallery::set_capture_thumbnail,
             gallery::replace_capture_image,
+            recording::start_recording,
+            recording::stop_recording,
+            recording::recording_state,
             export::export_begin,
             export::export_stage,
             export::export_save,
