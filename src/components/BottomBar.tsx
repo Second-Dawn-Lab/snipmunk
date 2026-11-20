@@ -39,11 +39,11 @@ export function BottomBar(props: {
         ]}
       />
       )}
-      <button type="button" className="dw-btn" disabled={empty || props.busy} title={props.recording ? t("soon.label") : t("bottom.saveTip")} onClick={props.onSave}>
+      <button type="button" className="dw-btn" disabled={empty || props.busy} title={t("bottom.saveTip")} onClick={props.onSave}>
         <AppIcon name="save" size={16} />
         {t("bottom.save")}
       </button>
-      <button type="button" className="dw-btn dw-btn--primary" disabled={empty || props.busy} title={props.recording ? t("soon.label") : t("bottom.copyTip")} onClick={props.onCopy}>
+      <button type="button" className="dw-btn dw-btn--primary" disabled={empty || props.busy} title={t("bottom.copyTip")} onClick={props.onCopy}>
         <AppIcon name="copy" size={16} />
         {label}
       </button>

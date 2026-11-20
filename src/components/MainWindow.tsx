@@ -127,6 +127,7 @@ export function MainWindow() {
   const ix = useRef(new SearchIndex()).current;
   const [confirmNew, setConfirmNew] = useState(false);
   const [unfinished, setUnfinished] = useState<string[]>([]);
+  const [micDenied, setMicDenied] = useState(false);
   const tRef = useRef(t);
   tRef.current = t;
   const [groupToDelete, setGroupToDelete] = useState<Group | null>(null);
@@ -314,8 +315,17 @@ export function MainWindow() {
     const failed = ipc.onCaptureError((message) => setError(message));
     // Why a recording was stopped or did not start (the disk, the screen going away).
     const noticed = ipc.onRecordingNotice((kind) => {
-      const key = kind === "disk-start" ? "rec.notice.diskStart" : kind === "disk-full" ? "rec.notice.diskFull" : "rec.notice.sourceGone";
-      setError(tRef.current(key));
+      if (kind === "mic-denied") {
+        setMicDenied(true);
+        return;
+      }
+      const keys: Record<string, string> = {
+        "disk-start": "rec.notice.diskStart",
+        "disk-full": "rec.notice.diskFull",
+        "mic-none": "rec.notice.micNone",
+        "system-none": "rec.notice.systemNone",
+      };
+      setError(tRef.current((keys[kind] ?? "rec.notice.sourceGone") as Parameters<typeof t>[0]));
     });
     return () => {
       void added.then((fn) => fn());
@@ -323,6 +333,11 @@ export function MainWindow() {
       void noticed.then((fn) => fn());
     };
   }, []);
+
+  // Cards of recordings that were deleted in Explorer go when the recordings are shown.
+  useEffect(() => {
+    if (settings.captureKind === "video") void ipc.refreshRecordings().catch(() => undefined);
+  }, [settings.captureKind]);
 
   // Recordings that a crash cut off are offered for recovery when the window opens.
   useEffect(() => {
@@ -528,12 +543,19 @@ export function MainWindow() {
     dragTarget: (target: string | null) => setCardDropTab(target),
     prepareDrag: (ids: string[]) => {
       if (!session) return;
+      if (recMode) return;
       const promise = stageAll("drag", session, byIdsInList(ids));
       promise.catch(() => undefined);
       dragFiles.current = { ids, promise };
     },
     dragOut: (ids: string[]) => {
       if (!session) return;
+      if (recMode) {
+        // The rendered video is dragged out: ready at once when it was rendered before, else it is made first.
+        const c = byIdsInList(ids)[0];
+        if (c) void withRendered(c, (r) => ipc.exportDrag([r.file], r.thumb));
+        return;
+      }
       void (async () => {
         try {
           const prepared = dragFiles.current;
@@ -568,6 +590,49 @@ export function MainWindow() {
     if (skipped > 0) parts.push(t("drop.skipped", { count: skipped }));
     if (parts.length > 0) setNotice(parts.join(" "));
   };
+
+  // --- recordings: Save, Copy, Share and drag out use the rendered file (final.mp4 in the recording's folder) ---------------
+  const [rendering, setRendering] = useState<{ id: string; progress: number } | null>(null);
+  useEffect(() => {
+    const p = ipc.onRenderProgress((e) => setRendering((r) => (r && r.id === e.captureId ? { ...r, progress: e.progress } : r)));
+    return () => void p.then((fn) => fn());
+  }, []);
+  /** Render (or find the rendered file of) a recording, then do something with it. A cancelled render does nothing. */
+  const withRendered = async (c: Capture, what: (r: { file: string; thumb: string }) => Promise<void>) => {
+    setRendering({ id: c.id, progress: 0 });
+    let rendered: { file: string; thumb: string } | null = null;
+    try {
+      rendered = await ipc.renderRecording(c.id);
+    } catch (e) {
+      if ((e as Partial<CmdError>).code !== "cancelled") setError(messageOf(e));
+    } finally {
+      setRendering(null);
+    }
+    if (!rendered) return;
+    try {
+      await what(rendered);
+    } catch (e) {
+      setError(messageOf(e));
+    }
+  };
+  const recCopy = (c: Capture) =>
+    void withRendered(c, async (r) => {
+      await ipc.exportClipboard([r.file], null, null);
+      setNotice(t("rec.copied"));
+    });
+  const recShare = (c: Capture) => void withRendered(c, (r) => ipc.exportShare([r.file]));
+  const recSave = (c: Capture) =>
+    void (async () => {
+      // The folder first (the picker starts in the recording's group folder), then the render.
+      const start = c.videoDir ? c.videoDir.replace(/[\\/][^\\/]*$/, "") : undefined;
+      const folder = await ipc.pickFolder(start).catch(() => null);
+      if (!folder) return;
+      await withRendered(c, async (r) => {
+        const name = `${c.name.replace(/[<>:"/\\|?*]/g, "_")}.mp4`;
+        const saved = await ipc.exportSave([r.file], [name], folder);
+        setNotice(t("save.done", { count: saved.length }), { label: t("save.openFolder"), run: () => void ipc.openFolder(saved[0] ?? folder).catch((e) => setError(messageOf(e))) });
+      });
+    })();
 
   const share = useShareActions({
     session,
@@ -649,6 +714,14 @@ export function MainWindow() {
   // --- the card menu ---------------------------------------------------------------------------------------------
 
   const closeMenu = () => setMenu(null);
+  /** What "Show in File Explorer" shows: a recording's video, or the file a screenshot was saved to automatically. */
+  const explorerTarget = (id: string | undefined): string | null => {
+    const c = id ? byIds([id])[0] : undefined;
+    if (!c) return null;
+    if (c.kind === "video") return c.videoDir && c.videoFile ? `${c.videoDir}\${c.videoFile}` : null;
+    return c.savedPath ?? null;
+  };
+
   const cardMenuEntries = (m: CardMenu): MenuEntry[] => {
     const others = session.groups.filter((g) => g.id !== group.id);
     return [
@@ -690,8 +763,11 @@ export function MainWindow() {
         ),
       },
       { kind: "separator", id: "sep1" },
-      { kind: "item", id: "copy", label: t("ctx.copy"), icon: "copy", disabled: recMode, tip: recMode ? t("soon.label") : undefined, onSelect: () => void share.copy(byIds(m.ids), copyMode) },
-      { kind: "item", id: "save", label: t("ctx.save"), icon: "save", disabled: recMode, tip: recMode ? t("soon.label") : undefined, onSelect: () => share.save(byIds(m.ids)) },
+      { kind: "item", id: "copy", label: t("ctx.copy"), icon: "copy", onSelect: () => (recMode ? recCopy(byIds(m.ids)[0]) : void share.copy(byIds(m.ids), copyMode)) },
+      { kind: "item", id: "save", label: t("ctx.save"), icon: "save", onSelect: () => (recMode ? recSave(byIds(m.ids)[0]) : share.save(byIds(m.ids))) },
+      ...(explorerTarget(m.ids[0])
+        ? ([{ kind: "item", id: "explorer", label: t("ctx.showInExplorer"), icon: "folder", onSelect: () => void ipc.openFolder(explorerTarget(m.ids[0]) as string).catch((e) => setError(messageOf(e))) }] as MenuEntry[])
+        : []),
       { kind: "separator", id: "sep2" },
       { kind: "item", id: "delete", label: t("ctx.delete"), icon: "trash", danger: true, onSelect: () => setPendingDelete(m.ids) },
     ];
@@ -715,9 +791,9 @@ export function MainWindow() {
           busy: share.busy,
           canShare: share.canShare,
           onPaint: () => capture && void share.paint(capture),
-          onSave: () => capture && share.save([capture]),
-          onCopy: () => capture && void share.copy([capture], copyMode),
-          onShare: () => capture && void share.share(view.sel.ids.size > 0 ? byIds([...view.sel.ids]) : [capture]),
+          onSave: () => capture && (recMode ? recSave(capture) : share.save([capture])),
+          onCopy: () => capture && (recMode ? recCopy(capture) : void share.copy([capture], copyMode)),
+          onShare: () => capture && (recMode ? recShare(capture) : void share.share(view.sel.ids.size > 0 ? byIds([...view.sel.ids]) : [capture])),
           onOpenFile: () => void share.openFile(),
           onOpenFolder: () => void share.openFolder(),
           onPrint: () => void share.print(printTargetsRef.current()),
@@ -727,6 +803,15 @@ export function MainWindow() {
       <HotkeyNotice onOpenSettings={() => void ipc.openSettings()} />
 
       <Toasts toasts={toasts} onClose={closeToast} />
+      {rendering && (
+        <div className="renderbar" role="status" aria-live="polite">
+          <span>{t("rec.rendering", { percent: Math.round(rendering.progress * 100) })}</span>
+          <progress max={1} value={rendering.progress} />
+          <button type="button" className="dw-btn" onClick={() => void ipc.cancelRender()}>
+            {t("session.cancel")}
+          </button>
+        </div>
+      )}
 
 
       <main className="panels">
@@ -840,8 +925,8 @@ export function MainWindow() {
         copyMode={copyMode}
         onCopyMode={chooseCopyMode}
         busy={share.busy}
-        onCopy={() => void share.copy(selectionOrCurrent(), copyMode)}
-        onSave={() => share.save(selectionOrCurrent())}
+        onCopy={() => (recMode ? selectionOrCurrent()[0] && recCopy(selectionOrCurrent()[0]) : void share.copy(selectionOrCurrent(), copyMode))}
+        onSave={() => (recMode ? selectionOrCurrent()[0] && recSave(selectionOrCurrent()[0]) : share.save(selectionOrCurrent()))}
       />
 
       <SaveDialog
@@ -942,6 +1027,30 @@ export function MainWindow() {
         }
       >
         <p>{t("rec.recoverBody", { count: unfinished.length })}</p>
+      </Dialog>
+
+      <Dialog
+        open={micDenied}
+        title={t("rec.notice.micDenied")}
+        onClose={() => setMicDenied(false)}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setMicDenied(false)}>
+              {t("session.cancel")}
+            </Button>
+            <Button
+              variant="primary"
+              onClick={() => {
+                setMicDenied(false);
+                void ipc.openOsSettings("microphone").catch((e) => setError(messageOf(e)));
+              }}
+            >
+              {t("rec.notice.openPrivacy")}
+            </Button>
+          </>
+        }
+      >
+        <p>{t("rec.notice.micDeniedBody")}</p>
       </Dialog>
 
       <CloseDialog />

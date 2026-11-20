@@ -2,9 +2,8 @@ import { useT } from "../i18n";
 import { type Capture, type Session } from "../ipc";
 import { formatSize } from "../sessionModel";
 import { AnnotationBar } from "./AnnotationBar";
-import { thumbUrl } from "../ipc";
-import { formatTime } from "../recording/timeline";
 import { Editor } from "./Editor";
+import { RecPlayer } from "./RecPlayer";
 import type { Settings } from "../settings/defaults";
 
 /** "fit" follows the size of the stage; a number is a zoom the user chose. */
@@ -55,13 +54,7 @@ export function Preview(props: {
 
       <div className="preview__stage">
         {capture?.kind === "video" ? (
-          <div className="recplaceholder">
-            <img className="recplaceholder__thumb" src={thumbUrl(props.session, capture)} alt="" />
-            <p className="recplaceholder__meta" dir="ltr">
-              {formatSize(capture.width, capture.height)} · {formatTime((capture.durationMs ?? 0) / 1000)}
-            </p>
-            <p className="preview__none">{t("rec.noPlayer")}</p>
-          </div>
+          <RecPlayer key={capture.id} session={props.session} capture={capture} />
         ) : capture ? (
           <Editor
             key={capture.id}

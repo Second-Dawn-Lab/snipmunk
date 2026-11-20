@@ -22,11 +22,19 @@ pub struct AppState {
 impl AppState {
     pub fn load() -> Self {
         let settings = Settings::load();
-        let sessions = SessionStore::open_in(
+        let mut sessions = SessionStore::open_in(
             SessionStore::default_root(),
             crate::language::resolve(&settings.language),
         );
-        // Old sessions go at startup, according to the retention setting.
+        sessions.set_recordings_root(crate::recstore::resolve(
+            &settings.recordings_dir,
+            crate::recstore::default_recordings_dir,
+        ));
+        // Recordings of earlier versions move into the recordings folder (once); cards of recordings that were deleted in
+        // Explorer go; old sessions go according to the retention setting, but never their recordings.
+        sessions.absorb_all_recordings();
+        sessions.migrate_recordings();
+        sessions.prune_missing_recordings();
         sessions.cleanup(settings.retention_days, now_ms());
         Self {
             settings: Mutex::new(settings),
@@ -72,12 +80,18 @@ pub fn apply(app: &AppHandle, settings: &Settings) {
         let _ = main.set_always_on_top(settings.always_on_top);
     }
     tray::set_language(app, &settings.language);
-    app.state::<AppState>()
-        .sessions
-        .lock()
-        .unwrap()
-        .set_language(crate::language::resolve(&settings.language));
-    crate::hotkey::apply(app, &settings.capture_hotkey);
+    crate::recording::apply_audio_settings(app);
+    {
+        let state = app.state::<AppState>();
+        let mut store = state.sessions.lock().unwrap();
+        store.set_language(crate::language::resolve(&settings.language));
+        // New recordings go to the folder of the setting; the existing ones stay until the user moves them.
+        store.set_recordings_root(crate::recstore::resolve(
+            &settings.recordings_dir,
+            crate::recstore::default_recordings_dir,
+        ));
+    }
+    crate::hotkey::apply(app, &settings.capture_hotkey, &settings.record_hotkey);
 }
 
 /// Only touches the Windows registry entry when the state differs.
@@ -185,6 +199,64 @@ pub(crate) fn change_session(
     };
     let _ = app.emit("session-changed", &session);
     Ok(session)
+}
+
+/// The folder the recordings are kept in (the setting, or the Videos folder + Snipmunk), and how many recordings are not in it.
+#[tauri::command]
+pub fn recordings_info(state: State<'_, AppState>) -> Value {
+    let store = state.sessions.lock().unwrap();
+    serde_json::json!({
+        "folder": store.recordings_root().to_string_lossy(),
+        "toMove": store.recordings_to_move().len(),
+    })
+}
+
+/// The default folders of recordings and of automatically saved screenshots (Videos / Pictures + Snipmunk).
+#[tauri::command]
+pub fn default_folders() -> Value {
+    serde_json::json!({
+        "recordings": crate::recstore::default_recordings_dir().to_string_lossy(),
+        "pictures": crate::recstore::default_pictures_dir().to_string_lossy(),
+    })
+}
+
+/// Cards of recordings that were deleted or moved away in Explorer are removed (the page asks when the recordings are shown).
+#[tauri::command]
+pub async fn refresh_recordings(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Session> {
+    let (session, removed) = {
+        let mut store = state.sessions.lock().unwrap();
+        let n = store.prune_missing_recordings();
+        (store.session().clone(), n)
+    };
+    if removed > 0 {
+        let _ = app.emit("session-changed", &session);
+    }
+    Ok(session)
+}
+
+/// Move the existing recordings into the recordings folder of the setting, one after the other (the lock is held for one
+/// recording at a time), telling the page the progress (`recordings-move`: done, total).
+#[tauri::command]
+pub async fn move_recordings(app: AppHandle, state: State<'_, AppState>) -> CmdResult<usize> {
+    let ids = state.sessions.lock().unwrap().recordings_to_move();
+    let total = ids.len();
+    let mut moved = 0;
+    for (i, id) in ids.iter().enumerate() {
+        let _ = app.emit(
+            "recordings-move",
+            serde_json::json!({ "done": i, "total": total }),
+        );
+        if state.sessions.lock().unwrap().relocate_capture(id) {
+            moved += 1;
+        }
+    }
+    let _ = app.emit(
+        "recordings-move",
+        serde_json::json!({ "done": total, "total": total }),
+    );
+    let session = state.sessions.lock().unwrap().session().clone();
+    let _ = app.emit("session-changed", &session);
+    Ok(moved)
 }
 
 /// The page tells which group tab is shown, so a capture lands there.
@@ -300,7 +372,7 @@ pub fn serve_image<R: tauri::Runtime>(
     let path = percent_decode(request.uri().path().trim_matches('/'));
     // A recording (the player reads it in parts: the video element sends Range requests).
     if let Some((session, file)) = path.split_once('/') {
-        if file.starts_with("recordings/") {
+        if file.starts_with("rec/") {
             let target = ctx
                 .app_handle()
                 .try_state::<AppState>()
@@ -380,6 +452,7 @@ fn serve_recording(
         Some("mp4") => "video/mp4",
         Some("m4a") => "audio/mp4",
         Some("wav") => "audio/wav",
+        Some("png") => "image/png",
         _ => "application/json",
     };
     let builder = tauri::http::Response::builder()

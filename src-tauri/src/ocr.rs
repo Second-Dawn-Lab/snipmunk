@@ -659,12 +659,14 @@ pub fn copy_table(html: String, text: String) -> CmdResult<()> {
 /// Open a page of the Windows settings (only the language page, for adding OCR languages).
 #[tauri::command]
 pub fn open_os_settings(page: String) -> CmdResult<()> {
-    if page != "language" {
-        return Err(CmdError::new("bad_request", "this page cannot be opened"));
-    }
+    let uri = match page.as_str() {
+        "language" => "ms-settings:regionlanguage",
+        "microphone" => "ms-settings:privacy-microphone",
+        _ => return Err(CmdError::new("bad_request", "this page cannot be opened")),
+    };
     #[cfg(windows)]
     return std::process::Command::new("explorer")
-        .arg("ms-settings:regionlanguage")
+        .arg(uri)
         .spawn()
         .map(|_| ())
         .map_err(|e| CmdError::new("io", e));

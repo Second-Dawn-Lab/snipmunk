@@ -36,18 +36,21 @@ export function App() {
   // Not while the shortcut dialog records a new shortcut.
   useEffect(() => {
     if (label !== "main" && label !== "settings") return;
-    const router = new ShortcutRouter(settings.captureHotkey);
+    // Each shortcut has its own router; the backend runs every key press once, per shortcut.
+    const routers: [ShortcutRouter, "capture" | "record"][] = [
+      [new ShortcutRouter(settings.captureHotkey), "capture"],
+      [new ShortcutRouter(settings.recordHotkey), "record"],
+    ];
     const onKey = (e: KeyboardEvent) => {
       if (document.querySelector(".shortcut-capture")) return;
-      const fired = router.onKey(
-        { code: e.code, repeat: e.repeat, ctrlKey: e.ctrlKey, altKey: e.altKey, shiftKey: e.shiftKey, metaKey: e.metaKey, altGraph: e.getModifierState("AltGraph") },
-        e.type === "keyup" ? "keyup" : "keydown",
-        isEditable(document.activeElement),
-      );
-      if (!fired) return;
-      e.preventDefault();
-      e.stopPropagation();
-      void ipc.shortcutFired("capture");
+      const key = { code: e.code, repeat: e.repeat, ctrlKey: e.ctrlKey, altKey: e.altKey, shiftKey: e.shiftKey, metaKey: e.metaKey, altGraph: e.getModifierState("AltGraph") };
+      for (const [router, name] of routers) {
+        if (!router.onKey(key, e.type === "keyup" ? "keyup" : "keydown", isEditable(document.activeElement))) continue;
+        e.preventDefault();
+        e.stopPropagation();
+        void ipc.shortcutFired(name);
+        return;
+      }
     };
     window.addEventListener("keydown", onKey, true);
     window.addEventListener("keyup", onKey, true);
@@ -55,7 +58,7 @@ export function App() {
       window.removeEventListener("keydown", onKey, true);
       window.removeEventListener("keyup", onKey, true);
     };
-  }, [settings.captureHotkey]);
+  }, [settings.captureHotkey, settings.recordHotkey]);
 
   useEffect(() => {
     // The direction comes from the locale (language.ts), never from a per-language rule in the CSS or components.

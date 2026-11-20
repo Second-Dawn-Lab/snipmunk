@@ -54,6 +54,11 @@ pub struct RecordingInfo {
     pub started_at: u64,
     /// "monitor" or "window".
     pub source: String,
+    /// The audio tracks next to the video (file names in the recording folder), when they were made.
+    pub system_file: Option<String>,
+    pub mic_file: Option<String>,
+    /// The cursor track (`cursor.jsonl`, see cursor.rs), when there is one.
+    pub cursor_file: Option<String>,
 }
 
 /// The rows of a BGRA picture in reverse order. A raw buffer given to the Media Foundation encoder is read as a bottom-up bitmap
@@ -187,6 +192,9 @@ struct Active {
     rel_dir: String,
     info: RecordingInfo,
     started: std::time::Instant,
+    /// The group of recordings it will be added to, and its name.
+    group_id: String,
+    name: String,
 }
 
 /// Is a recording running?
@@ -197,6 +205,39 @@ pub fn is_recording(app: &AppHandle) -> bool {
 fn announce(app: &AppHandle, recording: bool, _started_at: u64) {
     crate::tray::set_recording(app, recording);
     let _ = app.emit("recording-state", app.state::<Recorder>().state());
+}
+
+/// The switches of the bar (system sound, microphone) changed: the running recording follows (a track is made the first time its sound
+/// is switched on; the microphone is never opened while it is off). Runs on its own thread: it may wait for the recorder.
+pub fn apply_audio_settings(app: &AppHandle) {
+    if !is_recording(app) {
+        return;
+    }
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let (system, mic) = {
+            let s = app.state::<AppState>();
+            let s = s.settings.lock().unwrap();
+            (s.rec_system_sound, s.rec_mic)
+        };
+        let notice = {
+            let recorder = app.state::<Recorder>();
+            let guard = recorder.active.lock().unwrap();
+            #[cfg(windows)]
+            let n = guard
+                .as_ref()
+                .and_then(|a| a.handle.apply_audio(system, mic));
+            #[cfg(not(windows))]
+            let n: Option<&str> = {
+                let _ = (&guard, system, mic);
+                None
+            };
+            n
+        };
+        if let Some(kind) = notice {
+            let _ = app.emit("recording-notice", kind);
+        }
+    });
 }
 
 /// Pause (`true`) or resume (`false`) the recording: a pause ends the segment being written, the resume starts the next one.
@@ -420,6 +461,26 @@ fn prepare_screen(app: &AppHandle, area: Rect) {
     show_bar(app, area);
 }
 
+/// Where the floating bar goes (its top left corner): centred on the recorded area, below it when that fits on the monitor, else
+/// above it, else (the area fills the monitor) at the top centre inside the area, where the bar is left out of the video. Always
+/// inside the monitor. `gap` is the distance to the area.
+pub fn bar_position(area: Rect, mon: Rect, bar_w: i32, bar_h: i32, gap: i32) -> (i32, i32) {
+    let centre = area.x + area.w as i32 / 2;
+    let x = (centre - bar_w / 2)
+        .min(mon.x + mon.w as i32 - bar_w)
+        .max(mon.x);
+    let below = area.y + area.h as i32 + gap;
+    let above = area.y - gap - bar_h;
+    let y = if below + bar_h <= mon.y + mon.h as i32 {
+        below
+    } else if above >= mon.y {
+        above
+    } else {
+        (area.y + gap).max(mon.y)
+    };
+    (x, y)
+}
+
 /// The floating bar at the top centre of the recorded monitor: timer, stop and discard. It is excluded from the picture.
 fn show_bar(app: &AppHandle, area: Rect) {
     let Some(mon) = monitor_rect_at(area.x + area.w as i32 / 2, area.y + area.h as i32 / 2) else {
@@ -431,6 +492,14 @@ fn show_bar(app: &AppHandle, area: Rect) {
         .and_then(|w| w.scale_factor().ok())
         .unwrap_or(1.0);
     let (w, h) = ((200.0 * scale) as u32, (52.0 * scale) as u32);
+    // The bar is about 420 CSS pixels wide when it has loaded; its place is worked out for that width.
+    let (bx, by) = bar_position(
+        area,
+        mon,
+        (430.0 * scale) as i32,
+        h as i32,
+        (8.0 * scale) as i32,
+    );
     let built = tauri::WebviewWindowBuilder::new(
         app,
         "recbar",
@@ -447,10 +516,12 @@ fn show_bar(app: &AppHandle, area: Rect) {
     .visible(false)
     .build();
     if let Ok(win) = built {
-        let x = mon.x + (mon.w as i32 - w as i32) / 2;
-        let y = mon.y + (8.0 * scale) as i32;
         let _ = win.set_size(tauri::PhysicalSize::new(w, h));
-        let _ = win.set_position(tauri::PhysicalPosition::new(x, y));
+        // `bx` is the left edge of the full-size bar; the window is 200 wide at first and widens around its centre.
+        let _ = win.set_position(tauri::PhysicalPosition::new(
+            bx + (430.0 * scale) as i32 / 2 - w as i32 / 2,
+            by,
+        ));
         crate::webview::exclude_from_capture(&win);
         let _ = win.show();
     }
@@ -522,6 +593,17 @@ fn start_now(app: &AppHandle, source: Source, minimize_main: bool) -> CmdResult<
         .store(active.info.started_at, Ordering::SeqCst);
     let started_at = active.info.started_at;
     // The lock is held only to put the recording in; no window, tray or event call happens under it.
+    // The audio tracks that the switches ask for (the microphone is only opened when it is on).
+    #[cfg(windows)]
+    {
+        let (system, mic) = {
+            let s = state.settings.lock().unwrap();
+            (s.rec_system_sound, s.rec_mic)
+        };
+        if let Some(kind) = active.handle.apply_audio(system, mic) {
+            let _ = app.emit("recording-notice", kind);
+        }
+    }
     // The settings of the recording are on disk from the start: a recovery after a crash needs them.
     let _ = write_info(&active.dir, &active.info);
     *recorder.active.lock().unwrap() = Some(active);
@@ -550,12 +632,30 @@ fn prepare_and_start(
         let s = state.settings.lock().unwrap();
         (s.rec_fps, s.rec_quality.clone())
     };
-    let session_dir = state.sessions.lock().unwrap().session_dir();
-    let id = format!("r{:x}", now_ms());
-    let rel_dir = format!("recordings/{id}");
-    let dir = session_dir.join(&rel_dir);
+    // `<recordings folder><group><recording name>`: the group is the active group of recordings (made when there is none).
+    let name = recording_name();
+    let wanted = state.active_group.lock().unwrap().clone();
+    let (group_id, dir) = {
+        let mut store = state.sessions.lock().unwrap();
+        let group = match store
+            .session()
+            .groups
+            .iter()
+            .find(|g| Some(&g.id) == wanted.as_ref() && g.is_recording())
+        {
+            Some(g) => g.id.clone(),
+            None => store.ensure_recording_group().map_err(CmdError::from)?,
+        };
+        let dir = store
+            .new_recording_dir(&group, &name)
+            .map_err(CmdError::from)?;
+        (group, dir)
+    };
     std::fs::create_dir_all(&dir)?;
-    start_platform(app, dir, rel_dir, fps, &quality, source)
+    let mut active = start_platform(app, dir, String::new(), fps, &quality, source)?;
+    active.group_id = group_id;
+    active.name = name;
+    Ok(active)
 }
 
 /// Where the keyboard goes when Snipmunk has minimized: the recorded window, else the window in front at the area's centre.
@@ -791,7 +891,10 @@ fn active_of(
 ) -> Active {
     let info = RecordingInfo {
         version: 1,
-        screen_file: format!("{rel_dir}/screen.mp4"),
+        screen_file: {
+            let _ = &rel_dir;
+            "screen.mp4".to_string()
+        },
         width: handle.width,
         height: handle.height,
         fps,
@@ -806,6 +909,8 @@ fn active_of(
         rel_dir,
         info,
         started: std::time::Instant::now(),
+        group_id: String::new(),
+        name: String::new(),
     }
 }
 
@@ -859,6 +964,8 @@ fn finish(app: &AppHandle, state: &State<'_, AppState>, active: Active) -> CmdRe
         rel_dir,
         mut info,
         started,
+        group_id,
+        name,
     } = active;
     restore_screen(app);
     let stats = handle.stop().map_err(|e| CmdError::new("capture", e))?;
@@ -884,9 +991,21 @@ fn finish(app: &AppHandle, state: &State<'_, AppState>, active: Active) -> CmdRe
     for s in &stats.segments {
         let _ = std::fs::remove_file(s);
     }
+    info.cursor_file = stats
+        .cursor
+        .as_ref()
+        .and_then(|p| p.file_name())
+        .map(|n| n.to_string_lossy().into_owned());
+    for (kind, path) in &stats.audio {
+        let name = path.file_name().map(|n| n.to_string_lossy().into_owned());
+        match kind {
+            crate::audio::Kind::System => info.system_file = name,
+            crate::audio::Kind::Mic => info.mic_file = name,
+        }
+    }
     write_info(&dir, &info)?;
     let _ = &rel_dir;
-    let session = register(app, state, &dir, &info)?;
+    let session = register(app, state, &dir, &info, Some(&group_id), &name)?;
     // The recording is done: Snipmunk comes back to the front with the new recording selected (the page does the selecting).
     crate::tray::show_main(app);
     Ok(session)
@@ -898,6 +1017,8 @@ fn register(
     state: &State<'_, AppState>,
     dir: &Path,
     info: &RecordingInfo,
+    group: Option<&str>,
+    name: &str,
 ) -> CmdResult<Session> {
     let png = std::fs::read(dir.join("first.png")).map_err(|_| {
         CmdError::new(
@@ -908,16 +1029,15 @@ fn register(
     let image = image::load_from_memory(&png).map_err(|e| CmdError::new("io", e.to_string()))?;
     let thumb =
         crate::thumbs::thumbnail_png(&image.to_rgba8()).map_err(|m| CmdError::new("io", m))?;
-    let name = recording_name();
-    let wanted = state.active_group.lock().unwrap().clone();
+    let name = name.to_string();
     let (capture, group_id, session) = {
         let mut store = state.sessions.lock().unwrap();
-        // A recording goes into the active group of recordings (the first one, made if needed).
+        // A recording goes into the group it was started in (the first group of recordings if that is gone).
         let group = match store
             .session()
             .groups
             .iter()
-            .find(|g| Some(&g.id) == wanted.as_ref() && g.is_recording())
+            .find(|g| Some(g.id.as_str()) == group && g.is_recording())
         {
             Some(g) => g.id.clone(),
             None => store.ensure_recording_group().map_err(CmdError::from)?,
@@ -934,8 +1054,10 @@ fn register(
             )
             .map_err(CmdError::from)?;
         store
-            .set_video(&capture.id, &info.screen_file, info.duration_ms)
+            .set_recording(&capture.id, dir, info.duration_ms)
             .map_err(CmdError::from)?;
+        // The group may have been renamed or the recording started in another group: the folder follows the card.
+        let _ = &info.screen_file;
         (capture, group, store.session().clone())
     };
     let _ = app.emit("session-changed", &session);
@@ -947,28 +1069,62 @@ fn register(
 }
 
 /// Recording folders of the session that were cut off (segments but no joined video): a crash or a power cut. Names only.
-pub fn unfinished_in(session_dir: &Path) -> Vec<String> {
-    let Ok(rd) = std::fs::read_dir(session_dir.join("recordings")) else {
-        return Vec::new();
+pub fn unfinished_in(recordings_root: &Path) -> Vec<String> {
+    let mut v = Vec::new();
+    let Ok(groups) = std::fs::read_dir(recordings_root) else {
+        return v;
     };
-    let mut v: Vec<String> = rd
-        .filter_map(|e| e.ok())
-        .filter(|e| e.path().is_dir())
-        .filter(|e| {
-            let p = e.path();
-            !p.join("screen.mp4").exists() && !crate::mp4join::segments_in(&p).is_empty()
-        })
-        .filter_map(|e| e.file_name().into_string().ok())
-        .collect();
+    for g in groups.filter_map(|e| e.ok()).filter(|e| e.path().is_dir()) {
+        let Ok(recs) = std::fs::read_dir(g.path()) else {
+            continue;
+        };
+        for r in recs.filter_map(|e| e.ok()).filter(|e| e.path().is_dir()) {
+            let p = r.path();
+            if !p.join("screen.mp4").exists() && !crate::mp4join::segments_in(&p).is_empty() {
+                v.push(format!(
+                    "{}/{}",
+                    g.file_name().to_string_lossy(),
+                    r.file_name().to_string_lossy()
+                ));
+            }
+        }
+    }
     v.sort();
     v
+}
+
+/// `Group/Recording` from the page, checked: two plain folder names, and a recording that is really unfinished.
+fn unfinished_dir(state: &AppState, id: &str) -> Option<(PathBuf, String, String)> {
+    let (group, rec) = id.split_once('/')?;
+    let ok = |n: &str| !n.is_empty() && crate::recstore::safe_name(n) == n && n != "." && n != "..";
+    if !ok(group) || !ok(rec) {
+        return None;
+    }
+    let root = state
+        .sessions
+        .lock()
+        .unwrap()
+        .recordings_root()
+        .to_path_buf();
+    unfinished_in(&root).contains(&id.to_string()).then(|| {
+        (
+            root.join(group).join(rec),
+            group.to_string(),
+            rec.to_string(),
+        )
+    })
 }
 
 /// The recordings that a crash left unfinished (the page offers to recover them when it starts).
 #[tauri::command]
 pub async fn unfinished_recordings(state: State<'_, AppState>) -> CmdResult<Vec<String>> {
-    let dir = state.sessions.lock().unwrap().session_dir();
-    Ok(unfinished_in(&dir))
+    let root = state
+        .sessions
+        .lock()
+        .unwrap()
+        .recordings_root()
+        .to_path_buf();
+    Ok(unfinished_in(&root))
 }
 
 /// Recover a cut-off recording: its readable segments are joined (what the crash cut off is lost: the last few seconds), and the
@@ -979,11 +1135,8 @@ pub async fn recover_recording(
     app: AppHandle,
     id: String,
 ) -> CmdResult<Session> {
-    if !crate::sessions::is_safe_id(&id) {
-        return Err(CmdError::new("invalid", "not a recording"));
-    }
-    let session_dir = state.sessions.lock().unwrap().session_dir();
-    let dir = session_dir.join("recordings").join(&id);
+    let (dir, group_name, rec_name) = unfinished_dir(&state, &id)
+        .ok_or_else(|| CmdError::new("invalid", "not an unfinished recording"))?;
     let all = crate::mp4join::segments_in(&dir);
     let segments = crate::mp4join::readable(&all);
     if segments.is_empty() {
@@ -997,30 +1150,51 @@ pub async fn recover_recording(
         .and_then(|b| serde_json::from_slice(&b).ok())
         .unwrap_or_default();
     info.version = 1;
-    info.screen_file = format!("recordings/{id}/screen.mp4");
+    info.screen_file = "screen.mp4".into();
     info.duration_ms = joined.duration_ms;
     info.frames = joined.samples;
+    // The audio tracks: the header of a file that was cut off is made right, and the track is cut to the length of the video.
+    for (kind, slot) in [
+        (crate::audio::Kind::System, &mut info.system_file),
+        (crate::audio::Kind::Mic, &mut info.mic_file),
+    ] {
+        let path = crate::audio::track_path(&dir, kind);
+        *slot = match crate::audio::repair(&path, Some(joined.duration_ms)) {
+            Ok(_) if crate::audio::wav_ms(&path) > 0 => Some(kind.file_name().to_string()),
+            _ => None,
+        };
+    }
+    info.cursor_file = dir
+        .join("cursor.jsonl")
+        .exists()
+        .then(|| "cursor.jsonl".to_string());
     write_info(&dir, &info)?;
     for s in &all {
         let _ = std::fs::remove_file(s);
     }
-    register(&app, &state, &dir, &info)
+    // The group of the folder (a group of recordings of that name, made when there is none).
+    let group = {
+        let mut store = state.sessions.lock().unwrap();
+        let found = store
+            .session()
+            .groups
+            .iter()
+            .find(|g| g.is_recording() && crate::recstore::safe_name(&g.name) == group_name)
+            .map(|g| g.id.clone());
+        match found {
+            Some(g) => g,
+            None => store
+                .create_group_of(Some(group_name.clone()), true)
+                .map_err(CmdError::from)?,
+        }
+    };
+    register(&app, &state, &dir, &info, Some(&group), &rec_name)
 }
 
 /// Throw a cut-off recording away.
 #[tauri::command]
 pub async fn drop_unfinished_recording(state: State<'_, AppState>, id: String) -> CmdResult<()> {
-    if !crate::sessions::is_safe_id(&id) {
-        return Err(CmdError::new("invalid", "not a recording"));
-    }
-    let dir = state
-        .sessions
-        .lock()
-        .unwrap()
-        .session_dir()
-        .join("recordings")
-        .join(&id);
-    if unfinished_in(dir.parent().unwrap_or(&dir)).contains(&id) {
+    if let Some((dir, _, _)) = unfinished_dir(&state, &id) {
         let _ = std::fs::remove_dir_all(&dir);
     }
     Ok(())
@@ -1120,7 +1294,15 @@ mod win {
         h: u32,
         segment_len: std::time::Duration,
     ) -> Result<Handle, String> {
+        let audio = Arc::new(Mutex::new(crate::audio::Audio::new(dir, true)));
+        // A generated cursor movement: the real cursor is not watched in a generated recording.
+        let cursor = Arc::new(Mutex::new(
+            crate::cursor::poller::start(dir, crate::cursor::Area { x: 0, y: 0, w, h }, fps, true)
+                .ok(),
+        ));
         let shared = Arc::new(Shared {
+            audio: audio.clone(),
+            cursor: cursor.clone(),
             segments: Mutex::new(Segments::new(dir, w, h, fps, quality, segment_len)),
             closed: AtomicBool::new(false),
             first_png: dir.join("first.png"),
@@ -1140,6 +1322,7 @@ mod win {
                 while !stop.load(Ordering::Relaxed) {
                     let frame = super::test_pattern(w as usize, h as usize, i);
                     if i == 0 {
+                        shared.first_picture();
                         if let Some(img) = image::RgbaImage::from_raw(w, h, bgra_to_rgba(&frame)) {
                             let _ = img.save(&shared.first_png);
                         }
@@ -1172,6 +1355,8 @@ mod win {
             width: w,
             height: h,
             source: "synthetic",
+            audio,
+            cursor,
         })
     }
 
@@ -1347,6 +1532,21 @@ mod win {
         t0: AtomicI64,
         last_ms: AtomicU64,
         frames: AtomicU64,
+        /// The audio and the cursor track start their clocks with the first picture, so they are in step with the video.
+        audio: Arc<Mutex<crate::audio::Audio>>,
+        cursor: Arc<Mutex<Option<crate::cursor::poller::Cursor>>>,
+    }
+
+    impl Shared {
+        fn first_picture(&self) {
+            self.audio
+                .lock()
+                .unwrap()
+                .start_clock(crate::audio::wasapi::now());
+            if let Some(c) = self.cursor.lock().unwrap().as_ref() {
+                c.begin();
+            }
+        }
     }
 
     pub struct Stats {
@@ -1354,6 +1554,10 @@ mod win {
         pub last_ms: u64,
         /// The segment files, in order.
         pub segments: Vec<std::path::PathBuf>,
+        /// The audio tracks that were made (system sound, microphone).
+        pub audio: Vec<(crate::audio::Kind, std::path::PathBuf)>,
+        /// The cursor track file.
+        pub cursor: Option<std::path::PathBuf>,
     }
 
     pub struct Handle {
@@ -1364,9 +1568,18 @@ mod win {
         pub width: u32,
         pub height: u32,
         pub source: &'static str,
+        audio: Arc<Mutex<crate::audio::Audio>>,
+        cursor: Arc<Mutex<Option<crate::cursor::poller::Cursor>>>,
     }
 
     impl Handle {
+        /// Make the audio tracks match the switches (system sound, microphone). A reason why one could not be made is returned.
+        pub fn apply_audio(&self, system: bool, mic: bool) -> Option<&'static str> {
+            let mut a = self.audio.lock().unwrap();
+            a.apply(system, mic);
+            a.notice.take()
+        }
+
         /// Stop capturing and finish the file.
         pub fn stop(mut self) -> Result<Stats, String> {
             if let Some(c) = self.control.take() {
@@ -1376,20 +1589,34 @@ mod win {
                 stop.store(true, Ordering::Relaxed);
                 let _ = thread.join();
             }
+            // The end of the recorded time: before the encoder is finished (that takes a moment the video does not have).
+            let end = crate::audio::wasapi::now();
             let segments = self.shared.segments.lock().unwrap().finish_all()?;
+            let audio = self.audio.lock().unwrap().finish(end);
+            let cursor = self.cursor.lock().unwrap().take().and_then(|c| c.finish());
             Ok(Stats {
+                cursor,
                 frames: self.shared.frames.load(Ordering::Relaxed),
                 last_ms: self.shared.last_ms.load(Ordering::Relaxed),
                 segments,
+                audio,
             })
         }
 
         pub fn pause(&self) {
             self.shared.segments.lock().unwrap().pause();
+            self.audio.lock().unwrap().pause();
+            if let Some(c) = self.cursor.lock().unwrap().as_ref() {
+                c.pause();
+            }
         }
 
         pub fn resume(&self) {
             self.shared.segments.lock().unwrap().resume();
+            self.audio.lock().unwrap().resume();
+            if let Some(c) = self.cursor.lock().unwrap().as_ref() {
+                c.resume();
+            }
         }
 
         /// The recorded monitor or window went away.
@@ -1419,6 +1646,9 @@ mod win {
             let crop = *s.crop.lock().unwrap();
             // The first picture is the card's picture: the recorded area only (never more of the screen than is recorded).
             let first = !s.first_done.swap(true, Ordering::Relaxed);
+            if first {
+                s.first_picture();
+            }
             if first && crop.is_none() {
                 let _ = frame.save_as_image(&s.first_png, ImageFormat::Png);
             }
@@ -1463,7 +1693,8 @@ mod win {
         // The monitor and the crop (relative to the monitor) of an area; the size that is recorded.
         let mut monitor = None;
         let mut crop = None;
-        let (width, height, source) = match &target {
+        // Where the recorded picture starts on the screen (the cursor track is in the pixels of the picture).
+        let (width, height, source, origin) = match &target {
             Target::Area { x, y, w, h } => {
                 let (hmon, mx, my, mw, mh) = monitor_at(x + (*w as i32) / 2, y + (*h as i32) / 2)?;
                 monitor = Some(hmon);
@@ -1475,12 +1706,47 @@ mod win {
                 if cw < mw || ch < mh {
                     crop = Some((cx, cy, cw, ch));
                 }
-                (cw, ch, if crop.is_some() { "region" } else { "monitor" })
+                (
+                    cw,
+                    ch,
+                    if crop.is_some() { "region" } else { "monitor" },
+                    (mx + cx as i32, my + cy as i32),
+                )
             }
-            Target::Window { width, height, .. } => (*width, *height, "window"),
+            Target::Window {
+                hwnd,
+                width,
+                height,
+            } => {
+                let mut r = windows::Win32::Foundation::RECT::default();
+                // SAFETY: `r` is valid for the call; a window that is gone leaves the origin at 0.
+                let _ = unsafe {
+                    windows::Win32::UI::WindowsAndMessaging::GetWindowRect(
+                        windows::Win32::Foundation::HWND(*hwnd as *mut _),
+                        &mut r,
+                    )
+                };
+                (*width, *height, "window", (r.left, r.top))
+            }
         };
         let (w, h) = (super::even(width), super::even(height));
+        let cursor = crate::cursor::poller::start(
+            dir,
+            crate::cursor::Area {
+                x: origin.0,
+                y: origin.1,
+                w,
+                h,
+            },
+            fps,
+            false,
+        )
+        .ok();
+        let audio = Arc::new(Mutex::new(crate::audio::Audio::new(dir, false)));
+        let cursor = Arc::new(Mutex::new(cursor));
         let shared = Arc::new(Shared {
+            audio: audio.clone(),
+            cursor: cursor.clone(),
             segments: Mutex::new(Segments::new(
                 dir,
                 w,
@@ -1531,6 +1797,8 @@ mod win {
             width: w,
             height: h,
             source,
+            audio,
+            cursor,
         })
     }
 }
@@ -1556,6 +1824,38 @@ mod tests {
         assert!((2_500_000.0..3_500_000.0).contains(&std));
         assert!((std * 2.0 - bitrate_for(3440, 1440, 30, "high") as f64).abs() < 10.0);
         assert!(std / 8.0 * 60.0 / 1e6 < 23.0);
+    }
+
+    #[test]
+    fn the_bar_goes_below_or_above_the_area_or_inside_it_when_nothing_else_fits() {
+        let mon = Rect::new(0, 0, 1920, 1080);
+        // Room below: just below the area, centred on it.
+        assert_eq!(
+            bar_position(Rect::new(400, 200, 800, 400), mon, 400, 52, 8),
+            (600, 608)
+        );
+        // No room below (the area reaches the bottom): above it.
+        assert_eq!(
+            bar_position(Rect::new(400, 600, 800, 470), mon, 400, 52, 8),
+            (600, 540)
+        );
+        // The area fills the monitor: top centre inside the area.
+        assert_eq!(bar_position(mon, mon, 400, 52, 8), (760, 8));
+        // Never outside the monitor, also next to its edge.
+        assert_eq!(
+            bar_position(Rect::new(0, 100, 200, 200), mon, 400, 52, 8).0,
+            0
+        );
+        assert_eq!(
+            bar_position(Rect::new(1800, 100, 120, 200), mon, 400, 52, 8).0,
+            1520
+        );
+        // A second monitor to the left (negative coordinates).
+        let left = Rect::new(-1920, 0, 1920, 1080);
+        assert_eq!(
+            bar_position(Rect::new(-1500, 100, 600, 300), left, 400, 52, 8),
+            (-1400, 408)
+        );
     }
 
     #[test]
@@ -1618,6 +1918,9 @@ mod tests {
             frames: 45,
             started_at: 7,
             source: "monitor".into(),
+            system_file: Some("system.wav".into()),
+            mic_file: None,
+            cursor_file: Some("cursor.jsonl".into()),
         };
         write_info(dir.path(), &info).unwrap();
         let back: RecordingInfo =
@@ -1730,5 +2033,156 @@ mod segment_tests {
         assert_eq!(good.len(), files.len() - 1);
         let joined = mp4join::join(&good, &dir.path().join("screen.mp4")).unwrap();
         assert!(joined.samples > 20);
+    }
+}
+
+#[cfg(all(test, windows))]
+mod render_tests {
+    use super::*;
+    use crate::audio::{TrackWriter, TICKS};
+    use std::sync::atomic::AtomicBool;
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    /// A generated recording of `secs` seconds (no screen, no real sound): moving test pattern in 2 s segments, a tone for each
+    /// track, a generated cursor track. Returns the folder's `RecordingInfo` that was written.
+    fn generated(dir: &Path, w: u32, h: u32, fps: u32, secs: u32) {
+        let mut seg = win::Segments::new(dir, w, h, fps, "standard", Duration::from_secs(2));
+        for i in 0..(fps * secs) as usize {
+            let f = flip_rows(
+                &test_pattern(w as usize, h as usize, i),
+                w as usize,
+                h as usize,
+            );
+            seg.send_buffer(&f, i as i64 * (TICKS / fps as i64))
+                .unwrap();
+        }
+        let files = seg.finish_all().unwrap();
+        let joined = crate::mp4join::join(&files, &dir.join("screen.mp4")).unwrap();
+        for f in &files {
+            let _ = std::fs::remove_file(f);
+        }
+        for (name, hz) in [("system.wav", 440.0f64), ("mic.wav", 880.0)] {
+            let on = Arc::new(AtomicBool::new(true));
+            let mut t = TrackWriter::create(&dir.join(name), 44_100, 2, 0, on).unwrap();
+            let rate = 44_100usize;
+            for k in 0..(secs as usize * 100) {
+                let chunk: Vec<f32> = (0..rate / 100)
+                    .flat_map(|i| {
+                        let n = k * rate / 100 + i;
+                        let v = ((n as f64 / rate as f64 * hz * std::f64::consts::TAU).sin() * 0.3)
+                            as f32;
+                        [v, v]
+                    })
+                    .collect();
+                t.push(&chunk, k as i64 * TICKS / 100);
+            }
+            t.finish(secs as i64 * TICKS).unwrap();
+        }
+        let area = crate::cursor::Area { x: 0, y: 0, w, h };
+        let mut s = crate::cursor::Sampler::new(area, 500);
+        let mut a =
+            crate::cursor::Appender::create(&dir.join("cursor.jsonl"), &s.header(fps)).unwrap();
+        let mut img = image::RgbaImage::new(24, 24);
+        for p in img.pixels_mut() {
+            *p = image::Rgba([255, 255, 255, 255]);
+        }
+        std::fs::create_dir_all(dir.join("cursors")).unwrap();
+        img.save(dir.join("cursors").join("arrow.png")).unwrap();
+        a.define_shape(
+            0,
+            &crate::cursor::Shape {
+                id: "arrow".into(),
+                hx: 0,
+                hy: 0,
+                w: 24,
+                h: 24,
+                file: "cursors/arrow.png".into(),
+            },
+        )
+        .unwrap();
+        for ms in (0..secs as u64 * 1000).step_by(8) {
+            let r = crate::cursor::Reading {
+                x: (w / 2) as i32 + ((ms as f64 / 500.0).cos() * (w / 4) as f64) as i32,
+                y: (h / 2) as i32 + ((ms as f64 / 500.0).sin() * (h / 4) as f64) as i32,
+                visible: true,
+                shape: "arrow".into(),
+                left: false,
+                right: false,
+            };
+            for l in s.feed(ms, &r) {
+                a.line(&l).unwrap();
+            }
+        }
+        a.finish().unwrap();
+        let info = RecordingInfo {
+            version: 1,
+            screen_file: "screen.mp4".into(),
+            width: w,
+            height: h,
+            fps,
+            quality: "standard".into(),
+            duration_ms: joined.duration_ms,
+            frames: joined.samples,
+            system_file: Some("system.wav".into()),
+            mic_file: Some("mic.wav".into()),
+            cursor_file: Some("cursor.jsonl".into()),
+            ..Default::default()
+        };
+        write_info(dir, &info).unwrap();
+    }
+
+    #[test]
+    fn a_generated_1080p_recording_renders_with_cursor_and_mixed_sound_faster_than_real_time() {
+        let base = std::env::var("SNIPMUNK_TEST_DIR").unwrap_or_else(|_| ".".into());
+        let dir = tempfile::tempdir_in(base).unwrap();
+        let env = |k: &str, d: u32| {
+            std::env::var(k)
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(d)
+        };
+        let (w, h, fps, secs) = (
+            env("SNIPMUNK_RENDER_W", 1920),
+            env("SNIPMUNK_RENDER_H", 1080),
+            30u32,
+            6u32,
+        );
+        generated(dir.path(), w, h, fps, secs);
+        let cancel = AtomicBool::new(false);
+        let r = crate::render::win::render(dir.path(), 1.0, 1.0, &|_| {}, &cancel).unwrap();
+        assert!(r.made);
+        eprintln!(
+            "render of {secs} s of {w}x{h} at {fps} fps: {} frames in {:.2} s = {:.1}x real time",
+            r.frames,
+            r.seconds,
+            secs as f64 / r.seconds
+        );
+        assert_eq!(r.frames as u32, fps * secs);
+        // The file reads back: one video track with all the pictures and an audio track.
+        let f = std::fs::File::open(&r.file).unwrap();
+        let size = f.metadata().unwrap().len();
+        let reader = mp4::Mp4Reader::read_header(std::io::BufReader::new(f), size).unwrap();
+        let kinds: Vec<_> = reader
+            .tracks()
+            .values()
+            .filter_map(|t| t.track_type().ok())
+            .collect();
+        assert!(
+            kinds.contains(&mp4::TrackType::Video) && kinds.contains(&mp4::TrackType::Audio),
+            "{kinds:?}"
+        );
+        let secs_out = reader.duration().as_secs_f64();
+        assert!((secs_out - secs as f64).abs() < 0.3, "{secs_out}");
+        // A second render finds the file fresh and does nothing; a change makes it render again.
+        let again = crate::render::win::render(dir.path(), 1.0, 1.0, &|_| {}, &cancel).unwrap();
+        assert!(!again.made);
+        let louder = crate::render::win::render(dir.path(), 1.0, 0.5, &|_| {}, &cancel).unwrap();
+        assert!(louder.made);
+        // A render that is cancelled leaves no partial file.
+        let stop = AtomicBool::new(true);
+        std::fs::remove_file(dir.path().join("final.key")).unwrap();
+        assert!(crate::render::win::render(dir.path(), 1.0, 1.0, &|_| {}, &stop).is_err());
+        assert!(!dir.path().join("final.mp4.part").exists());
     }
 }

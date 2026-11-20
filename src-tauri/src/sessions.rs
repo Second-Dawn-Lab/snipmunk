@@ -59,6 +59,11 @@ pub struct Capture {
     pub duration_ms: u64,
     /// The screen video of a recording, relative to the session folder (`recordings/<id>/screen.mp4`).
     pub video_file: Option<String>,
+    /// The folder of a recording (an absolute path, `<recordings folder>\<group>\<recording>`); `video_file` is then the name of
+    /// the video in it. `None` in sessions of earlier versions (their recordings are moved there once).
+    pub video_dir: Option<String>,
+    /// The file a screenshot was saved to automatically (the setting "Save each screenshot automatically"), if any.
+    pub saved_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -310,6 +315,13 @@ pub fn lowest_free_group_number(groups: &[Group]) -> u32 {
     (1..).find(|n| !used.contains(n)).unwrap_or(1)
 }
 
+/// Does this session hold recordings (cards of recording groups)?
+fn theirs_is_empty(s: &Session) -> bool {
+    !s.groups
+        .iter()
+        .any(|g| g.is_recording() && !g.captures.is_empty())
+}
+
 fn clean_name(name: &str) -> StoreResult<String> {
     let name = name.trim();
     if name.is_empty() {
@@ -337,6 +349,8 @@ pub struct SessionStore {
     session: Session,
     /// The interface language: names the groups the store makes itself.
     lang: String,
+    /// The folder that holds the recordings (see `recstore`).
+    rec_root: PathBuf,
 }
 
 impl SessionStore {
@@ -363,10 +377,12 @@ impl SessionStore {
             .max_by_key(|s| s.updated_at)
             .unwrap_or_else(|| Session::new(lang));
         let migrated = session.migrate_videos(lang);
+        let rec_root = root.with_file_name("recordings");
         let store = Self {
             root,
             session,
             lang: lang.to_string(),
+            rec_root,
         };
         // A brand new session is written at once, so it exists on disk before the first capture.
         if migrated || !store.session_dir().join(SESSION_FILE).exists() {
@@ -431,31 +447,141 @@ impl SessionStore {
         let fresh = Session::named(group_name, &self.lang);
         self.write(&fresh)?;
         let old = std::mem::replace(&mut self.session, fresh);
-        if discard_previous {
-            let _ = fs::remove_dir_all(self.root.join(&old.id));
-        }
+        // Recordings are never deleted by a new session: their groups come along.
+        self.absorb_recordings(old, discard_previous);
         Ok(())
+    }
+
+    /// The folder that holds the recordings.
+    pub fn recordings_root(&self) -> &Path {
+        &self.rec_root
+    }
+
+    pub fn set_recordings_root(&mut self, root: PathBuf) {
+        self.rec_root = root;
+    }
+
+    /// The groups of recordings of another session (`old`) move into this one (a group of the same name takes the cards), so a
+    /// new session, the retention setting and clear-on-exit never take a recording. With `discard_old` the old session folder is
+    /// deleted afterwards, otherwise only its recording groups are taken out of it.
+    fn absorb_recordings(&mut self, mut old: Session, discard_old: bool) {
+        let old_dir = self.root.join(&old.id);
+        let theirs: Vec<Group> = old
+            .groups
+            .iter()
+            .filter(|g| g.is_recording() && !g.captures.is_empty())
+            .cloned()
+            .collect();
+        if !theirs.is_empty() {
+            let dir = self.session_dir();
+            for c in theirs.iter().flat_map(|g| &g.captures) {
+                for f in std::iter::once(&c.file).chain(c.thumbnail.iter()) {
+                    if is_safe_relative(f) {
+                        let to = dir.join(f);
+                        if let Some(p) = to.parent() {
+                            let _ = fs::create_dir_all(p);
+                        }
+                        let _ = fs::copy(old_dir.join(f), to);
+                    }
+                }
+                // A recording of an earlier version lives in its session folder: it moves along (migrated later).
+                if c.video_dir.is_none() {
+                    if let Some(parent) =
+                        c.video_file.as_deref().and_then(|v| Path::new(v).parent())
+                    {
+                        if is_safe_relative(&parent.to_string_lossy()) {
+                            let _ =
+                                crate::recstore::move_dir(&old_dir.join(parent), &dir.join(parent));
+                        }
+                    }
+                }
+            }
+            let lang = self.lang.clone();
+            let _ = self.change(|s| {
+                for g in theirs {
+                    let index = match s
+                        .groups
+                        .iter()
+                        .position(|x| x.is_recording() && x.name == g.name)
+                    {
+                        Some(i) => i,
+                        None => {
+                            let id = s.push_group_of(Some(g.name.clone()), &lang, true);
+                            s.groups.iter().position(|x| x.id == id).unwrap_or(0)
+                        }
+                    };
+                    let group = &mut s.groups[index];
+                    for c in g.captures {
+                        if !group.captures.iter().any(|x| x.id == c.id) {
+                            group.captures.push(c);
+                        }
+                    }
+                }
+                Ok(())
+            });
+        }
+        if discard_old {
+            let _ = fs::remove_dir_all(&old_dir);
+        } else if !theirs_is_empty(&old) {
+            old.groups.retain(|g| !g.is_recording());
+            if old.groups.is_empty() {
+                let _ = fs::remove_dir_all(&old_dir);
+            } else {
+                let _ = self.write(&old);
+            }
+        }
+    }
+
+    /// Sessions other than the current one that still hold recordings (an earlier version kept them per session): their
+    /// recordings move into the current session.
+    pub fn absorb_all_recordings(&mut self) {
+        let current = self.session.id.clone();
+        for s in Self::list(&self.root) {
+            if s.id != current && !theirs_is_empty(&s) {
+                self.absorb_recordings(s, false);
+            }
+        }
     }
 
     /// Delete the current session from disk (clear on exit). The store must not be used for changes afterwards.
     pub fn delete_current(&mut self) {
+        if !theirs_is_empty(&self.session) {
+            // Recordings stay: only the screenshots are deleted with the session.
+            let dir = self.session_dir();
+            let mut kept = self.session.clone();
+            for g in kept.groups.iter().filter(|g| !g.is_recording()) {
+                for c in &g.captures {
+                    for f in std::iter::once(&c.file).chain(c.thumbnail.iter()) {
+                        if is_safe_relative(f) {
+                            let _ = fs::remove_file(dir.join(f));
+                        }
+                    }
+                }
+            }
+            kept.groups.retain(|g| g.is_recording());
+            kept.renumber_groups();
+            let _ = self.write(&kept);
+            return;
+        }
         let _ = fs::remove_dir_all(self.session_dir());
     }
 
     /// Delete sessions other than the current one whose last change is older than `days` days (0 = keep all).
     /// Returns how many were deleted.
-    pub fn cleanup(&self, days: u32, now: u64) -> usize {
+    pub fn cleanup(&mut self, days: u32, now: u64) -> usize {
         if days == 0 {
             return 0;
         }
         let limit = u64::from(days) * DAY_MS;
         let mut removed = 0;
         for s in Self::list(&self.root) {
-            if s.id != self.session.id
-                && now.saturating_sub(s.updated_at) > limit
-                && fs::remove_dir_all(self.root.join(&s.id)).is_ok()
-            {
-                removed += 1;
+            if s.id != self.session.id && now.saturating_sub(s.updated_at) > limit {
+                let id = s.id.clone();
+                // Recordings are never deleted by the retention setting.
+                self.absorb_recordings(s, false);
+                if fs::remove_dir_all(self.root.join(&id)).is_ok() {
+                    removed += 1;
+                }
             }
         }
         removed
@@ -490,12 +616,185 @@ impl SessionStore {
         self.change(|s| {
             s.group_mut(id)?.name = name;
             Ok(())
-        })
+        })?;
+        // The folder of the group follows its name.
+        self.relocate_recordings(id);
+        Ok(())
+    }
+
+    /// Put the recording folders of a group where its name says (`<recordings folder><group><recording>`), after a rename or
+    /// when recordings were moved into it. A folder that cannot be moved stays where it is: the card keeps working.
+    fn relocate_recordings(&mut self, group_id: &str) {
+        let ids: Vec<String> = self
+            .session
+            .groups
+            .iter()
+            .filter(|g| g.id == group_id && g.is_recording())
+            .flat_map(|g| g.captures.iter().map(|c| c.id.clone()))
+            .collect();
+        for id in ids {
+            self.relocate_capture(&id);
+        }
+    }
+
+    /// The recordings that are not where the recordings folder and their group say (the folder setting changed, or a group was
+    /// renamed while a folder could not be moved).
+    pub fn recordings_to_move(&self) -> Vec<String> {
+        let mut v = Vec::new();
+        for g in self.session.groups.iter().filter(|g| g.is_recording()) {
+            let parent = self.rec_root.join(crate::recstore::safe_name(&g.name));
+            for c in &g.captures {
+                if let Some(d) = c.video_dir.as_deref().map(PathBuf::from) {
+                    if d.parent() != Some(parent.as_path()) && d.exists() {
+                        v.push(c.id.clone());
+                    }
+                }
+            }
+        }
+        v
+    }
+
+    /// Move the folder of one recording to where its group says. True when it moved.
+    pub fn relocate_capture(&mut self, id: &str) -> bool {
+        let Some((g, c)) = self.session.find_capture(id) else {
+            return false;
+        };
+        let group = &self.session.groups[g];
+        if !group.is_recording() {
+            return false;
+        }
+        let Some(dir) = group.captures[c].video_dir.as_deref().map(PathBuf::from) else {
+            return false;
+        };
+        let target_parent = self.rec_root.join(crate::recstore::safe_name(&group.name));
+        if dir.parent() == Some(target_parent.as_path()) || !dir.exists() {
+            return false;
+        }
+        let leaf = dir
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let to = crate::recstore::unique_dir(&target_parent, &leaf);
+        if crate::recstore::move_dir(&dir, &to).is_err() {
+            return false;
+        }
+        let to_s = to.to_string_lossy().into_owned();
+        let _ = self.change(|s| {
+            if let Some((g, c)) = s.find_capture(id) {
+                s.groups[g].captures[c].video_dir = Some(to_s);
+            }
+            Ok(())
+        });
+        if let Some(p) = dir.parent() {
+            crate::recstore::remove_if_empty(p);
+        }
+        true
+    }
+
+    /// Recordings of an earlier version (in their session folder) move into the recordings folder, once. Returns how many.
+    pub fn migrate_recordings(&mut self) -> usize {
+        let dir = self.session_dir();
+        let mut done: Vec<(String, String)> = Vec::new();
+        for g in self.session.groups.iter().filter(|g| g.is_recording()) {
+            let parent = self.rec_root.join(crate::recstore::safe_name(&g.name));
+            for c in &g.captures {
+                let (None, Some(v)) = (&c.video_dir, &c.video_file) else {
+                    continue;
+                };
+                let Some(from) = Path::new(v)
+                    .parent()
+                    .filter(|p| is_safe_relative(&p.to_string_lossy()))
+                    .map(|p| dir.join(p))
+                else {
+                    continue;
+                };
+                if !from.exists() {
+                    continue;
+                }
+                let to = crate::recstore::unique_dir(&parent, &c.name);
+                if crate::recstore::move_dir(&from, &to).is_ok() {
+                    done.push((c.id.clone(), to.to_string_lossy().into_owned()));
+                }
+            }
+        }
+        let n = done.len();
+        if n > 0 {
+            let _ = self.change(|s| {
+                for (id, to) in &done {
+                    if let Some((g, c)) = s.find_capture(id) {
+                        let cap = &mut s.groups[g].captures[c];
+                        cap.video_dir = Some(to.clone());
+                        cap.video_file = Some("screen.mp4".into());
+                    }
+                }
+                Ok(())
+            });
+        }
+        n
+    }
+
+    /// Cards of recordings whose files were deleted or moved away (in Explorer) are removed. Returns how many.
+    pub fn prune_missing_recordings(&mut self) -> usize {
+        let dir = self.session_dir();
+        let gone: Vec<String> = self
+            .session
+            .groups
+            .iter()
+            .flat_map(|g| &g.captures)
+            .filter(|c| c.video_file.is_some())
+            .filter(|c| match (&c.video_dir, &c.video_file) {
+                (Some(d), Some(f)) => !Path::new(d).join(f).exists(),
+                (None, Some(f)) => !dir.join(f).exists(),
+                _ => false,
+            })
+            .map(|c| c.id.clone())
+            .collect();
+        for id in &gone {
+            // The recording folder is already gone: only the card and its pictures are removed.
+            let _ = self.change(|s| {
+                if let Some((g, c)) = s.find_capture(id) {
+                    let cap = s.groups[g].captures.remove(c);
+                    for f in std::iter::once(&cap.file).chain(cap.thumbnail.iter()) {
+                        if is_safe_relative(f) {
+                            let _ = fs::remove_file(dir.join(f));
+                        }
+                    }
+                }
+                Ok(())
+            });
+        }
+        gone.len()
+    }
+
+    /// The folder of a recording.
+    pub fn recording_dir(&self, capture_id: &str) -> Option<PathBuf> {
+        let (g, c) = self.session.find_capture(capture_id)?;
+        let cap = &self.session.groups[g].captures[c];
+        match (&cap.video_dir, &cap.video_file) {
+            (Some(d), _) => Some(PathBuf::from(d)),
+            (None, Some(f)) => Path::new(f).parent().map(|p| self.session_dir().join(p)),
+            _ => None,
+        }
+    }
+
+    /// A new folder for a recording that starts now, in the group `group_id`: `<recordings folder>\<group>\<name>` (not created).
+    pub fn new_recording_dir(&self, group_id: &str, name: &str) -> StoreResult<PathBuf> {
+        let g = self
+            .session
+            .groups
+            .iter()
+            .find(|g| g.id == group_id && g.is_recording())
+            .ok_or_else(|| StoreError::NotFound(format!("group {group_id}")))?;
+        Ok(crate::recstore::unique_dir(
+            &self.rec_root.join(crate::recstore::safe_name(&g.name)),
+            name,
+        ))
     }
 
     /// Delete a group. Its captures are moved to the end of `move_to`, or deleted with their files when that is `None`.
     /// The last group cannot be deleted.
     pub fn delete_group(&mut self, id: &str, move_to: Option<&str>) -> StoreResult<()> {
+        let rec_root = self.rec_root.clone();
         let files = self.change(|s| {
             // The last group of a kind stays (screenshots and recordings count separately).
             let recording = s
@@ -529,14 +828,30 @@ impl SessionStore {
                     s.group_mut(target)?.captures.extend(group.captures);
                     Ok(Vec::new())
                 }
-                None => Ok(group
-                    .captures
-                    .into_iter()
-                    .flat_map(|c| [Some(c.file), c.thumbnail])
-                    .flatten()
-                    .collect::<Vec<_>>()),
+                None => {
+                    // The folders of its recordings are deleted with it.
+                    for c in &group.captures {
+                        if let Some(d) = &c.video_dir {
+                            let _ = fs::remove_dir_all(d);
+                        }
+                    }
+                    if group.is_recording() {
+                        crate::recstore::remove_if_empty(
+                            &rec_root.join(crate::recstore::safe_name(&group.name)),
+                        );
+                    }
+                    Ok(group
+                        .captures
+                        .into_iter()
+                        .flat_map(|c| [Some(c.file), c.thumbnail])
+                        .flatten()
+                        .collect::<Vec<_>>())
+                }
             }
         })?;
+        if let Some(t) = move_to {
+            self.relocate_recordings(t);
+        }
         for file in files {
             self.remove_file(&file);
             // thumbs/<id>.png and images/<id>.png: the recognized text of that capture goes too.
@@ -696,6 +1011,8 @@ impl SessionStore {
                 kind: Some("image".into()),
                 duration_ms: 0,
                 video_file: None,
+                video_dir: None,
+                saved_path: None,
             };
             s.group_mut(group_id)?.captures.push(capture.clone());
             Ok(capture)
@@ -726,10 +1043,16 @@ impl SessionStore {
                 .find_capture(id)
                 .ok_or_else(|| StoreError::NotFound(format!("capture {id}")))?;
             let c = s.groups[g].captures.remove(c);
-            Ok((c.file, c.thumbnail, c.video_file))
+            Ok((c.file, c.thumbnail, c.video_file, c.video_dir))
         })?;
         // A recording's folder (the video and what belongs to it) goes with its card.
-        if let Some(v) = &removed.2 {
+        if let Some(d) = &removed.3 {
+            let dir = PathBuf::from(d);
+            let _ = fs::remove_dir_all(&dir);
+            if let Some(p) = dir.parent() {
+                crate::recstore::remove_if_empty(p);
+            }
+        } else if let Some(v) = &removed.2 {
             if let Some(dir) = Path::new(v).parent() {
                 let _ = fs::remove_dir_all(self.session_dir().join(dir));
             }
@@ -742,7 +1065,36 @@ impl SessionStore {
         Ok(())
     }
 
+    /// Remember the file a screenshot was saved to automatically.
+    pub fn set_saved_path(&mut self, id: &str, path: &Path) -> StoreResult<()> {
+        let path = path.to_string_lossy().into_owned();
+        self.change(|s| {
+            let (g, c) = s
+                .find_capture(id)
+                .ok_or_else(|| StoreError::NotFound(format!("capture {id}")))?;
+            s.groups[g].captures[c].saved_path = Some(path);
+            Ok(())
+        })
+    }
+
+    /// Make a capture a recording that lives in `dir` (`screen.mp4` and its tracks), with its length.
+    pub fn set_recording(&mut self, id: &str, dir: &Path, duration_ms: u64) -> StoreResult<()> {
+        let dir = dir.to_string_lossy().into_owned();
+        self.change(|s| {
+            let (g, c) = s
+                .find_capture(id)
+                .ok_or_else(|| StoreError::NotFound(format!("capture {id}")))?;
+            let cap = &mut s.groups[g].captures[c];
+            cap.kind = Some("video".into());
+            cap.video_file = Some("screen.mp4".into());
+            cap.video_dir = Some(dir);
+            cap.duration_ms = duration_ms;
+            Ok(())
+        })
+    }
+
     /// Make a capture a recording: its screen video (relative to the session folder) and its length.
+    #[cfg(test)]
     pub fn set_video(&mut self, id: &str, video_file: &str, duration_ms: u64) -> StoreResult<()> {
         self.change(|s| {
             let (g, c) = s
@@ -840,7 +1192,10 @@ impl SessionStore {
                 .min(target.captures.len());
             target.captures.splice(at..at, moved);
             Ok(())
-        })
+        })?;
+        // Recordings that moved to another group move their folders.
+        self.relocate_recordings(group_id);
+        Ok(())
     }
 
     /// Copy captures (image, thumbnail and annotations) into new captures that sit right after their originals. The
@@ -902,6 +1257,8 @@ impl SessionStore {
                         kind: original.kind.clone(),
                         duration_ms: original.duration_ms,
                         video_file: None,
+                        video_dir: None,
+                        saved_path: None,
                     },
                 ));
             }
@@ -1109,19 +1466,25 @@ impl SessionStore {
         }
     }
 
-    /// The file of a recording (`recordings/<id>/screen.mp4` and its tracks) for the player. `session_id` and `file` come from the page.
+    /// A file of a recording (`rec/<capture id>/screen.mp4`, `system.wav`, ...) for the player. `session_id` and `file` come from the
+    /// page.
     pub fn recording_file(&self, session_id: &str, file: &str) -> Option<PathBuf> {
-        let ok_ext = ["mp4", "wav", "m4a", "json"]
-            .iter()
-            .any(|e| file.ends_with(&format!(".{e}")));
-        if !is_safe_id(session_id)
-            || !is_safe_relative(file)
-            || !file.starts_with("recordings/")
-            || !ok_ext
-        {
+        let rest = file.strip_prefix("rec/")?;
+        let (capture_id, name) = rest.split_once('/')?;
+        // The video, the audio tracks, the cursor track and the info file; the cursor pictures are in `cursors/`.
+        let plain = |n: &str, exts: &[&str]| {
+            !n.contains('/')
+                && is_safe_relative(n)
+                && exts.iter().any(|e| n.ends_with(&format!(".{e}")))
+        };
+        let ok = match name.strip_prefix("cursors/") {
+            Some(image) => plain(image, &["png"]),
+            None => plain(name, &["mp4", "wav", "m4a", "json", "jsonl"]),
+        };
+        if session_id != self.session.id || !is_safe_id(capture_id) || !ok {
             return None;
         }
-        Some(self.root.join(session_id).join(file))
+        Some(self.recording_dir(capture_id)?.join(name))
     }
 
     /// The bytes of a session image for the `snipmunk-img` scheme. `session_id` and `file` come from the web page.
@@ -1387,7 +1750,7 @@ mod tests {
             r#"{"id":"someone-else","groups":[{"id":"g","name":"G"}]}"#,
         )
         .unwrap();
-        let store = SessionStore::open(root.clone());
+        let mut store = SessionStore::open(root.clone());
         assert!(is_safe_id(&store.session().id));
         assert!(root.join("junk").exists() && root.join("other").exists());
         assert_eq!(store.cleanup(1, now_ms() + 100 * DAY_MS), 0);
@@ -2157,5 +2520,171 @@ mod tests {
         ] {
             assert!(c.get(key).is_some(), "{key}");
         }
+    }
+}
+
+#[cfg(test)]
+mod recording_storage_tests {
+    use super::*;
+
+    /// A store whose recordings folder is inside the temp folder; returns it with the id of a new recording group.
+    fn store(dir: &Path) -> (SessionStore, String) {
+        let mut s = SessionStore::open(dir.join("sessions"));
+        s.set_recordings_root(dir.join("Rec"));
+        let g = s.ensure_recording_group().unwrap();
+        (s, g)
+    }
+
+    /// A recording card with a folder that holds a video.
+    fn recording(s: &mut SessionStore, group: &str, name: &str) -> (String, PathBuf) {
+        let folder = s.new_recording_dir(group, name).unwrap();
+        fs::create_dir_all(&folder).unwrap();
+        fs::write(folder.join("screen.mp4"), b"video").unwrap();
+        let png = image::RgbaImage::new(2, 2);
+        let mut bytes = Vec::new();
+        png.write_to(&mut io::Cursor::new(&mut bytes), image::ImageFormat::Png)
+            .unwrap();
+        let c = s
+            .add_capture(group, Some(name.into()), &bytes, None, 2, 2, None)
+            .unwrap();
+        s.set_recording(&c.id, &folder, 1000).unwrap();
+        (c.id, folder)
+    }
+
+    #[test]
+    fn a_recording_lives_in_group_and_recording_folders_with_names_that_do_not_clash() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut s, g) = store(dir.path());
+        let name = s
+            .session()
+            .groups
+            .iter()
+            .find(|x| x.id == g)
+            .unwrap()
+            .name
+            .clone();
+        let (a, fa) = recording(&mut s, &g, "Rec 1");
+        let (_, fb) = recording(&mut s, &g, "Rec 1");
+        assert_eq!(fa, dir.path().join("Rec").join(&name).join("Rec 1"));
+        assert_eq!(fb, dir.path().join("Rec").join(&name).join("Rec 1 (2)"));
+        assert_eq!(s.recording_dir(&a), Some(fa.clone()));
+        let session = s.session().id.clone();
+        assert_eq!(
+            s.recording_file(&session, &format!("rec/{a}/screen.mp4")),
+            Some(fa.join("screen.mp4"))
+        );
+        assert!(s
+            .recording_file(&session, &format!("rec/{a}/../x.mp4"))
+            .is_none());
+        assert!(s
+            .recording_file("other", &format!("rec/{a}/screen.mp4"))
+            .is_none());
+    }
+
+    #[test]
+    fn renaming_or_moving_between_groups_moves_the_folders_and_deleting_deletes_them() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut s, g) = store(dir.path());
+        let (a, _) = recording(&mut s, &g, "A");
+        s.rename_group(&g, "Demo: part 1").unwrap();
+        let folder = s.recording_dir(&a).unwrap();
+        assert_eq!(
+            folder,
+            dir.path().join("Rec").join("Demo_ part 1").join("A")
+        );
+        assert!(folder.join("screen.mp4").exists());
+        let g2 = s.create_group_of(Some("Other".into()), true).unwrap();
+        s.move_captures(std::slice::from_ref(&a), &g2, None)
+            .unwrap();
+        let folder = s.recording_dir(&a).unwrap();
+        assert_eq!(folder, dir.path().join("Rec").join("Other").join("A"));
+        assert!(!dir.path().join("Rec").join("Demo_ part 1").exists());
+        s.delete_capture(&a).unwrap();
+        assert!(!folder.exists());
+        let (b, fb) = recording(&mut s, &g2, "B");
+        s.delete_group(&g2, None).unwrap();
+        assert!(!fb.exists());
+        assert!(s.session().find_capture(&b).is_none());
+    }
+
+    #[test]
+    fn recordings_survive_a_new_session_the_retention_setting_and_clear_on_exit() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut s, g) = store(dir.path());
+        let (a, folder) = recording(&mut s, &g, "Keep me");
+        let old_session = s.session().id.clone();
+        s.new_session(true, None).unwrap();
+        assert_ne!(s.session().id, old_session);
+        assert!(!dir.path().join("sessions").join(&old_session).exists());
+        assert!(s.session().find_capture(&a).is_some());
+        assert!(folder.join("screen.mp4").exists());
+        // The recording's card picture came along.
+        let (g, c) = s.session().find_capture(&a).unwrap();
+        let file = s.session().groups[g].captures[c].file.clone();
+        assert!(s.session_dir().join(file).exists());
+        // Retention: a session that is old but holds a recording hands it over.
+        let g2 = s.ensure_recording_group().unwrap();
+        let (b, _) = recording(&mut s, &g2, "Old");
+        s.new_session(false, None).unwrap();
+        assert!(s.session().find_capture(&b).is_some());
+        // Clear on exit: the screenshots go, the recordings stay.
+        let shot = s.create_group(None).unwrap();
+        let png = {
+            let mut bytes = Vec::new();
+            image::RgbaImage::new(2, 2)
+                .write_to(&mut io::Cursor::new(&mut bytes), image::ImageFormat::Png)
+                .unwrap();
+            bytes
+        };
+        let shot_capture = s.add_capture(&shot, None, &png, None, 2, 2, None).unwrap();
+        s.delete_current();
+        let again = SessionStore::open(dir.path().join("sessions"));
+        assert!(again.session().find_capture(&a).is_some());
+        assert!(again.session().find_capture(&shot_capture.id).is_none());
+    }
+
+    #[test]
+    fn recordings_of_an_earlier_version_move_into_the_recordings_folder_and_missing_ones_are_dropped(
+    ) {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut s, g) = store(dir.path());
+        let png = {
+            let mut bytes = Vec::new();
+            image::RgbaImage::new(2, 2)
+                .write_to(&mut io::Cursor::new(&mut bytes), image::ImageFormat::Png)
+                .unwrap();
+            bytes
+        };
+        let c = s
+            .add_capture(&g, Some("Old rec".into()), &png, None, 2, 2, None)
+            .unwrap();
+        let legacy = s.session_dir().join("recordings").join("r1");
+        fs::create_dir_all(&legacy).unwrap();
+        fs::write(legacy.join("screen.mp4"), b"v").unwrap();
+        s.set_video(&c.id, "recordings/r1/screen.mp4", 500).unwrap();
+        assert_eq!(s.migrate_recordings(), 1);
+        let folder = s.recording_dir(&c.id).unwrap();
+        assert!(folder.starts_with(dir.path().join("Rec")));
+        assert!(folder.join("screen.mp4").exists());
+        assert!(!legacy.exists());
+        assert_eq!(s.migrate_recordings(), 0);
+        // Deleted in Explorer: the card goes at the next check.
+        fs::remove_dir_all(&folder).unwrap();
+        assert_eq!(s.prune_missing_recordings(), 1);
+        assert!(s.session().find_capture(&c.id).is_none());
+    }
+
+    #[test]
+    fn changing_the_recordings_folder_leaves_old_recordings_until_they_are_moved() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut s, g) = store(dir.path());
+        let (a, old) = recording(&mut s, &g, "A");
+        s.set_recordings_root(dir.path().join("New"));
+        assert_eq!(s.recording_dir(&a), Some(old.clone()));
+        assert_eq!(s.recordings_to_move(), vec![a.clone()]);
+        assert!(s.relocate_capture(&a));
+        let now = s.recording_dir(&a).unwrap();
+        assert!(now.starts_with(dir.path().join("New")) && now.join("screen.mp4").exists());
+        assert!(s.recordings_to_move().is_empty());
     }
 }

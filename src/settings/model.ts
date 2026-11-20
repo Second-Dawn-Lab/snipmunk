@@ -30,11 +30,16 @@ export const INDEX: SettingEntry[] = [
   { id: "editorWheel", tab: "general", title: "settings.editorWheel", desc: "settings.editorWheelDesc" },
 
   { id: "captureHotkey", tab: "capture", title: "settings.captureHotkey", desc: "settings.captureHotkeyDesc" },
+  { id: "recordHotkey", tab: "capture", title: "settings.recordHotkey", desc: "settings.recordHotkeyDesc" },
   { id: "captureMode", tab: "capture", title: "settings.captureMode", desc: "settings.captureModeDesc" },
   { id: "captureDelay", tab: "capture", title: "settings.captureDelay", desc: "settings.captureDelayDesc" },
   { id: "afterCapture", tab: "capture", title: "settings.afterCapture", desc: "settings.afterCaptureDesc" },
   { id: "autoCopy", tab: "capture", title: "settings.autoCopy", desc: "settings.autoCopyDesc" },
   { id: "magnifier", tab: "capture", title: "settings.magnifier", desc: "settings.magnifierDesc" },
+  { id: "recordingsDir", tab: "capture", title: "settings.recordingsDir", desc: "settings.recordingsDirDesc" },
+  { id: "autoSave", tab: "capture", title: "settings.autoSave", desc: "settings.autoSaveDesc" },
+  { id: "autoSaveNaming", tab: "capture", title: "settings.autoSaveNaming", desc: "settings.autoSaveNaming" },
+  { id: "autoSaveDir", tab: "capture", title: "settings.autoSaveDir", desc: "settings.autoSaveDirDesc" },
 
   { id: "newSessionAction", tab: "sessions", title: "settings.newSessionAction", desc: "settings.newSessionActionDesc" },
   { id: "galleryView", tab: "sessions", title: "settings.galleryView", desc: "settings.galleryViewDesc" },

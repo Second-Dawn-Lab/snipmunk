@@ -66,6 +66,13 @@ export interface Settings {
   recQuality: "standard" | "high";
   recSystemSound: boolean;
   recMic: boolean;
+  /** The shortcut that starts and stops a recording, from any program. */
+  recordHotkey: string;
+  /** Where recordings are kept ("" = the Windows Videos folder + Snipmunk). */
+  recordingsDir: string;
+  /** Save each screenshot automatically (to `autoSaveDir`, "" = the Pictures folder + Snipmunk). */
+  autoSaveScreenshots: boolean;
+  autoSaveDir: string;
   saveFormat: SaveFormat;
   saveNaming: Naming;
   /** JPEG / WebP quality, 10 to 100. */
@@ -130,6 +137,10 @@ export const defaultSettings: Settings = {
   recQuality: "standard",
   recSystemSound: true,
   recMic: false,
+  recordHotkey: "Ctrl+Alt+R",
+  recordingsDir: "",
+  autoSaveScreenshots: false,
+  autoSaveDir: "",
   saveFormat: "png",
   saveNaming: "capture",
   saveQuality: 90,

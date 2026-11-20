@@ -55,13 +55,25 @@ pub fn safe_file_name(name: &str) -> String {
 }
 
 /// A path inside the temp folder (the web page only names staged files, never other files).
+/// Files outside the temp folder that Save, Copy, drag and Share may use as they are: the rendered video of a recording and its
+/// picture (a recording is never copied to a temp folder).
+static ALLOWED: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
+
+pub fn allow_file(path: &Path) {
+    let mut v = ALLOWED.lock().unwrap();
+    if !v.iter().any(|p| p == path) {
+        v.push(path.to_path_buf());
+    }
+}
+
 fn staged(path: &str) -> CmdResult<PathBuf> {
     let p = PathBuf::from(path);
     let root = temp_root();
-    let ok = p.starts_with(&root)
+    let ok = (p.starts_with(&root)
         && !p
             .components()
-            .any(|c| matches!(c, std::path::Component::ParentDir));
+            .any(|c| matches!(c, std::path::Component::ParentDir)))
+        || ALLOWED.lock().unwrap().contains(&p);
     if !ok || !p.is_file() {
         return Err(CmdError::new("bad_request", "this file was not staged"));
     }

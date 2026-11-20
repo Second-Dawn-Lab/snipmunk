@@ -67,7 +67,9 @@ export function TopBar(props: {
   const { settings, zoom, share } = props;
   const video = settings.captureKind === "video";
   const off = !share.hasCapture || share.busy || !!props.recording;
-  const soonTip = props.recording ? t("soon.label") : undefined;
+  // Save, Copy and Share work for recordings too (they use the rendered video); Edit in Paint does not.
+  const offShare = !share.hasCapture || share.busy;
+  const soonTip: string | undefined = undefined;
   const [modeOpen, setModeOpen] = useState(false);
   const [zoomOpen, setZoomOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
@@ -196,13 +198,13 @@ export function TopBar(props: {
           <span>{isWindows ? t("actions.editPaint") : t("actions.openEditor")}</span>
         </button>
         )}
-        <ActionButton icon="save" label={t("actions.save")} tip={soonTip ?? t("actions.saveTip")} disabled={off} onClick={share.onSave} />
-        <ActionButton icon="copy" label={t("actions.copy")} tip={soonTip ?? t("actions.copyTip")} disabled={off} onClick={share.onCopy} />
+        <ActionButton icon="save" label={t("actions.save")} tip={soonTip ?? t("actions.saveTip")} disabled={offShare} onClick={share.onSave} />
+        <ActionButton icon="copy" label={t("actions.copy")} tip={soonTip ?? t("actions.copyTip")} disabled={offShare} onClick={share.onCopy} />
         <ActionButton
           icon="share"
           label={t("actions.share")}
           tip={soonTip ?? (share.canShare ? t("actions.shareTip") : t("share.unsupported"))}
-          disabled={off || !share.canShare}
+          disabled={offShare || !share.canShare}
           onClick={share.onShare}
         />
 

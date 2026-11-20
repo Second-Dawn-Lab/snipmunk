@@ -214,9 +214,57 @@ function WordList({ settings, set }: PageProps) {
   );
 }
 
+/** A folder setting: the folder in use (the default when none is chosen), Choose… and Default. */
+function FolderSetting(props: { label: string; value: string; fallback: string; onChange: (folder: string) => void }) {
+  const { t } = useT();
+  return (
+    <div className="foldersetting">
+      <span className="foldersetting__path" dir="ltr" title={props.value || props.fallback}>
+        {props.value || props.fallback}
+      </span>
+      <Button
+        onClick={() =>
+          void ipc
+            .pickFolder(props.value || props.fallback)
+            .then((f) => f && props.onChange(f))
+            .catch(() => undefined)
+        }
+      >
+        {t("settings.chooseFolder")}
+      </Button>
+      {props.value !== "" && <Button onClick={() => props.onChange("")}>{t("settings.folderDefault")}</Button>}
+    </div>
+  );
+}
+
 export function CapturePage({ settings, set }: PageProps) {
   const { t } = useT();
   const [recording, setRecording] = useState(false);
+  const [recordingKey, setRecordingKey] = useState(false);
+  const [defaults, setDefaults] = useState({ recordings: "", pictures: "" });
+  // After the recordings folder changed: the recordings that are in another folder can be moved (with progress).
+  const [toMove, setToMove] = useState(0);
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  useEffect(() => {
+    void ipc.defaultFolders().then(setDefaults).catch(() => undefined);
+    const p = ipc.onRecordingsMove(setProgress);
+    return () => void p.then((fn) => fn());
+  }, []);
+  const changeRecordingsDir = (recordingsDir: string) => {
+    set({ recordingsDir });
+    // The backend applies the setting before this asks (set_settings has returned by then).
+    setTimeout(() => void ipc.recordingsInfo().then((i) => setToMove(i.toMove)).catch(() => undefined), 300);
+  };
+  const move = () => {
+    setProgress({ done: 0, total: toMove });
+    void ipc
+      .moveRecordings()
+      .catch(() => undefined)
+      .finally(() => {
+        setProgress(null);
+        setToMove(0);
+      });
+  };
   return (
     <>
       <HotkeyNotice />
@@ -224,6 +272,10 @@ export function CapturePage({ settings, set }: PageProps) {
         <Setting id="captureHotkey" title={t("settings.captureHotkey")} description={t("settings.captureHotkeyDesc")}>
           <Kbd keys={settings.captureHotkey} />
           <Button onClick={() => setRecording(true)}>{t("settings.shortcutChange")}</Button>
+        </Setting>
+        <Setting id="recordHotkey" title={t("settings.recordHotkey")} description={t("settings.recordHotkeyDesc")}>
+          <Kbd keys={settings.recordHotkey} />
+          <Button onClick={() => setRecordingKey(true)}>{t("settings.shortcutChange")}</Button>
         </Setting>
         <Setting id="captureMode" title={t("settings.captureMode")} description={t("settings.captureModeDesc")}>
           <Select
@@ -272,10 +324,55 @@ export function CapturePage({ settings, set }: PageProps) {
             onChange={(showMagnifier) => set({ showMagnifier })}
           />
         </Setting>
+        <Setting id="recordingsDir" title={t("settings.recordingsDir")} description={t("settings.recordingsDirDesc")}>
+          <FolderSetting label={t("settings.recordingsDir")} value={settings.recordingsDir} fallback={defaults.recordings} onChange={changeRecordingsDir} />
+        </Setting>
+        {toMove > 0 && (
+          <div className="foldersetting__move" role="status">
+            <span>{progress ? t("settings.recMoving", { done: progress.done, total: progress.total }) : t("settings.recMoveAsk", { count: toMove })}</span>
+            {!progress && (
+              <>
+                <Button onClick={move}>{t("settings.recMove")}</Button>
+                <Button onClick={() => setToMove(0)}>{t("settings.recLeave")}</Button>
+              </>
+            )}
+          </div>
+        )}
+        <Setting id="autoSave" title={t("settings.autoSave")} description={t("settings.autoSaveDesc")}>
+          <Switch label={t("settings.autoSave")} checked={settings.autoSaveScreenshots} onChange={(autoSaveScreenshots) => set({ autoSaveScreenshots })} />
+        </Setting>
+        {settings.autoSaveScreenshots && (
+          <>
+            <Setting id="autoSaveDir" title={t("settings.autoSaveDir")} description={t("settings.autoSaveDirDesc")}>
+              <FolderSetting label={t("settings.autoSaveDir")} value={settings.autoSaveDir} fallback={defaults.pictures} onChange={(autoSaveDir) => set({ autoSaveDir })} />
+            </Setting>
+            <Setting id="autoSaveNaming" title={t("settings.autoSaveNaming")} description="">
+              <Select
+                label={t("settings.autoSaveNaming")}
+                value={settings.saveNaming}
+                onChange={(saveNaming) => set({ saveNaming: saveNaming as typeof settings.saveNaming })}
+                options={(["capture", "group", "dateTime"] as const).map((n) => ({ value: n, label: t(`naming.${n}`) }))}
+              />
+            </Setting>
+          </>
+        )}
       </Section>
+      {recordingKey && (
+        <ShortcutDialog
+          current={settings.recordHotkey}
+          fallback="Ctrl+Alt+R"
+          other={settings.captureHotkey}
+          onClose={() => setRecordingKey(false)}
+          onSave={(recordHotkey) => {
+            setRecordingKey(false);
+            set({ recordHotkey });
+          }}
+        />
+      )}
       {recording && (
         <ShortcutDialog
           current={settings.captureHotkey}
+          other={settings.recordHotkey}
           onClose={() => setRecording(false)}
           onSave={(captureHotkey) => {
             setRecording(false);

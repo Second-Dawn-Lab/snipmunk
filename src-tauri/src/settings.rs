@@ -86,6 +86,13 @@ pub struct Settings {
     pub rec_quality: String,
     pub rec_system_sound: bool,
     pub rec_mic: bool,
+    /// The shortcut that starts and stops a recording, from any program.
+    pub record_hotkey: String,
+    /// Where recordings are kept ("" = the Windows Videos folder + Snipmunk) and the automatic saving of screenshots.
+    pub recordings_dir: String,
+    pub auto_save_screenshots: bool,
+    /// Where automatically saved screenshots go ("" = the Windows Pictures folder + Snipmunk).
+    pub auto_save_dir: String,
     /// Save: "png" | "jpeg" | "webp" | "bmp" | "zip"
     pub save_format: String,
     /// File names: "capture" | "group" | "dateTime"
@@ -151,6 +158,10 @@ impl Default for Settings {
             rec_quality: "standard".into(),
             rec_system_sound: true,
             rec_mic: false,
+            record_hotkey: "Ctrl+Alt+R".into(),
+            recordings_dir: String::new(),
+            auto_save_screenshots: false,
+            auto_save_dir: String::new(),
             save_format: "png".into(),
             save_naming: "capture".into(),
             save_quality: 90,
@@ -278,6 +289,8 @@ impl Settings {
         if ![30, 60].contains(&self.rec_fps) {
             self.rec_fps = d.rec_fps;
         }
+        self.recordings_dir = self.recordings_dir.trim().chars().take(400).collect();
+        self.auto_save_dir = self.auto_save_dir.trim().chars().take(400).collect();
         self.quick_redact_words = clean_words(std::mem::take(&mut self.quick_redact_words));
         one_of(
             &mut self.close_action,

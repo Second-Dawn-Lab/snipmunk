@@ -1,7 +1,9 @@
 //! Snipmunk backend: window and tray lifecycle, settings and the session store.
 
+mod audio;
 mod capture;
 mod commands;
+mod cursor;
 mod error;
 mod export;
 mod freeform;
@@ -17,6 +19,8 @@ mod output;
 mod placement;
 mod popups;
 mod recording;
+mod recstore;
+mod render;
 mod sessions;
 mod settings;
 mod startup;
@@ -53,6 +57,7 @@ pub fn run() {
         .manage(capture::Capture::new())
         .manage(recording::Recorder::new())
         .manage(hotkey::HotkeyManager::new())
+        .manage(render::RenderJob::default())
         .register_uri_scheme_protocol("snipmunk-img", commands::serve_image)
         .register_uri_scheme_protocol("snipmunk-cap", capture::serve)
         .invoke_handler(tauri::generate_handler![
@@ -88,6 +93,12 @@ pub fn run() {
             recording::stop_recording,
             recording::discard_recording,
             recording::pause_recording,
+            render::render_recording,
+            render::cancel_render,
+            commands::recordings_info,
+            commands::default_folders,
+            commands::refresh_recordings,
+            commands::move_recordings,
             recording::unfinished_recordings,
             recording::recover_recording,
             recording::drop_unfinished_recording,

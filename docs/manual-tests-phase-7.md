@@ -126,3 +126,51 @@ Done in code, gates green (cargo fmt, clippy -D warnings, cargo test 158, tsc, e
 - [ ] B1 to B4 (bar transparent around the capsule and as big as its content, no growth on hover, countdown on the bar with the ✕, the discard question on the same line, the video icon in the badge): look at them once with a real recording.
 
 Not built in this stretch: sound/mic toggles on the bar and bar placement outside the area (M3 rest), M4 audio, M5 cursor track, M7 player, M8 render, M9 hotkeys.
+
+## Session 7-B1b: P1, S1, S2, S3, M3 rest, M4, M5, M7, M8, M9
+
+Gates are green (cargo fmt, clippy -D warnings, cargo test 186, tsc, eslint, vitest 795). Everything below was tested with the development source `__synthetic__` (generated frames, a generated cursor movement, generated tones) in a test instance whose storage folders were under `E:\SecondDawn\_scratch`; **nothing was captured from the real screen, the real cursor, the real system sound or the microphone.**
+
+### P1 One bar
+- Checked live: the bar is one layout in the countdown and in the recording; the buttons are disabled while counting and the last one is Cancel, then Stop. The time cell now has a fixed width (before, the bar was 423 px wide while counting and 401 px while recording). New trash icon at full contrast.
+- [ ] **[REAL INPUT]** Start a recording with a countdown: the bar does not change size or jump when the recording starts; pause, trash (asks "Discard? Discard / Keep"), speaker and microphone buttons are greyed during the countdown and work after it. Light and dark theme, Arabic (mirrored).
+
+### S1 Recording storage
+- Layout `<recordings folder>\<Group>\<Recording>\` (default: the Windows Videos folder + `\Snipmunk`, found with the Known Folder API). Checked live: a recording lands in `rec\Group 1\Recording ...\`; renaming the group renamed the folder (`Demo_ clips`, the `:` made safe); the video plays through `snipmunk-img`; changing the folder in the settings offered 1 recording to move and `move_recordings` moved it; a killed recording was found and recovered in its new place.
+- Unit tests: safe names, " (2)" names, rename and move between groups move the folders, deleting removes them, new session / retention / clear on exit keep recordings, migration of recordings of earlier versions, cards of deleted folders are removed.
+- [ ] Settings → Capture: "Save recordings to" shows the Videos folder by default; Choose… and Default work; after a change a row offers "Move them / Leave them" with progress.
+- [ ] Delete a recording or a group of recordings in Snipmunk: the folders are gone in Explorer. Delete or move a recording folder in Explorer: its card is gone the next time the recording tab is shown or Snipmunk starts. New folders that appear are not imported.
+- [ ] "Start fresh" with "Delete them", retention and clear on exit: screenshots go, **recordings and their folders stay**.
+- [ ] First start after the update: recordings from `%AppData%\SecondDawn\snipmunk\sessions\...\recordings` are in the Videos folder and the old copies are gone.
+
+### S2 Automatic saving of screenshots
+- Unit test of the file: `<folder>\<Group>\<name>.png` with the naming option of the Save dialog, never replaces a file. **The capture itself needs the real screen, so the whole flow is yours to test.**
+- [ ] Settings → Capture → "Save each screenshot automatically" (default off): take screenshots; files appear in `Pictures\Snipmunk\<Group>\`. Edits made later stay in Snipmunk. "Start fresh", retention and delete never delete these files. The copy temp folder is emptied on the next copy, on quit and on start.
+
+### S3 Show in File Explorer
+- [ ] Right-click a recording: "Show in File Explorer" opens its folder with `screen.mp4` selected. Right-click a screenshot that was saved automatically: the item shows that file; a screenshot without a file has no such item. With several cards selected it opens the folder of the first.
+
+### M3 rest and M4 audio
+- Bar: system sound and microphone buttons (they change the settings, also while recording). Placement: below the recorded area when it fits on the monitor, else above, else top centre inside the area (left out of the picture); unit tested with several monitors.
+- Audio: `system.wav` (WASAPI loopback of the default output) and `mic.wav` (default input) are separate 16 bit WAV files next to the video, in step with the recording clock (silence is filled in, a fast or slow device is corrected, a pause writes nothing; the clocks of the tracks and of the cursor start with the first picture). The microphone is never opened while it is off. Live (generated tones): both tracks 9.08 s for a 9.03 s video; a track switched on in the middle has silence before it; muting writes silence and keeps the length.
+- Drift (generated input, simulated device clock): 10 minutes with a device 100 ppm fast and 100 ppm slow end within 20 ms of the recorded time (one correction of 40 ms).
+- [ ] **[REAL AUDIO]** Play music, record 1 minute with system sound on: `system.wav` has it. Switch the microphone on in the bar and speak: `mic.wav` has your voice and the music is only in `system.wav`. Pause and resume in the middle: sound and picture stay in step (clap test at the start and after the pause). Record 10 minutes and check the end for drift.
+- [ ] **[REAL AUDIO]** Windows privacy settings → Microphone off for desktop apps → record with the microphone on: a message "The microphone is blocked" with the button "Open Windows settings" appears and the recording goes on without it. With no microphone plugged in: "No microphone was found".
+
+### M5 Cursor track
+- `cursor.jsonl` next to the video (format in `src-tauri/src/cursor.rs`): positions in recording pixels, shape changes with the cursor pictures in `cursors/`, visibility, left/right button down/up, about 120 readings a second (a position is written when it changed, at least every 500 ms), a pause is cut out of its time. It only reads the cursor and the state of the mouse buttons (no hook), so it cannot delay or swallow input. Unit tests with generated movements; live with the generated movement.
+- [ ] **[REAL INPUT]** Record a window, move the mouse, click both buttons, hover a link and a text field: `cursor.jsonl` has the positions (compare with where you moved), the clicks and the changing shapes, and `cursors/*.png` are the real cursor pictures. Pause and resume while moving.
+
+### M7 Player
+- In the recording tab: play/pause (button and Space), seek bar with the time, a volume per track (system / microphone, shown when the track exists), full screen, the cursor drawn on the video from the track at normal size, "Open in Snipmunk Studio" disabled ("Coming soon"). Checked live with generated media: the video plays, both tracks load, the generated cursor is drawn at the right place.
+- [ ] **[REAL INPUT]** Play a real recording: cursor and clicks line up with the picture, the sound is in step, seeking and full screen work, Space plays and pauses (not while typing in a field).
+
+### M8 Rendered file
+- `final.mp4` (H.264 + AAC) is made in the recording's folder from the screen, the cursor and the mixed tracks (48 kHz stereo, tracks of other rates are resampled), with `final.key` (what it was made from): Save, Copy (as a file), drag out and Share use it, and it is used again until the video, a track or the cursor track changes. Progress bar with Cancel; a cancelled render leaves no partial file.
+- Speed (generated input, release build, this PC): 6 s of 1920x1080 at 30 fps rendered in about 5.3 s (about 1.1x real time; decoding and the software encoder are the limit, not the drawing); 640x360 in 1.45 s (4.2x). In the app (debug build, 640x360) a 9 s recording took 1.6 s and the second call took no time.
+- [ ] **[REAL INPUT]** Save: pick a folder, the file plays in another player with picture, cursor and sound. Copy: paste into Explorer and into a chat. Share: the Windows share sheet. Drag a card out into Explorer or a chat (the first drag of a recording waits for the render; do Copy or Save first for an instant drag). Cancel during a long render.
+- [ ] Measure the render speed of a real 1080p recording.
+
+### M9 Recording shortcut
+- Ctrl+Alt+R (editable in Settings → Capture, with the same checks as the capture shortcut and a refusal when both use the same keys) starts the recording flow from any program and stops a running recording; inside Snipmunk's windows the page reports it and the backend runs each press once (per shortcut).
+- [ ] **[REAL INPUT]** Press Ctrl+Alt+R in another program: the area selection opens; press it again while recording: the recording stops and the card appears. Press it inside Snipmunk: it works once. Set it to the keys of the capture shortcut: the dialog refuses it.

@@ -22,7 +22,15 @@ export function Kbd({ keys }: { keys: string }) {
 }
 
 /** Records a new shortcut from the keyboard and checks it with the backend (valid, used by Windows or other programs). */
-export function ShortcutDialog(props: { current: string; onSave: (shortcut: string) => void; onClose: () => void }) {
+export function ShortcutDialog(props: {
+  current: string;
+  /** The shortcut that resets to (the default of this shortcut). */
+  fallback?: string;
+  /** The other shortcut of Snipmunk: the same keys cannot be used for both. */
+  other?: string;
+  onSave: (shortcut: string) => void;
+  onClose: () => void;
+}) {
   const { t } = useT();
   const [pressed, setPressed] = useState<Pressed | null>(null);
   const [check, setCheck] = useState<ShortcutCheck | null>(null);
@@ -64,11 +72,17 @@ export function ShortcutDialog(props: { current: string; onSave: (shortcut: stri
     };
   }, []);
 
-  const usable = !!candidate && !!check?.valid && !!check.canonical;
+  const [otherCanonical, setOtherCanonical] = useState<string | null>(null);
+  useEffect(() => {
+    if (!props.other) return;
+    void ipc.checkShortcut(props.other).then((c) => setOtherCanonical(c.canonical ?? null));
+  }, [props.other]);
+  const conflict = !!check?.canonical && check.canonical === otherCanonical;
+  const usable = !!candidate && !!check?.valid && !!check.canonical && !conflict;
   const useDefault = () => {
     setPressed(null);
     setUnsupported(false);
-    setText(defaultSettings.captureHotkey);
+    setText(props.fallback ?? defaultSettings.captureHotkey);
   };
 
   return (
@@ -95,6 +109,7 @@ export function ShortcutDialog(props: { current: string; onSave: (shortcut: stri
       <p className="shortcut-hint">{t("shortcuts.hint")}</p>
       {check?.error && <p className="shortcut-warn">{check.error}</p>}
       {unsupported && <p className="shortcut-warn">{t("shortcuts.unsupportedKey")}</p>}
+      {conflict && <p className="shortcut-warn">{t("shortcuts.conflict")}</p>}
       {check?.warning === "windows" && <p className="shortcut-warn">{t("shortcuts.warn.windows")}</p>}
       {check?.warning === "shared" && <p className="shortcut-warn">{t("shortcuts.warn.shared")}</p>}
     </Dialog>

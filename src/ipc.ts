@@ -33,6 +33,9 @@ export interface Capture {
   durationMs?: number;
   /** The screen video of a recording, relative to the session folder. */
   videoFile?: string | null;
+  /** The folder of a recording (absolute) and, for a screenshot, the file it was saved to automatically. */
+  videoDir?: string | null;
+  savedPath?: string | null;
   /** "screenshot" (taken by Snipmunk), "imported" (dropped in); `null` in sessions of earlier versions. */
   source: "screenshot" | "imported" | null;
   /** The editable marks, crop and rotation (see src/annotate/schema.ts); `null` for a capture nobody edited. */
@@ -143,6 +146,12 @@ export interface ToastInfo {
   height: number;
 }
 
+/** The address of a file of a recording (screen.mp4, system.wav, mic.wav, cursor.jsonl, recording.json, cursors/<id>.png). */
+export function recordingUrl(session: Session, capture: Capture, name: string): string {
+  if (!isTauri) return "";
+  return convertFileSrc(`${session.id}/rec/${capture.id}/${name}`, "snipmunk-img");
+}
+
 /** The address of a toast picture (the thumbnail file of the capture). */
 export function toastImageUrl(info: ToastInfo): string {
   if (!isTauri) return "";
@@ -194,6 +203,15 @@ export const ipc = {
   onRecCountdown: (cb: (n: number) => void) => on<number>("rec-countdown", cb),
   recordingState: () => call<RecState>("recording_state"),
   onRecordingState: (cb: (s: RecState) => void) => on<RecState>("recording-state", cb),
+  recordingsInfo: () => call<{ folder: string; toMove: number }>("recordings_info"),
+  defaultFolders: () => call<{ recordings: string; pictures: string }>("default_folders"),
+  refreshRecordings: () => call<Session>("refresh_recordings"),
+  moveRecordings: () => call<number>("move_recordings"),
+  onRecordingsMove: (cb: (p: { done: number; total: number }) => void) => on<{ done: number; total: number }>("recordings-move", cb),
+  /** Render a recording to final.mp4 (the cursor drawn, the sound mixed); the same file again while nothing changed. */
+  renderRecording: (captureId: string) => call<{ file: string; thumb: string; made: boolean; seconds: number }>("render_recording", { captureId }),
+  cancelRender: () => call<void>("cancel_render"),
+  onRenderProgress: (cb: (p: { captureId: string; progress: number }) => void) => on<{ captureId: string; progress: number }>("render-progress", cb),
   pauseRecording: (pause: boolean) => call<RecState>("pause_recording", { pause }),
   /** Why a recording was stopped or did not start: "disk-start" | "disk-full" | "source-gone". */
   onRecordingNotice: (cb: (kind: string) => void) => on<string>("recording-notice", cb),
@@ -204,7 +222,7 @@ export const ipc = {
   onStartRecording: (cb: () => void) => on<null>("start-recording", () => cb()),
   startCapture: (mode?: string) => call<void>("start_capture", { mode: mode ?? null }),
   /** The capture shortcut was pressed inside a Snipmunk window (the backend ignores it if the hook saw it too). */
-  shortcutFired: (name: "capture") => call<void>("shortcut_fired", { name }),
+  shortcutFired: (name: "capture" | "record") => call<void>("shortcut_fired", { name }),
   /** The overlay's delay dropdown: remember the delay; a delay above 0 closes the overlay, counts down and grabs again. */
   captureSetDelay: (delay: number) => call<void>("capture_set_delay", { delay }),
   setActiveGroup: (groupId: string | null) => call<void>("set_active_group", { groupId }),
@@ -245,7 +263,7 @@ export const ipc = {
   onOcrReady: (cb: (captureId: string) => void) => on<{ captureId: string }>("ocr-ready", (p) => cb(p.captureId)),
   copyText: (text: string) => call<void>("copy_text", { text }),
   copyTable: (html: string, text: string) => call<void>("copy_table", { html, text }),
-  openOsSettings: (page: "language") => call<void>("open_os_settings", { page }),
+  openOsSettings: (page: "language" | "microphone") => call<void>("open_os_settings", { page }),
   /** The recognized text of every capture that has one (for the gallery search). */
   ocrTexts: () => call<Record<string, string>>("ocr_texts"),
   // copy, save, share (Phase 6): the page renders, the backend stages the files in its temp folder and hands them out

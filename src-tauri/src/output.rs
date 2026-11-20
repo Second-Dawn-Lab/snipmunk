@@ -101,6 +101,19 @@ pub fn deliver(app: &AppHandle, frame: Frame, title: Option<String>) -> Result<(
         )
     };
 
+    // Automatic saving: the original goes to <folder><group> as a file (Snipmunk never deletes it again).
+    let session = if settings.auto_save_screenshots {
+        match auto_save(&settings, &group_name, &capture, &png) {
+            Some(path) => {
+                let mut store = state.sessions.lock().unwrap();
+                let _ = store.set_saved_path(&capture.id, &path);
+                store.session().clone()
+            }
+            None => session,
+        }
+    } else {
+        session
+    };
     let _ = app.emit("session-changed", &session);
     // The text of the new capture is read in the background (low priority, one at a time).
     crate::ocr::queue(app, &capture.id);
@@ -128,6 +141,34 @@ pub fn deliver(app: &AppHandle, frame: Frame, title: Option<String>) -> Result<(
         crate::tray::show_main(app);
     }
     Ok(())
+}
+
+/// Write a screenshot into the folder of the setting, in a subfolder named like its group. Never replaces a file.
+fn auto_save(
+    settings: &crate::settings::Settings,
+    group_name: &str,
+    capture: &crate::sessions::Capture,
+    png: &[u8],
+) -> Option<std::path::PathBuf> {
+    let root = crate::recstore::resolve(
+        &settings.auto_save_dir,
+        crate::recstore::default_pictures_dir,
+    );
+    let dir = root.join(crate::recstore::safe_name(group_name));
+    std::fs::create_dir_all(&dir).ok()?;
+    // The number of the screenshot in its group is the number of files already there plus one.
+    let number = std::fs::read_dir(&dir).map(|d| d.count()).unwrap_or(0) + 1;
+    let stem = crate::recstore::screenshot_file_stem(
+        &settings.save_naming,
+        &capture.name,
+        group_name,
+        number,
+        naming::screenshot_word(&settings.language),
+        &crate::recstore::local_stamp(),
+    );
+    let path = crate::export::free_path(&dir, &format!("{stem}.png"));
+    std::fs::write(&path, png).ok()?;
+    Some(path)
 }
 
 #[cfg(test)]
@@ -174,5 +215,24 @@ mod tests {
             rgba: vec![0; 12],
         };
         assert!(encode(&bad).is_err());
+    }
+
+    #[test]
+    fn an_automatic_save_goes_to_a_folder_per_group_and_never_replaces_a_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = crate::settings::Settings {
+            auto_save_dir: dir.path().to_string_lossy().into_owned(),
+            save_naming: "capture".into(),
+            ..Default::default()
+        };
+        let capture = crate::sessions::Capture {
+            name: "My: shot".into(),
+            ..Default::default()
+        };
+        let a = auto_save(&settings, "Group 1", &capture, b"one").unwrap();
+        let b = auto_save(&settings, "Group 1", &capture, b"two").unwrap();
+        assert_eq!(a, dir.path().join("Group 1").join("My_ shot.png"));
+        assert_eq!(b, dir.path().join("Group 1").join("My_ shot (2).png"));
+        assert_eq!(std::fs::read(&a).unwrap(), b"one");
     }
 }
