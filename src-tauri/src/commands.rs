@@ -216,8 +216,12 @@ pub fn create_group(
     app: AppHandle,
     state: State<'_, AppState>,
     name: Option<String>,
+    kind: Option<String>,
 ) -> CmdResult<Session> {
-    change_session(&app, &state, |s| s.create_group(name).map(|_| ()))
+    let recording = kind.as_deref() == Some("recording");
+    change_session(&app, &state, |s| {
+        s.create_group_of(name, recording).map(|_| ())
+    })
 }
 
 #[tauri::command]
@@ -294,6 +298,21 @@ pub fn serve_image<R: tauri::Runtime>(
 ) -> tauri::http::Response<Vec<u8>> {
     // The web view sends the path percent-encoded ("<session>%2Fimages%2F<id>.png").
     let path = percent_decode(request.uri().path().trim_matches('/'));
+    // A recording (the player reads it in parts: the video element sends Range requests).
+    if let Some((session, file)) = path.split_once('/') {
+        if file.starts_with("recordings/") {
+            let target = ctx
+                .app_handle()
+                .try_state::<AppState>()
+                .and_then(|state| state.sessions.lock().unwrap().recording_file(session, file));
+            let range = request
+                .headers()
+                .get("range")
+                .and_then(|v| v.to_str().ok())
+                .map(str::to_string);
+            return serve_recording(target, file, range.as_deref());
+        }
+    }
     let body = path.split_once('/').and_then(|(session, file)| {
         let state = ctx.app_handle().try_state::<AppState>()?;
         let store = state.sessions.lock().unwrap();
@@ -310,6 +329,83 @@ pub fn serve_image<R: tauri::Runtime>(
             .status(404)
             .body(Vec::new())
             .unwrap_or_default(),
+    }
+}
+
+/// The part of a file a `Range: bytes=a-b` header asks for, as (start, end inclusive); `None` for a missing or unusable header.
+pub fn parse_range(header: &str, len: u64) -> Option<(u64, u64)> {
+    let spec = header.trim().strip_prefix("bytes=")?;
+    let (a, b) = spec.split_once('-')?;
+    if len == 0 {
+        return None;
+    }
+    let (start, end) = if a.is_empty() {
+        // "-500": the last 500 bytes.
+        let n: u64 = b.parse().ok()?;
+        (len.saturating_sub(n), len - 1)
+    } else {
+        let start: u64 = a.parse().ok()?;
+        let end = if b.is_empty() {
+            len - 1
+        } else {
+            b.parse::<u64>().ok()?.min(len - 1)
+        };
+        (start, end)
+    };
+    (start <= end && start < len).then_some((start, end))
+}
+
+fn serve_recording(
+    target: Option<std::path::PathBuf>,
+    file: &str,
+    range: Option<&str>,
+) -> tauri::http::Response<Vec<u8>> {
+    use std::io::{Read, Seek, SeekFrom};
+    let not_found = || {
+        tauri::http::Response::builder()
+            .status(404)
+            .body(Vec::new())
+            .unwrap_or_default()
+    };
+    let Some(path) = target else {
+        return not_found();
+    };
+    let Ok(mut f) = std::fs::File::open(&path) else {
+        return not_found();
+    };
+    let Ok(len) = f.metadata().map(|m| m.len()) else {
+        return not_found();
+    };
+    let kind = match file.rsplit('.').next() {
+        Some("mp4") => "video/mp4",
+        Some("m4a") => "audio/mp4",
+        Some("wav") => "audio/wav",
+        _ => "application/json",
+    };
+    let builder = tauri::http::Response::builder()
+        .header("Content-Type", kind)
+        .header("Accept-Ranges", "bytes")
+        .header("Access-Control-Allow-Origin", "*")
+        .header("Cache-Control", "no-store");
+    match range.and_then(|r| parse_range(r, len)) {
+        Some((start, end)) => {
+            let mut bytes = vec![0u8; (end - start + 1) as usize];
+            if f.seek(SeekFrom::Start(start)).is_err() || f.read_exact(&mut bytes).is_err() {
+                return not_found();
+            }
+            builder
+                .status(206)
+                .header("Content-Range", format!("bytes {start}-{end}/{len}"))
+                .body(bytes)
+                .unwrap_or_default()
+        }
+        None => {
+            let mut bytes = Vec::with_capacity(len as usize);
+            if f.read_to_end(&mut bytes).is_err() {
+                return not_found();
+            }
+            builder.status(200).body(bytes).unwrap_or_default()
+        }
     }
 }
 
@@ -352,5 +448,22 @@ mod tests {
         assert_eq!(percent_decode("100%"), "100%");
         assert_eq!(percent_decode("%zz%2"), "%zz%2");
         assert_eq!(percent_decode("a%41"), "aA");
+    }
+}
+
+#[cfg(test)]
+mod range_tests {
+    use super::parse_range;
+
+    #[test]
+    fn byte_ranges_are_read_the_way_a_video_element_asks() {
+        assert_eq!(parse_range("bytes=0-99", 1000), Some((0, 99)));
+        assert_eq!(parse_range("bytes=500-", 1000), Some((500, 999)));
+        assert_eq!(parse_range("bytes=-200", 1000), Some((800, 999)));
+        assert_eq!(parse_range("bytes=900-5000", 1000), Some((900, 999)));
+        assert_eq!(parse_range("bytes=1000-", 1000), None);
+        assert_eq!(parse_range("bytes=50-10", 1000), None);
+        assert_eq!(parse_range("items=0-1", 1000), None);
+        assert_eq!(parse_range("bytes=0-1", 0), None);
     }
 }

@@ -30,6 +30,47 @@ fn record_label(lang: &str) -> &'static str {
     }
 }
 
+/// "Stop recording" in the interface language.
+fn stop_label(lang: &str) -> &'static str {
+    match lang {
+        "de" => "Aufnahme beenden",
+        "es" => "Detener grabación",
+        "fr" => "Arrêter l’enregistrement",
+        "it" => "Interrompi registrazione",
+        "nl" => "Opname stoppen",
+        "pl" => "Zatrzymaj nagrywanie",
+        "tr" => "Kaydı durdur",
+        "zh-Hans" => "停止录制",
+        "zh-Hant" => "停止錄製",
+        "ar" => "إيقاف التسجيل",
+        "ur" => "ریکارڈنگ روکیں",
+        _ => "Stop recording",
+    }
+}
+
+/// The recording item of the tray menu reads "Stop recording" while a recording runs, else "Start recording".
+pub fn set_recording(app: &AppHandle, recording: bool) {
+    let lang = app
+        .state::<crate::commands::AppState>()
+        .settings
+        .lock()
+        .unwrap()
+        .language
+        .clone();
+    let lang = crate::language::resolve(&lang);
+    // The menu is changed on the main thread, without waiting for it (a command runs on another thread).
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        if let Some(l) = handle.try_state::<TrayLabels>() {
+            let _ = l.record.set_text(if recording {
+                stop_label(lang)
+            } else {
+                record_label(lang)
+            });
+        }
+    });
+}
+
 /// Open, Add capture, Settings, Quit
 fn labels(lang: &str) -> [&'static str; 4] {
     match crate::language::resolve(lang) {
@@ -86,8 +127,16 @@ pub fn build(app: &AppHandle, lang: &str) -> tauri::Result<()> {
             "capture" => crate::capture::trigger(app),
             // The page starts the recording flow (the area is chosen in the overlay).
             "record" => {
-                show_main(app);
-                let _ = tauri::Emitter::emit(app, "start-recording", ());
+                if crate::recording::is_recording(app) {
+                    // Stop from the tray: the card is made and Snipmunk comes back to the front.
+                    let app = app.clone();
+                    std::thread::spawn(move || {
+                        let _ = crate::recording::stop_now(&app);
+                    });
+                } else {
+                    show_main(app);
+                    let _ = tauri::Emitter::emit(app, "start-recording", ());
+                }
             }
             "settings" => open_settings_window(app),
             "quit" => app.exit(0),

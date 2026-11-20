@@ -38,6 +38,8 @@ drag = "2"
 zip = { version = "2", default-features = false }
 # The file and folder pickers (the same plugin Owl-L uses); only its Rust side is used.
 tauri-plugin-dialog = "2"
+# Joins the segments of a recording without re-encoding (reads and writes MP4 boxes; MIT, brings byteorder, bytes, num-rational).
+mp4 = "0.14"
 
 [dev-dependencies]
 tempfile = "3"
@@ -76,6 +78,7 @@ features = [
   "Win32_Graphics_Gdi",
   "Win32_System_SystemInformation",
   "Win32_System_Threading",
+  "Win32_Storage_FileSystem",
   "Win32_UI_Input_KeyboardAndMouse",
   "Win32_UI_Shell",
   "Win32_UI_WindowsAndMessaging",

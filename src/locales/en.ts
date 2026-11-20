@@ -429,6 +429,22 @@ export const en = {
   "rec.clickFx": "Click effect",
   "rec.noPlayer": "This recording cannot be played in this version yet. Editing, text recognition, copy as a picture and printing are not available for recordings.",
   "rec.stop": "Stop recording",
+  "rec.recording": "Recording",
+  "rec.discard": "Discard the recording",
+  "rec.discardYes": "Discard",
+  "rec.keep": "Keep",
+  "rec.discardAsk": "Discard this recording?",
+  "rec.pause": "Pause",
+  "rec.resume": "Resume",
+  "rec.paused": "Paused",
+  "rec.notice.diskStart": "There is not enough free disk space to record.",
+  "rec.notice.diskFull": "The disk is almost full: the recording was stopped and saved.",
+  "rec.notice.sourceGone": "The recorded screen or window went away: the recording was stopped and saved.",
+  "rec.recoverTitle": "Recover an interrupted recording?",
+  "rec.recoverBody": "Snipmunk was closed while {count} recording(s) were running. The video up to a few seconds before the interruption can be recovered.",
+  "rec.recover": "Recover",
+  "rec.dropUnfinished": "Delete",
+  "rec.recovered": "The recording was recovered.",
 } as const;
 
 export type Key = keyof typeof en;

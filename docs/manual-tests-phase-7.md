@@ -72,3 +72,57 @@ Built in this step: the 📷/🎥 mode switch, the red **Record** split button (
 - [ ] **M1** **[REAL INPUT]** Switch to 🎥, press Record: the monitor under the pointer is recorded (no mouse cursor in the picture); the red bar shows the time and **Stop recording**; after Stop a card "Recording <date>" with 🎥 and the duration appears in the active group; the preview says the recording cannot be played yet. Deleting the card removes its folder `sessions\<id>\recordings\<rec>\` (screen.mp4, first.png, recording.json).
 - Checked in the test instance (own window only): 6.0 s of a 1056x708 window with a moving counter gave a valid MP4 (`ftyp mp42`, Windows reads a length of 6 s), 357 frames, 861 KB; recording.json written.
 - Not built yet: areas and countdown (M2), floating bar, pause, discard (M3), audio (M4), cursor track (M5), crash recovery, disk checks (M6), player (M7), render / save / copy (M8), Ctrl+Alt+R (M9).
+
+## R0 and M2 (done; M3 to M9 not built)
+
+### R0: separate recording UI
+- [ ] The 📷/🎥 switch changes the whole window. In 🎥: Record ▾ / Countdown / ⚙ / New session, a list of recordings on the left (tabs, rename, colour, emoji, reorder, delete with move/delete, search by name), a placeholder on the right (thumbnail, size, duration). No annotation toolbar, no Separate/Stack/Grid, no Edit in Paint / Open file / Print; Save, Copy and Share are greyed out ("Coming soon") until the rendered video exists.
+- [ ] Screenshots never show in the 🎥 list and recordings never show in the 📷 list. Each kind has its own "Group N" numbering and its own last group that cannot be deleted. The first recording group is made when you enter 🎥 mode.
+- [ ] An old session with a recording inside a screenshot group: after the update the recording is in a recording group (Rust test: `recordings_in_a_screenshot_group_move_to_a_recording_group_when_the_session_is_opened`).
+- [ ] Context menu in 🎥: Rename, Move to, Delete (no Duplicate); selection, Ctrl+A, arrow keys and the three gallery views work.
+- Not done: the group on show in each mode is remembered while the app runs, not across restarts.
+
+### M2: areas and setup
+- [ ] **[REAL INPUT]** Record ▾ → **Rectangle**: the selection overlay opens with the modes Rectangle / Window / Full screen only (no freeform, key 4 does nothing) and the countdown dropdown (it changes the recording countdown, not the screenshot delay). Drag a rectangle: only that area is recorded (check the size of the video and the picture).
+- [ ] **[REAL INPUT]** **Window**: click a window: that window is recorded (its handle is used).
+- [ ] **[REAL INPUT]** **Full screen**: the monitor under the pointer, after the countdown. Countdown None / 3 / 5 / 10 with the badge; Esc cancels and nothing is recorded.
+- [ ] **[REAL INPUT]** A thin red frame is around the recorded area during recording and is not in the video; Snipmunk's main and settings windows are not in the video (also if they overlap the area); both are back to normal after Stop.
+- Checked in the test instance (own window only): a window recording of 10 s gave 281 frames (28 fps, limit 30) and 1.07 MB for 1056x708; a rectangle recording (the monitor cut to the test window's area) gave 323 frames in 11.6 s (28 fps), 0.78 MB, source "region", 1056x708. The two recordings landed in the recording group, the screenshot stayed in the screenshot group.
+- Bitrate: Standard is about 0.02 bits per pixel and frame (3440x1440 at 30 fps: 3 Mbit/s, at most ~22 MB a minute), High twice that. **[REAL INPUT]** Measure MB per minute on your monitor at 30 and 60 fps (the real size depends on how much changes on the screen).
+- [ ] The first picture of a region recording (the card's thumbnail) is the recorded area only, not the whole screen (fixed at the end of this step; not checked in the test instance).
+
+## F1 to F4 and M3 (partly): done in this step
+
+- [ ] **F1** **[REAL INPUT]** Rectangle recording: the video is the right way up (it was flipped: a raw buffer given to the Media Foundation encoder is read bottom-up, so the cropped frames are now sent with their rows reversed; Rust test `a_cropped_frame_is_sent_bottom_up`). Window and Full screen are unchanged.
+- [ ] **F2** The ⚙ of the recording bar is a camera with a small gear (the title bar keeps its sliders icon); both have tooltips.
+- [ ] **F3** Medium and Large views in the recording list: the card is not cut off; the 🎥 duration is a badge on the thumbnail. Also in Arabic (badge on the other side) and in the List view.
+- [ ] **F4** **[REAL INPUT]** When the recording starts (after the countdown) the main window minimizes (a hidden or minimized window stays that way); at Stop the main window comes back to the front in the 🎥 mode with the new recording selected.
+- [ ] **M3 (partly)** **[REAL INPUT]** A small always-on-top bar appears at the top centre of the recorded monitor: red dot, timer, Discard (asks "Discard? Discard / Keep") and Stop; it is not in the video; drag it anywhere by its background. The tray item reads "Stop recording" while recording and stops it. The bar is closed with the red frame when the recording ends. Not built: pause / resume, the system sound and microphone toggles on the bar.
+- Checked in the test instance: the bar and the red frame windows appear when a recording starts and are gone after Stop; recordings stop and make a card. The player can load the MP4 through `snipmunk-img` with range requests (a `<video>` element decoded it).
+- **Privacy note:** a test of the rectangle path recorded the monitor behind my test window (my window was not on top), which showed the real desktop. That test data was deleted at once and the development shortcut for rectangle tests was removed. Region recordings can only be checked by hand.
+
+## H1 and H2 (freeze fix, focus after minimize)
+
+**Root cause of the freeze.** `start_now` held the recorder's mutex for the whole start, including `announce`, `is_visible()` and `minimize()` of the main window. Those calls make the thread wait for the main thread. The floating bar (new) loads its page about a second later and calls the synchronous command `recording_state`, which runs on the main thread and wanted the same mutex: the main thread waited for a lock held by a thread that waited for the main thread, so the whole app froze ("Not responding"). Before the bar and the minimize call the lock was held only while the capture started, so it never happened. Fix: whether a recording runs, and since when, is in atomics (`recording_state` and `is_recording` never wait); the start claims the recorder with an atomic, does its work without any lock, puts the recording in under a short lock, and only then updates the tray, emits the event and minimizes the window (on a separate thread). A development-build watchdog asks the main thread for a sign of life every 250 ms while recording and prints `[recording] the main thread has not answered for 500 ms` to the console if it does not answer.
+
+Verified in the test instance **without any screen capture**: a generated-frame recording (`start_recording` with the development source `__synthetic__`: moving test pattern, 640x360) goes through the real start, red frame window, floating bar window, tray update, minimize, watchdog and stop. During 6 s the page asked `recording_state` 20 times: the slowest answer took 31 ms (average 4 ms); no watchdog line; Stop made the card. The decoded video is upright (red square top left, blue bottom right), which also verifies the F1 row reversal. Per-frame crop-path work (row reversal and copy) of a 3440x1440 frame takes 11.8 ms in a debug build (test `the_crop_and_flip_of_an_ultrawide_frame_are_fast`).
+
+- [ ] **[REAL INPUT]** Record Full screen, Window and Rectangle: Snipmunk stays responsive for the whole recording (also while the floating bar is dragged), Stop works from the bar, the tray and the app. If a freeze ever shows again, the console of a development build has the watchdog lines.
+- [ ] **[REAL INPUT]** H2: when the recording starts and Snipmunk minimizes, the keyboard is in the recorded window (Window mode), the window in front at the centre of the area (Rectangle), or the window in front on the monitor (Full screen); you can type there at once. (Windows may refuse to move the focus to a program that was not used last; then the window that Windows activates after the minimize keeps it.)
+
+Not built in this step: M6 (segments, join, recovery, disk checks), the rest of M3 (pause, sound and mic toggles, bar placement), M4 audio, M5 cursor track, M7 player, M8 render, M9 Ctrl+Alt+R.
+
+## B1 to B4, M6 (crash-safe segments) and pause/resume
+
+Done in code, gates green (cargo fmt, clippy -D warnings, cargo test 158, tsc, eslint, vitest 792). Then checked live in a test instance with the generated-frame source only (no screen capture): a recording with 3 s segments and a 2.3 s pause made one `screen.mp4` (segments deleted, plays in the web view at 640x360, 10.5 s); the timer stood still while paused (2181 ms) and went on after the resume. The test instance was killed during a recording: after the restart the dialog "Recover an interrupted recording?" appeared, Recover made a card (10.8 s, plays), and no unfinished folder was left. The bar window is transparent (body rgba 0,0,0,0), 313x52 for a 308 px capsule, with the pause button. Not checked live: disk-full, monitor unplugged, long recordings.
+
+- Rust tests (generated frames, no screen): `segments_of_generated_frames_join_into_one_video_with_all_the_pictures` writes 5 s at 30 fps as 1 s segments with a 300 ms pause in the middle, joins them without re-encoding: 150 samples, 4997 ms, the **join took 5 ms**. `a_segment_cut_off_by_a_crash_is_left_out_and_the_rest_is_recovered` cuts the last segment short and recovers the rest.
+- How it works: the video is written as ~10 s segments `screen-000.mp4` ...; each is a finished MP4 as soon as its encoder is finished; Stop joins them (a remux with the `mp4` crate) into `screen.mp4` and deletes the segments. A pause ends the segment, the resume starts the next. `recording.json` is written at the start.
+- [ ] **[REAL INPUT]** Record 35 s (3 or 4 segments): the card plays in one piece without a jump at the segment borders; the length matches the timer.
+- [ ] **[REAL INPUT]** Pause (⏸ on the bar): the timer stands still, the red dot stops pulsing; Resume (▶): it goes on. The video has no frozen part for the pause time.
+- [ ] **Crash recovery** (use only a recording of a window you do not mind, or the dev source): start a recording, wait 25 s, kill Snipmunk in the Task Manager, start it again: a dialog "Recover an interrupted recording?" offers Recover / Delete. Recover gives a card with the video up to about 10 s before the kill (at most the last segment is lost); Delete removes the folder.
+- [ ] **Disk**: with less than 300 MB free the recording does not start and the message says so; while recording, below 150 MB the recording is stopped and saved with a message.
+- [ ] **[REAL INPUT]** Unplug the recorded monitor (or close the recorded window) during a recording: it is stopped and saved, with a message.
+- [ ] B1 to B4 (bar transparent around the capsule and as big as its content, no growth on hover, countdown on the bar with the ✕, the discard question on the same line, the video icon in the badge): look at them once with a real recording.
+
+Not built in this stretch: sound/mic toggles on the bar and bar placement outside the area (M3 rest), M4 audio, M5 cursor track, M7 player, M8 render, M9 hotkeys.

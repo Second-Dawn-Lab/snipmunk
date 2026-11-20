@@ -7,7 +7,9 @@
     "settings",
     "overlay-*",
     "toast",
-    "countdown"
+    "countdown",
+    "recframe",
+    "recbar"
   ],
   "permissions": [
     "core:default",

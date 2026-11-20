@@ -86,7 +86,7 @@ export function RecordControls(props: { settings: Settings; onPatch: (change: Pa
             title={t("rec.options")}
             onClick={() => setOptionsOpen((o) => !o)}
           >
-            <AppIcon name="settings" size={17} />
+            <AppIcon name="recoptions" size={17} />
           </button>
         }
       >

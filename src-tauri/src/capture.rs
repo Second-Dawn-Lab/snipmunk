@@ -47,6 +47,8 @@ struct Run {
 
 pub struct Capture {
     run: Mutex<Option<Run>>,
+    /// The running selection is for a screen recording, not for a screenshot.
+    recording: AtomicBool,
     /// A capture is in progress (countdown, overlays, or saving).
     busy: AtomicBool,
     next_id: AtomicU64,
@@ -56,6 +58,7 @@ impl Capture {
     pub fn new() -> Self {
         Self {
             run: Mutex::new(None),
+            recording: AtomicBool::new(false),
             busy: AtomicBool::new(false),
             next_id: AtomicU64::new(1),
         }
@@ -177,6 +180,7 @@ pub fn precreate(app: &AppHandle) {
 fn finish_run(app: &AppHandle) {
     release_own_windows(app);
     let capture = app.state::<Capture>();
+    capture.recording.store(false, Ordering::SeqCst);
     *capture.run.lock().unwrap() = None;
     capture.busy.store(false, Ordering::SeqCst);
 }
@@ -196,6 +200,18 @@ pub fn trigger(app: &AppHandle) {
         return;
     }
     run_flow(app);
+}
+
+/// Start choosing the area of a screen recording: the same selection overlay, with the recording modes (no freeform) and the
+/// recording countdown. Does nothing while another capture is running.
+pub fn trigger_recording(app: &AppHandle) {
+    let capture = app.state::<Capture>();
+    if capture.busy.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    capture.recording.store(true, Ordering::SeqCst);
+    let app = app.clone();
+    std::thread::spawn(move || begin(&app));
 }
 
 /// The delay (when set), then the grab and the overlays. A capture is marked busy already. Runs on its own thread.
@@ -360,6 +376,8 @@ pub struct OverlayInfo {
     /// Seconds of delay before a capture: 0, 3, 5 or 10 (the setting the main window's dropdown shows).
     delay: u32,
     magnifier: bool,
+    /// "screenshot" or "recording" (the mode bar shows the recording modes and the recording countdown).
+    purpose: String,
     /// This monitor on the virtual desktop, physical pixels.
     monitor: Rect,
     scale: f64,
@@ -382,6 +400,7 @@ pub fn capture_overlay_info(
     let guard = capture.run.lock().unwrap();
     let run = guard.as_ref().filter(|r| index < r.screens.len())?;
     let settings = state.settings.lock().unwrap();
+    let recording = capture.recording.load(Ordering::SeqCst);
     let base = if cfg!(windows) {
         "http://snipmunk-cap.localhost"
     } else {
@@ -392,9 +411,18 @@ pub fn capture_overlay_info(
         index,
         count: run.screens.len(),
         focus: index == run.focus,
-        mode: settings.capture_mode.clone(),
-        delay: settings.capture_delay,
+        mode: if recording {
+            settings.rec_mode.clone()
+        } else {
+            settings.capture_mode.clone()
+        },
+        delay: if recording {
+            settings.rec_countdown
+        } else {
+            settings.capture_delay
+        },
         magnifier: settings.show_magnifier,
+        purpose: if recording { "recording" } else { "screenshot" }.into(),
         monitor: run.rects[index],
         scale: run.screens[index].scale,
         windows: run.windows.clone(),
@@ -438,6 +466,18 @@ pub fn capture_set_mode(app: AppHandle, mode: String) -> CmdResult<()> {
     if !["rectangle", "window", "fullscreen", "freeform"].contains(&mode.as_str()) {
         return Err(CmdError::new("bad_request", "unknown capture mode"));
     }
+    if app.state::<Capture>().recording.load(Ordering::SeqCst) {
+        // A recording has no freeform mode.
+        if mode == "freeform" {
+            return Err(CmdError::new(
+                "bad_request",
+                "a recording has no freeform area",
+            ));
+        }
+        crate::commands::patch_settings(&app, serde_json::json!({ "recMode": mode }))?;
+        let _ = app.emit("capture-mode", &mode);
+        return Ok(());
+    }
     crate::commands::patch_settings(&app, serde_json::json!({ "captureMode": mode }))?;
     let _ = app.emit("capture-mode", &mode);
     Ok(())
@@ -450,6 +490,11 @@ pub fn capture_set_mode(app: AppHandle, mode: String) -> CmdResult<()> {
 pub fn capture_set_delay(app: AppHandle, delay: u32) -> CmdResult<()> {
     if !is_delay(delay) {
         return Err(CmdError::new("bad_request", "unknown delay"));
+    }
+    if app.state::<Capture>().recording.load(Ordering::SeqCst) {
+        // The recording countdown runs after the area is chosen: only the setting changes.
+        crate::commands::patch_settings(&app, serde_json::json!({ "recCountdown": delay }))?;
+        return Ok(());
     }
     crate::commands::patch_settings(&app, serde_json::json!({ "captureDelay": delay }))?;
     if delay == 0 {
@@ -487,6 +532,27 @@ pub struct FinishArgs {
     /// The lasso, for the freeform mode.
     pub points: Option<Vec<[f64; 2]>>,
     pub window_title: Option<String>,
+    /// The window of a window selection (its handle), for a recording of that window.
+    pub window_hwnd: Option<i64>,
+}
+
+/// The area of a finished selection on the virtual desktop (physical pixels) for a recording: the window (what is visible of
+/// it), the monitor, or the dragged rectangle. `None` when it is too small.
+pub fn recording_area(rects: &[Rect], index: usize, args: &FinishArgs) -> Option<Rect> {
+    let monitor = *rects.get(index)?;
+    let [rx, ry, rw, rh] = args.rect;
+    let wanted = Rect::new(
+        monitor.x + rx,
+        monitor.y + ry,
+        rw.max(0) as u32,
+        rh.max(0) as u32,
+    );
+    let area = match args.mode.as_str() {
+        "window" => geometry::visible_part(wanted, rects)?,
+        "fullscreen" => monitor,
+        _ => wanted.intersect(&monitor)?,
+    };
+    (area.w >= geometry::MIN_SELECTION && area.h >= geometry::MIN_SELECTION).then_some(area)
 }
 
 /// The pixels of a finished selection, cut out of the frozen screenshots, and the title to name it by.
@@ -556,6 +622,24 @@ pub fn capture_finish(app: AppHandle, args: FinishArgs) -> CmdResult<()> {
         capture.busy.store(false, Ordering::SeqCst);
         return Ok(());
     };
+    if capture.recording.swap(false, Ordering::SeqCst) {
+        // A recording: the area is what was chosen; the screenshots of the overlay are not needed.
+        let area = recording_area(&run.rects, index, &args);
+        drop(run);
+        let Some(area) = area else {
+            capture.busy.store(false, Ordering::SeqCst);
+            return Ok(());
+        };
+        let hwnd = args
+            .window_hwnd
+            .filter(|_| args.mode == "window")
+            .map(|h| h as usize);
+        std::thread::spawn(move || {
+            crate::recording::begin_area(&app, area, hwnd);
+            app.state::<Capture>().busy.store(false, Ordering::SeqCst);
+        });
+        return Ok(());
+    }
     trace(&format!(
         "selection finished {} ms after the start",
         run.started.elapsed().as_millis()
@@ -608,7 +692,41 @@ mod tests {
             rect,
             points: None,
             window_title: None,
+            window_hwnd: None,
         }
+    }
+
+    #[test]
+    fn a_recording_area_is_the_rectangle_the_window_or_the_monitor() {
+        let rects = [Rect::new(0, 0, 1920, 1080), Rect::new(1920, 0, 2560, 1440)];
+        // A dragged rectangle on the second monitor is in desktop coordinates; it is kept inside its monitor.
+        assert_eq!(
+            recording_area(&rects, 1, &args("rectangle", [100, 50, 800, 600])),
+            Some(Rect::new(2020, 50, 800, 600))
+        );
+        assert_eq!(
+            recording_area(&rects, 1, &args("rectangle", [2000, 1000, 800, 800])),
+            Some(Rect::new(3920, 1000, 560, 440))
+        );
+        // The whole monitor.
+        assert_eq!(
+            recording_area(&rects, 0, &args("fullscreen", [0, 0, 10, 10])),
+            Some(rects[0])
+        );
+        // A window that reaches off the screen: what is visible.
+        assert_eq!(
+            recording_area(&rects[..1], 0, &args("window", [1500, 800, 800, 600])),
+            Some(Rect::new(1500, 800, 420, 280))
+        );
+        // Too small, or not on any monitor.
+        assert_eq!(
+            recording_area(&rects, 0, &args("rectangle", [10, 10, 2, 2])),
+            None
+        );
+        assert_eq!(
+            recording_area(&rects, 5, &args("rectangle", [10, 10, 200, 200])),
+            None
+        );
     }
 
     #[test]

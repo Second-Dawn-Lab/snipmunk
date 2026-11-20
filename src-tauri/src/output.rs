@@ -76,8 +76,8 @@ pub fn deliver(app: &AppHandle, frame: Frame, title: Option<String>) -> Result<(
             .session()
             .groups
             .iter()
-            .find(|g| Some(&g.id) == wanted.as_ref())
-            .or_else(|| store.session().groups.first())
+            .find(|g| Some(&g.id) == wanted.as_ref() && !g.is_recording())
+            .or_else(|| store.session().groups.iter().find(|g| !g.is_recording()))
             .map(|g| (g.id.clone(), g.name.clone()))
             .ok_or("the session has no group")?;
         // The files are on disk before the session file mentions them (see SessionStore::add_capture).

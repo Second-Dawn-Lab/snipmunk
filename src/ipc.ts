@@ -41,6 +41,8 @@ export interface Capture {
 
 export interface Group {
   id: string;
+  /** "recording" for a group of screen recordings; none for screenshots. */
+  kind?: "recording" | null;
   name: string;
   order: number;
   /** One of `GROUP_COLORS` (groupRules.ts), or none. */
@@ -109,6 +111,8 @@ export interface OverlayInfo {
   count: number;
   focus: boolean;
   mode: "rectangle" | "window" | "fullscreen" | "freeform";
+  /** "screenshot" or "recording" (a recording has no freeform area and its own countdown). */
+  purpose?: "screenshot" | "recording";
   /** Seconds before a capture (0, 3, 5 or 10). */
   delay: number;
   magnifier: boolean;
@@ -126,6 +130,8 @@ export interface FinishArgs {
   rect: [number, number, number, number];
   points?: [number, number][];
   windowTitle?: string;
+  /** The handle of the selected window (a window selection). */
+  windowHwnd?: number;
 }
 
 export interface ToastInfo {
@@ -153,6 +159,14 @@ function on<T>(event: string, handler: (payload: T) => void): Promise<() => void
   return isTauri ? listen<T>(event, (e) => handler(e.payload)) : mockListen(event, handler);
 }
 
+/** The state of the recorder: the timer counts `elapsedMs` (pauses not counted) as of the moment the state was made. */
+export interface RecState {
+  recording: boolean;
+  startedAt: number;
+  paused: boolean;
+  elapsedMs: number;
+}
+
 export const ipc = {
   // settings
   getSettings: () => call<Settings>("get_settings"),
@@ -173,8 +187,20 @@ export const ipc = {
   /** Start a screen recording of an area. Fails with code "unsupported" while the recorder is not part of this build. */
   startRecording: (mode: string, window?: string) => call<void>("start_recording", { mode, window: window ?? null }),
   stopRecording: () => call<Session>("stop_recording"),
-  recordingState: () => call<{ recording: boolean; startedAt: number }>("recording_state"),
-  onRecordingState: (cb: (s: { recording: boolean; startedAt: number }) => void) => on<{ recording: boolean; startedAt: number }>("recording-state", cb),
+  discardRecording: () => call<void>("discard_recording"),
+  cancelCountdown: () => call<void>("cancel_countdown"),
+  recbarFit: (width: number, height: number) => call<void>("recbar_fit", { width, height }),
+  /** The seconds left of the countdown on the floating bar (0 = over or cancelled). */
+  onRecCountdown: (cb: (n: number) => void) => on<number>("rec-countdown", cb),
+  recordingState: () => call<RecState>("recording_state"),
+  onRecordingState: (cb: (s: RecState) => void) => on<RecState>("recording-state", cb),
+  pauseRecording: (pause: boolean) => call<RecState>("pause_recording", { pause }),
+  /** Why a recording was stopped or did not start: "disk-start" | "disk-full" | "source-gone". */
+  onRecordingNotice: (cb: (kind: string) => void) => on<string>("recording-notice", cb),
+  /** Recordings that a crash cut off (their folder names). */
+  unfinishedRecordings: () => call<string[]>("unfinished_recordings"),
+  recoverRecording: (id: string) => call<Session>("recover_recording", { id }),
+  dropUnfinishedRecording: (id: string) => call<void>("drop_unfinished_recording", { id }),
   onStartRecording: (cb: () => void) => on<null>("start-recording", () => cb()),
   startCapture: (mode?: string) => call<void>("start_capture", { mode: mode ?? null }),
   /** The capture shortcut was pressed inside a Snipmunk window (the backend ignores it if the hook saw it too). */
@@ -245,7 +271,8 @@ export const ipc = {
   readPickedFile: (path: string) => readPicked(path),
   /** Replace a capture's thumbnail with a PNG rendered by the editor (the picture with its annotations). */
   setCaptureThumbnail: (captureId: string, png: Blob) => setThumbnail(captureId, png),
-  createGroup: (name?: string) => call<Session>("create_group", { name: name ?? null }),
+  /** A group of screenshots, or (`kind: "recording"`) of recordings. */
+  createGroup: (name?: string, kind?: "recording") => call<Session>("create_group", { name: name ?? null, kind: kind ?? null }),
   renameGroup: (groupId: string, name: string) =>
     call<Session>("rename_group", { groupId, name }),
   /** Delete a group; its captures move to the end of `moveTo`, or are deleted with it when that is not given. */

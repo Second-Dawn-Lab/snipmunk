@@ -74,6 +74,15 @@ pub struct Group {
     pub emoji: Option<String>,
     /// In the user's custom order.
     pub captures: Vec<Capture>,
+    /// "recording" for a group of screen recordings; `None` (also in sessions of earlier versions) for screenshots. The two
+    /// kinds of groups are independent: each has its own tabs, names and "last group" rule.
+    pub kind: Option<String>,
+}
+
+impl Group {
+    pub fn is_recording(&self) -> bool {
+        self.kind.as_deref() == Some("recording")
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -163,10 +172,21 @@ impl Session {
     }
 
     fn push_group(&mut self, name: Option<String>, lang: &str) -> String {
+        self.push_group_of(name, lang, false)
+    }
+
+    /// A new group of the screenshot kind or (`recording`) of the recording kind. Default names count per kind.
+    fn push_group_of(&mut self, name: Option<String>, lang: &str, recording: bool) -> String {
+        let same: Vec<Group> = self
+            .groups
+            .iter()
+            .filter(|g| g.is_recording() == recording)
+            .cloned()
+            .collect();
         let name = name
             .map(|n| n.trim().chars().take(80).collect::<String>())
             .filter(|n| !n.is_empty())
-            .unwrap_or_else(|| default_group_name(lang, lowest_free_group_number(&self.groups)));
+            .unwrap_or_else(|| default_group_name(lang, lowest_free_group_number(&same)));
         let id = new_id("g");
         let order = self.groups.len() as u32;
         self.groups.push(Group {
@@ -176,8 +196,40 @@ impl Session {
             color: None,
             emoji: None,
             captures: Vec::new(),
+            kind: recording.then(|| "recording".to_string()),
         });
         id
+    }
+
+    /// Recordings that sit in a screenshot group (sessions of the first recorder versions) move into the first recording group,
+    /// which is made when there is none. Returns whether anything changed.
+    fn migrate_videos(&mut self, lang: &str) -> bool {
+        let stray = self.groups.iter().any(|g| {
+            !g.is_recording()
+                && g.captures
+                    .iter()
+                    .any(|c| c.kind.as_deref() == Some("video"))
+        });
+        if !stray {
+            return false;
+        }
+        let target = match self.groups.iter().position(|g| g.is_recording()) {
+            Some(i) => i,
+            None => {
+                self.push_group_of(None, lang, true);
+                self.groups.len() - 1
+            }
+        };
+        let mut moved = Vec::new();
+        for g in self.groups.iter_mut().filter(|g| !g.is_recording()) {
+            let (videos, rest): (Vec<Capture>, Vec<Capture>) = std::mem::take(&mut g.captures)
+                .into_iter()
+                .partition(|c| c.kind.as_deref() == Some("video"));
+            g.captures = rest;
+            moved.extend(videos);
+        }
+        self.groups[target].captures.extend(moved);
+        true
     }
 
     fn group_mut(&mut self, id: &str) -> StoreResult<&mut Group> {
@@ -288,6 +340,11 @@ pub struct SessionStore {
 }
 
 impl SessionStore {
+    /// The folder of the sessions.
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
     /// `%AppData%\SecondDawn\snipmunk\sessions`
     pub fn default_root() -> PathBuf {
         dawn_core::app_dir("snipmunk").join("sessions")
@@ -301,17 +358,18 @@ impl SessionStore {
 
     /// Like `open`, with the interface language that names the first group of a new session.
     pub fn open_in(root: PathBuf, lang: &str) -> Self {
-        let session = Self::list(&root)
+        let mut session = Self::list(&root)
             .into_iter()
             .max_by_key(|s| s.updated_at)
             .unwrap_or_else(|| Session::new(lang));
+        let migrated = session.migrate_videos(lang);
         let store = Self {
             root,
             session,
             lang: lang.to_string(),
         };
         // A brand new session is written at once, so it exists on disk before the first capture.
-        if !store.session_dir().join(SESSION_FILE).exists() {
+        if migrated || !store.session_dir().join(SESSION_FILE).exists() {
             let _ = store.write(&store.session.clone());
         }
         store
@@ -406,8 +464,25 @@ impl SessionStore {
     // --- groups ----------------------------------------------------------------
 
     pub fn create_group(&mut self, name: Option<String>) -> StoreResult<String> {
+        self.create_group_of(name, false)
+    }
+
+    /// A group of screenshots, or (`recording`) of recordings.
+    pub fn create_group_of(
+        &mut self,
+        name: Option<String>,
+        recording: bool,
+    ) -> StoreResult<String> {
         let lang = self.lang.clone();
-        self.change(|s| Ok(s.push_group(name, &lang)))
+        self.change(|s| Ok(s.push_group_of(name, &lang, recording)))
+    }
+
+    /// The id of the first group of recordings, made when the session has none.
+    pub fn ensure_recording_group(&mut self) -> StoreResult<String> {
+        if let Some(g) = self.session.groups.iter().find(|g| g.is_recording()) {
+            return Ok(g.id.clone());
+        }
+        self.create_group_of(None, true)
     }
 
     pub fn rename_group(&mut self, id: &str, name: &str) -> StoreResult<()> {
@@ -422,10 +497,18 @@ impl SessionStore {
     /// The last group cannot be deleted.
     pub fn delete_group(&mut self, id: &str, move_to: Option<&str>) -> StoreResult<()> {
         let files = self.change(|s| {
-            if s.groups.len() <= 1 {
-                return Err(StoreError::Invalid(
-                    "the last group cannot be deleted".into(),
-                ));
+            // The last group of a kind stays (screenshots and recordings count separately).
+            let recording = s
+                .groups
+                .iter()
+                .find(|g| g.id == id)
+                .map(|g| g.is_recording());
+            if let Some(r) = recording {
+                if s.groups.iter().filter(|g| g.is_recording() == r).count() <= 1 {
+                    return Err(StoreError::Invalid(
+                        "the last group cannot be deleted".into(),
+                    ));
+                }
             }
             let index = s
                 .groups
@@ -1024,6 +1107,21 @@ impl SessionStore {
         if is_safe_relative(relative) {
             let _ = fs::remove_file(self.session_dir().join(relative));
         }
+    }
+
+    /// The file of a recording (`recordings/<id>/screen.mp4` and its tracks) for the player. `session_id` and `file` come from the page.
+    pub fn recording_file(&self, session_id: &str, file: &str) -> Option<PathBuf> {
+        let ok_ext = ["mp4", "wav", "m4a", "json"]
+            .iter()
+            .any(|e| file.ends_with(&format!(".{e}")));
+        if !is_safe_id(session_id)
+            || !is_safe_relative(file)
+            || !file.starts_with("recordings/")
+            || !ok_ext
+        {
+            return None;
+        }
+        Some(self.root.join(session_id).join(file))
     }
 
     /// The bytes of a session image for the `snipmunk-img` scheme. `session_id` and `file` come from the web page.
@@ -1682,6 +1780,82 @@ mod tests {
             name: name.into(),
             ..Group::default()
         }
+    }
+
+    #[test]
+    fn recordings_in_a_screenshot_group_move_to_a_recording_group_when_the_session_is_opened() {
+        let (dir, mut store) = store();
+        let g = store.session().groups[0].id.clone();
+        let shot = add(&mut store, &g, "shot");
+        let video = add(&mut store, &g, "rec");
+        store
+            .set_video(&video.id, "recordings/r1/screen.mp4", 1500)
+            .unwrap();
+        drop(store);
+        // An old session: no recording group, a video among the screenshots.
+        let reopened = SessionStore::open(dir.path().join("sessions"));
+        let groups = &reopened.session().groups;
+        assert_eq!(groups.len(), 2);
+        assert!(!groups[0].is_recording() && groups[1].is_recording());
+        assert_eq!(
+            groups[0]
+                .captures
+                .iter()
+                .map(|c| c.id.clone())
+                .collect::<Vec<_>>(),
+            [shot.id]
+        );
+        assert_eq!(groups[1].captures.len(), 1);
+        assert_eq!(groups[1].captures[0].id, video.id);
+        assert_eq!(
+            groups[1].captures[0].video_file.as_deref(),
+            Some("recordings/r1/screen.mp4")
+        );
+        assert_eq!(
+            groups[1].name, "Group 1",
+            "the recording groups are numbered on their own"
+        );
+        // It was written: opening again changes nothing.
+        let again = SessionStore::open(dir.path().join("sessions"));
+        assert_eq!(again.session().groups.len(), 2);
+    }
+
+    #[test]
+    fn sessions_without_recordings_or_recording_groups_load_unchanged() {
+        let (dir, mut store) = store();
+        let g = store.session().groups[0].id.clone();
+        add(&mut store, &g, "shot");
+        drop(store);
+        let reopened = SessionStore::open(dir.path().join("sessions"));
+        assert_eq!(reopened.session().groups.len(), 1);
+        assert!(reopened.session().groups.iter().all(|g| g.kind.is_none()));
+    }
+
+    #[test]
+    fn each_kind_of_group_has_its_own_names_and_its_own_last_group() {
+        let (_dir, mut store) = store();
+        let first_shot = store.session().groups[0].id.clone();
+        let rec = store.create_group_of(None, true).unwrap();
+        let rec2 = store.create_group_of(None, true).unwrap();
+        let names: Vec<_> = store
+            .session()
+            .groups
+            .iter()
+            .map(|g| (g.name.clone(), g.is_recording()))
+            .collect();
+        assert_eq!(
+            names,
+            [
+                ("Group 1".into(), false),
+                ("Group 1".into(), true),
+                ("Group 2".into(), true)
+            ]
+        );
+        // The only screenshot group stays although there are three groups; a recording group can go while another is left.
+        assert!(store.delete_group(&first_shot, None).is_err());
+        store.delete_group(&rec2, None).unwrap();
+        assert!(store.delete_group(&rec, None).is_err());
+        assert_eq!(store.ensure_recording_group().unwrap(), rec);
     }
 
     fn names_of_groups(store: &SessionStore) -> Vec<String> {

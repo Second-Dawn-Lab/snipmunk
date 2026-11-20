@@ -151,7 +151,9 @@ export function Overlay() {
     void ipc.captureCancel();
   };
 
-  const finish = (rect: Box, extra: { points?: [number, number][]; windowTitle?: string } = {}) => {
+  /** The modes of this selection: a recording has no freeform area. */
+  const modes = info?.purpose === "recording" ? MODE_ORDER.filter((m) => m !== "freeform") : MODE_ORDER;
+  const finish = (rect: Box, extra: { points?: [number, number][]; windowTitle?: string; windowHwnd?: number } = {}) => {
     void ipc.captureFinish({
       label,
       mode,
@@ -188,6 +190,7 @@ export function Overlay() {
         return;
       }
       const next = modeForKey(e.key);
+      if (next === "freeform" && info?.purpose === "recording") return;
       if (next) {
         e.preventDefault();
         chooseMode(next);
@@ -241,7 +244,7 @@ export function Overlay() {
       setDragTo(null);
       if (box) finish(box);
     } else if (mode === "window") {
-      if (hovered) finish(windowToLocal(hovered, monitorOrigin), { windowTitle: hovered.title });
+      if (hovered) finish(windowToLocal(hovered, monitorOrigin), { windowTitle: hovered.title, windowHwnd: hovered.hwnd });
     } else if (mode === "fullscreen") {
       finish(monitorBox);
     } else if (mode === "freeform" && lasso.length > 0) {
@@ -348,7 +351,7 @@ export function Overlay() {
 
       {info.focus && (
         <div className="modebar" role="toolbar" aria-label={t("overlay.modes")} onPointerDown={(e) => e.stopPropagation()}>
-          {MODE_ORDER.map((m, i) => (
+          {modes.map((m, i) => (
             <button
               key={m}
               type="button"

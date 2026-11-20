@@ -1,3 +1,4 @@
+import { AppIcon } from "./AppIcons";
 import { Icon } from "@seconddawn/ui";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { contentHeight, dropSlot, gridSpec, itemPosition, pageRows, scrollToShow, slotMark, visibleRange, type GalleryView } from "../gallery/layout";
@@ -387,7 +388,7 @@ const Card = memo(function Card(p: CardProps) {
         )}
         {c.kind === "video" && (
           <div className="card__video" dir="ltr">
-            <span aria-hidden="true">🎥</span>
+            <AppIcon name="video" size={13} />
             {formatDuration(c.durationMs ?? 0)}
           </div>
         )}

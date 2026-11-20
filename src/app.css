@@ -1637,3 +1637,38 @@ body.is-dragging * {
 [dir="rtl"] .recbar { transform: translateX(50%); }
 .recdot--live { background: #d32f2f; box-shadow: none; animation: recpulse 1.2s infinite; }
 @keyframes recpulse { 50% { opacity: .35; } }
+
+.recplaceholder { display: grid; justify-items: center; align-content: center; gap: 10px; height: 100%; padding: 24px; text-align: center; }
+.recplaceholder__thumb { max-width: min(100%, 520px); max-height: 50%; border-radius: 8px; border: 1px solid var(--dw-border); }
+.recplaceholder__meta { margin: 0; font-weight: 600; }
+
+/* The thin red frame around the recorded area: a transparent window with a red border (excluded from the recording). */
+html[data-window="recframe"], html[data-window="recframe"] body { background: transparent !important; }
+.recframe { position: fixed; inset: 0; border: 3px solid #e53935; box-sizing: border-box; pointer-events: none; }
+html[data-window="recframe"] #root { background: transparent; }
+
+/* A recording's duration on a tile (medium and large views) sits on the thumbnail, so the tile keeps its height. */
+.card--medium .card__video, .card--large .card__video { position: absolute; inset-inline-end: 6px; padding: 1px 7px; border-radius: 10px; background: rgba(0, 0, 0, 0.7); color: #fff; opacity: 1; z-index: 1; }
+.card--medium .card__video { top: 74px; }
+.card--large .card__video { top: 137px; }
+
+/* The floating recording bar (its own transparent window; the pill is the page). */
+html[data-window="recbar"], html[data-window="recbar"] body, html[data-window="recbar"] #root { background: transparent !important; }
+.floatbar { display: flex; align-items: center; gap: 10px; height: 100%; padding: 0 8px 0 14px; border-radius: 26px; background: var(--dw-surface); color: var(--dw-text); border: 1px solid var(--dw-border-strong, var(--dw-border)); box-shadow: 0 4px 18px rgba(0,0,0,.3); -webkit-user-select: none; user-select: none; }
+.floatbar__time { font-variant-numeric: tabular-nums; font-weight: 600; min-width: 48px; }
+.floatbar__sp { flex: 1; }
+.floatbar button { height: 32px; }
+
+/* B1/B2: the bar window is transparent; the capsule is as big as its content and nothing grows on hover. */
+html[data-window="recbar"], html[data-window="recbar"] body, html[data-window="recbar"] #root, html[data-window="recframe"] #root { background: transparent !important; }
+.floatbar { width: max-content; height: 48px; box-sizing: border-box; white-space: nowrap; display: inline-flex; align-items: center; gap: 10px; padding: 0 8px 0 14px; border-radius: 24px; background: var(--dw-surface, #fff); color: var(--dw-text, #111); border: 1px solid var(--dw-border-strong, rgba(128,128,128,.5)); box-shadow: none; }
+.floatbar__count { font-size: 30px; font-weight: 700; min-width: 32px; text-align: center; font-variant-numeric: tabular-nums; }
+.floatbar__ask { font-size: 13px; }
+.floatbar__btn { flex: none; height: 32px; min-width: 32px; padding: 0 12px; border: 1px solid var(--dw-border-strong, rgba(128,128,128,.5)); border-radius: 16px; background: var(--dw-surface-2, transparent); color: inherit; font: inherit; font-size: 13px; cursor: pointer; transition: none; }
+.floatbar__btn:hover:not(:disabled) { background: var(--dw-hover, rgba(128,128,128,.2)); transform: none; }
+.floatbar__btn--danger { background: #d32f2f; border-color: #d32f2f; color: #fff; }
+.floatbar__btn--danger:hover:not(:disabled) { background: #b71c1c; }
+.floatbar__btn:disabled { opacity: .5; cursor: default; }
+/* B3: the recording icon on the duration badge is light on the dark badge. */
+.card__video svg { color: inherit; stroke: currentColor; }
+.card--medium .card__video, .card--large .card__video { color: #fff; }

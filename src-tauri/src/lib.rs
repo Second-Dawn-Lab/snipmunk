@@ -10,6 +10,7 @@ mod geometry;
 mod hotkey;
 mod import;
 mod language;
+mod mp4join;
 mod naming;
 mod ocr;
 mod output;
@@ -85,6 +86,13 @@ pub fn run() {
             gallery::replace_capture_image,
             recording::start_recording,
             recording::stop_recording,
+            recording::discard_recording,
+            recording::pause_recording,
+            recording::unfinished_recordings,
+            recording::recover_recording,
+            recording::drop_unfinished_recording,
+            recording::cancel_countdown,
+            recording::recbar_fit,
             recording::recording_state,
             export::export_begin,
             export::export_stage,

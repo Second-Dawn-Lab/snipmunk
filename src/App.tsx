@@ -3,6 +3,7 @@ import { useSettings } from "@seconddawn/settings";
 import { applyTheme } from "@seconddawn/ui";
 import { useEffect, useState } from "react";
 import { MainWindow } from "./components/MainWindow";
+import { RecBar } from "./components/RecBar";
 import { Countdown } from "./overlay/Countdown";
 import { Overlay } from "./overlay/Overlay";
 import { Toast } from "./overlay/Toast";
@@ -76,5 +77,7 @@ function Root({ label }: { label: string }) {
   if (label.startsWith("overlay-")) return <Overlay />;
   if (label === "toast") return <Toast />;
   if (label === "countdown") return <Countdown />;
+  if (label === "recframe") return <div className="recframe" />;
+  if (label === "recbar") return <RecBar />;
   return <MainWindow />;
 }

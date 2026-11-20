@@ -56,6 +56,8 @@ export function TopBar(props: {
   /** Start a capture, optionally in this mode (picked from the mode menu). */
   onCapture: (mode?: CaptureMode) => void;
   zoom: ZoomApi;
+  /** The recording mode: no Edit in Paint, Open file or Print; Save, Copy and Share wait for the rendered video. */
+  recording?: boolean;
   /** Start a recording of an area (the recording mode). */
   onRecord: (area: CaptureSettings["recMode"]) => void;
   /** What the buttons on the right do with the capture shown in the preview. */
@@ -64,7 +66,8 @@ export function TopBar(props: {
   const { t, locale } = useT();
   const { settings, zoom, share } = props;
   const video = settings.captureKind === "video";
-  const off = !share.hasCapture || share.busy;
+  const off = !share.hasCapture || share.busy || !!props.recording;
+  const soonTip = props.recording ? t("soon.label") : undefined;
   const [modeOpen, setModeOpen] = useState(false);
   const [zoomOpen, setZoomOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
@@ -181,6 +184,7 @@ export function TopBar(props: {
       </div>
 
       <div className="topbar__group topbar__group--end">
+        {!props.recording && (
         <button
           type="button"
           className="editbtn"
@@ -191,12 +195,13 @@ export function TopBar(props: {
           <AppIcon name="paint" size={17} />
           <span>{isWindows ? t("actions.editPaint") : t("actions.openEditor")}</span>
         </button>
-        <ActionButton icon="save" label={t("actions.save")} tip={t("actions.saveTip")} disabled={off} onClick={share.onSave} />
-        <ActionButton icon="copy" label={t("actions.copy")} tip={t("actions.copyTip")} disabled={off} onClick={share.onCopy} />
+        )}
+        <ActionButton icon="save" label={t("actions.save")} tip={soonTip ?? t("actions.saveTip")} disabled={off} onClick={share.onSave} />
+        <ActionButton icon="copy" label={t("actions.copy")} tip={soonTip ?? t("actions.copyTip")} disabled={off} onClick={share.onCopy} />
         <ActionButton
           icon="share"
           label={t("actions.share")}
-          tip={share.canShare ? t("actions.shareTip") : t("share.unsupported")}
+          tip={soonTip ?? (share.canShare ? t("actions.shareTip") : t("share.unsupported"))}
           disabled={off || !share.canShare}
           onClick={share.onShare}
         />
@@ -244,9 +249,9 @@ export function TopBar(props: {
           <SubmenuItem label={t("menu.zoom")} icon="zoom">
             {zoomItems(() => setMoreOpen(false))}
           </SubmenuItem>
-          <MenuItem label={t("menu.openFile")} icon="openfile" hint={key("Ctrl+O")} disabled={share.busy} onSelect={() => { setMoreOpen(false); share.onOpenFile(); }} />
+          {!props.recording && <MenuItem label={t("menu.openFile")} icon="openfile" hint={key("Ctrl+O")} disabled={share.busy} onSelect={() => { setMoreOpen(false); share.onOpenFile(); }} />}
           <MenuItem label={t("menu.openFolder")} icon="window" onSelect={() => { setMoreOpen(false); share.onOpenFolder(); }} />
-          <MenuItem label={t("menu.print")} icon="print" hint={key("Ctrl+P")} disabled={off} onSelect={() => { setMoreOpen(false); share.onPrint(); }} />
+          {!props.recording && <MenuItem label={t("menu.print")} icon="print" hint={key("Ctrl+P")} disabled={off} onSelect={() => { setMoreOpen(false); share.onPrint(); }} />}
           <MenuItem
             label={t("menu.settings")}
             icon="settings"

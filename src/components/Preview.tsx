@@ -2,6 +2,8 @@ import { useT } from "../i18n";
 import { type Capture, type Session } from "../ipc";
 import { formatSize } from "../sessionModel";
 import { AnnotationBar } from "./AnnotationBar";
+import { thumbUrl } from "../ipc";
+import { formatTime } from "../recording/timeline";
 import { Editor } from "./Editor";
 import type { Settings } from "../settings/defaults";
 
@@ -20,6 +22,8 @@ export function Preview(props: {
   settings: Settings;
   onPatch: (change: Partial<Settings>) => void;
   onError: (e: unknown) => void;
+  /** The recording mode: no annotation toolbar; a video shows its details until the player exists. */
+  recording?: boolean;
   /** The gallery search: the words that match are marked in the picture. */
   searchQuery?: string;
   /** The zoom in effect, for the badge. */
@@ -47,11 +51,17 @@ export function Preview(props: {
         )}
       </div>
 
-      {capture?.kind !== "video" && <AnnotationBar settings={props.settings} onPatch={props.onPatch} />}
+      {capture?.kind !== "video" && !props.recording && <AnnotationBar settings={props.settings} onPatch={props.onPatch} />}
 
       <div className="preview__stage">
         {capture?.kind === "video" ? (
-          <p className="preview__none">{t("rec.noPlayer")}</p>
+          <div className="recplaceholder">
+            <img className="recplaceholder__thumb" src={thumbUrl(props.session, capture)} alt="" />
+            <p className="recplaceholder__meta" dir="ltr">
+              {formatSize(capture.width, capture.height)} · {formatTime((capture.durationMs ?? 0) / 1000)}
+            </p>
+            <p className="preview__none">{t("rec.noPlayer")}</p>
+          </div>
         ) : capture ? (
           <Editor
             key={capture.id}

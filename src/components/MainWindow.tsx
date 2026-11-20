@@ -23,7 +23,7 @@ import { dictionaries } from "../i18n";
 import { useT } from "../i18n";
 import { onNotice } from "../notify";
 import { ipc, type Capture, type CmdError, type Group, type Session } from "../ipc";
-import { formatTime as formatDuration } from "../recording/timeline";
+import { hasRecordingGroup, mergeGroupOrder } from "../recordingGroups";
 import { SearchIndex } from "../search";
 import { stageAll } from "../share/exporter";
 import { SaveDialog } from "./SaveDialog";
@@ -81,12 +81,25 @@ interface CardMenu {
 export function MainWindow() {
   const { t, locale } = useT();
   const { settings, patch } = useSettings(settingsStore);
-  const session = useSession();
+  const rawSession = useSession();
+  // The window shows one kind at a time: the screenshot groups, or (in the recording mode) the recording groups. They are
+  // independent: no screenshot appears among the recordings and no recording among the screenshots.
+  const recMode = settings.captureKind === "video";
+  const session = useMemo<Session | null>(
+    () => (rawSession ? { ...rawSession, groups: rawSession.groups.filter((g) => (g.kind === "recording") === recMode) } : null),
+    [rawSession, recMode],
+  );
+  const rawRef = useRef(rawSession);
+  rawRef.current = rawSession;
   const shareRef = useRef<ReturnType<typeof useShareActions> | null>(null);
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
   const printTargetsRef = useRef<() => Capture[]>(() => []);
-  const [groupId, setGroupId] = useState<string | null>(null);
+  // The group on show is remembered per mode.
+  const [groupIds, setGroupIds] = useState<{ image: string | null; recording: string | null }>({ image: null, recording: null });
+  const modeKey = recMode ? "recording" : "image";
+  const groupId = groupIds[modeKey];
+  const setGroupId = useCallback((id: string | null) => setGroupIds((p) => ({ ...p, [modeKey]: id })), [modeKey]);
   const [sort, setSort] = useState<SortMode>("newest");
   const [views, setViews] = useState<Record<string, GroupView>>({});
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -113,6 +126,9 @@ export function MainWindow() {
   const searchBox = useRef<HTMLInputElement>(null);
   const ix = useRef(new SearchIndex()).current;
   const [confirmNew, setConfirmNew] = useState(false);
+  const [unfinished, setUnfinished] = useState<string[]>([]);
+  const tRef = useRef(t);
+  tRef.current = t;
   const [groupToDelete, setGroupToDelete] = useState<Group | null>(null);
   const [pendingDelete, setPendingDelete] = useState<string[] | null>(null);
   const [menu, setMenu] = useState<CardMenu | null>(null);
@@ -267,23 +283,12 @@ export function MainWindow() {
     void ipc.setActiveGroup(shownGroupId);
   }, [shownGroupId]);
 
-  // The recorder: a bar with the time and Stop while a recording runs (the floating bar of a later step replaces it).
-  const [recStart, setRecStart] = useState(0);
-  const [recNow, setRecNow] = useState(0);
+  // The recording mode needs a group of recordings: the first one is made when there is none.
   useEffect(() => {
-    void ipc.recordingState().then((s) => setRecStart(s.recording ? s.startedAt : 0)).catch(() => undefined);
-    const sub = ipc.onRecordingState((s) => setRecStart(s.recording ? s.startedAt : 0));
-    return () => {
-      void sub.then((fn) => fn());
-    };
-  }, []);
-  useEffect(() => {
-    if (!recStart) return;
-    setRecNow(Date.now());
-    const timer = setInterval(() => setRecNow(Date.now()), 500);
-    return () => clearInterval(timer);
-  }, [recStart]);
-  const stopRecording = () => void ipc.stopRecording().then((s) => sessionStore.apply(s)).catch((e) => setError(messageOf(e)));
+    if (recMode && rawSession && !hasRecordingGroup(rawSession.groups)) {
+      void ipc.createGroup(undefined, "recording").then((s) => sessionStore.apply(s)).catch(() => undefined);
+    }
+  }, [recMode, rawSession]);
 
   // "Start recording" from the tray: the recording mode starts the same way as the Record button.
   useEffect(() => {
@@ -299,15 +304,49 @@ export function MainWindow() {
   // A capture was taken (by the shortcut, the button or the tray): show it, in its group.
   useEffect(() => {
     const added = ipc.onCaptureAdded(({ captureId, groupId: target }) => {
-      setGroupId(target);
+      // The new capture's group is shown in the mode it belongs to.
+      const kind = rawRef.current?.groups.find((x) => x.id === target)?.kind === "recording" ? "recording" : "image";
+      // A new recording shows in the recording mode (the recording list), a new screenshot in the screenshot mode.
+      void patch({ captureKind: kind === "recording" ? "video" : "screenshot" });
+      setGroupIds((p) => ({ ...p, [kind]: target }));
       setViews((prev) => ({ ...prev, [target]: { sel: emptySelection, active: captureId } }));
     });
     const failed = ipc.onCaptureError((message) => setError(message));
+    // Why a recording was stopped or did not start (the disk, the screen going away).
+    const noticed = ipc.onRecordingNotice((kind) => {
+      const key = kind === "disk-start" ? "rec.notice.diskStart" : kind === "disk-full" ? "rec.notice.diskFull" : "rec.notice.sourceGone";
+      setError(tRef.current(key));
+    });
     return () => {
       void added.then((fn) => fn());
       void failed.then((fn) => fn());
+      void noticed.then((fn) => fn());
     };
   }, []);
+
+  // Recordings that a crash cut off are offered for recovery when the window opens.
+  useEffect(() => {
+    void ipc
+      .unfinishedRecordings()
+      .then((ids) => setUnfinished(ids))
+      .catch(() => undefined);
+  }, []);
+  const recoverUnfinished = async (recover: boolean) => {
+    const ids = unfinished;
+    setUnfinished([]);
+    for (const id of ids) {
+      try {
+        if (recover) {
+          await ipc.recoverRecording(id);
+          setNotice(t("rec.recovered"));
+        } else {
+          await ipc.dropUnfinishedRecording(id);
+        }
+      } catch (e) {
+        setError(messageOf(e));
+      }
+    }
+  };
 
   // Messages from the editor (text copied, redactions made, recognition failed).
   useEffect(
@@ -373,6 +412,7 @@ export function MainWindow() {
         return;
       }
       if (typing || dialogOpen) return;
+      if (settingsRef.current.captureKind === "video" && (e.ctrlKey || e.metaKey) && (e.key === "o" || e.key === "O" || e.key === "p" || e.key === "P")) return;
       if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === "o" || e.key === "O")) {
         e.preventDefault();
         void shareRef.current?.openFile();
@@ -446,7 +486,7 @@ export function MainWindow() {
   };
 
   const moveToNewGroup = async (ids: string[]) => {
-    const made = await run(ipc.createGroup(newGroupName(session?.groups.map((g) => g.name) ?? [])));
+    const made = await run(ipc.createGroup(newGroupName(session?.groups.map((g) => g.name) ?? []), recMode ? "recording" : undefined));
     if (made) await moveToGroup(ids, made.groups[made.groups.length - 1].id);
   };
 
@@ -551,7 +591,7 @@ export function MainWindow() {
 
   if (!session || !group) return null;
 
-  const count = totalCaptures(session);
+  const count = totalCaptures(rawSession ?? session);
 
   /** The captures with these ids, in the order of the list (the group's current order). */
   const byIds = (ids: readonly string[]): Capture[] => {
@@ -588,7 +628,7 @@ export function MainWindow() {
   };
 
   const addGroup = async () => {
-    const next = await run(ipc.createGroup(newGroupName(session.groups.map((g) => g.name))));
+    const next = await run(ipc.createGroup(newGroupName(session.groups.map((g) => g.name)), recMode ? "recording" : undefined));
     if (next) setGroupId(next.groups[next.groups.length - 1].id);
   };
 
@@ -620,7 +660,7 @@ export function MainWindow() {
         disabled: !m.canRename,
         onSelect: () => setRenamingId(m.ids[0]),
       },
-      { kind: "item", id: "duplicate", label: t("ctx.duplicate"), icon: "duplicate", onSelect: () => void duplicate(m.ids) },
+      ...(recMode ? [] : ([{ kind: "item", id: "duplicate", label: t("ctx.duplicate"), icon: "duplicate", onSelect: () => void duplicate(m.ids) }] as MenuEntry[])),
       {
         kind: "sub",
         id: "move",
@@ -650,8 +690,8 @@ export function MainWindow() {
         ),
       },
       { kind: "separator", id: "sep1" },
-      { kind: "item", id: "copy", label: t("ctx.copy"), icon: "copy", onSelect: () => void share.copy(byIds(m.ids), copyMode) },
-      { kind: "item", id: "save", label: t("ctx.save"), icon: "save", onSelect: () => share.save(byIds(m.ids)) },
+      { kind: "item", id: "copy", label: t("ctx.copy"), icon: "copy", disabled: recMode, tip: recMode ? t("soon.label") : undefined, onSelect: () => void share.copy(byIds(m.ids), copyMode) },
+      { kind: "item", id: "save", label: t("ctx.save"), icon: "save", disabled: recMode, tip: recMode ? t("soon.label") : undefined, onSelect: () => share.save(byIds(m.ids)) },
       { kind: "separator", id: "sep2" },
       { kind: "item", id: "delete", label: t("ctx.delete"), icon: "trash", danger: true, onSelect: () => setPendingDelete(m.ids) },
     ];
@@ -668,6 +708,7 @@ export function MainWindow() {
         onOpenSettings={() => void ipc.openSettings()}
         onCapture={(mode) => void ipc.startCapture(mode).catch((e) => setError(messageOf(e)))}
         zoom={zoom}
+        recording={recMode}
         onRecord={(area) => void ipc.startRecording(area).catch((e) => setError(messageOf(e)))}
         share={{
           hasCapture: capture !== null,
@@ -686,15 +727,7 @@ export function MainWindow() {
       <HotkeyNotice onOpenSettings={() => void ipc.openSettings()} />
 
       <Toasts toasts={toasts} onClose={closeToast} />
-      {recStart > 0 && (
-        <div className="recbar" role="status">
-          <span className="recdot recdot--live" aria-hidden="true" />
-          <span dir="ltr">{formatDuration(Math.max(0, recNow - recStart) / 1000)}</span>
-          <button type="button" className="dw-btn dw-btn--danger" onClick={stopRecording}>
-            {t("rec.stop")}
-          </button>
-        </div>
-      )}
+
 
       <main className="panels">
         <div className={`panel panel--left panel--${galleryView}`}>
@@ -706,7 +739,10 @@ export function MainWindow() {
             onAdd={() => void addGroup()}
             onRename={(id, name) => void run(ipc.renameGroup(id, name))}
             onDelete={askDeleteGroup}
-            onReorder={(ids) => void run(ipc.reorderGroups(ids))}
+            onReorder={(ids) => {
+              // The tabs on show keep their places among all groups; the other kind's groups stay where they are.
+              void run(ipc.reorderGroups(mergeGroupOrder(rawSession?.groups ?? session.groups, ids)));
+            }}
             onColor={(id, color) => void run(ipc.setGroupColor(id, color))}
             onEmoji={(id, emoji) => void run(ipc.setGroupEmoji(id, emoji))}
           />
@@ -785,6 +821,7 @@ export function MainWindow() {
             settings={settings}
             onPatch={(change) => void patch(change)}
             searchQuery={searching ? applied : ""}
+            recording={recMode}
           />
         </div>
         {dropGroup && (
@@ -799,6 +836,7 @@ export function MainWindow() {
       <BottomBar
         selectedCount={view.sel.ids.size}
         hasCapture={capture !== null}
+        recording={recMode}
         copyMode={copyMode}
         onCopyMode={chooseCopyMode}
         busy={share.busy}
@@ -887,6 +925,24 @@ export function MainWindow() {
         onCancel={() => setGroupToDelete(null)}
         onConfirm={(g, choice) => void removeGroup(g, choice)}
       />
+
+      <Dialog
+        open={unfinished.length > 0}
+        title={t("rec.recoverTitle")}
+        onClose={() => setUnfinished([])}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => void recoverUnfinished(false)}>
+              {t("rec.dropUnfinished")}
+            </Button>
+            <Button variant="primary" onClick={() => void recoverUnfinished(true)}>
+              {t("rec.recover")}
+            </Button>
+          </>
+        }
+      >
+        <p>{t("rec.recoverBody", { count: unfinished.length })}</p>
+      </Dialog>
 
       <CloseDialog />
     </div>
