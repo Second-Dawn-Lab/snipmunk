@@ -167,9 +167,10 @@ pub fn run() {
             ocr::copy_table,
             ocr::open_os_settings,
             gallery::debug_seed_session,
-            scrollshot::scroll_stop,
-            scrollshot::dev_scroll_window,
-            scrollshot::dev_scroll_capture,
+            scrollshot::experimental_scroll,
+            scrollshot::scroll_done,
+            scrollshot::scroll_cancel,
+            scrollshot::dev_scroll_test,
             titlebar::set_maximize_rect,
             capture::start_capture,
             capture::capture_overlay_info,
@@ -223,13 +224,15 @@ pub fn run() {
                         .clone();
                     api.prevent_close();
                     placement::flush();
-                    match behavior.as_str() {
-                        "background" => {
+                    match crate::projects::close_behavior(&behavior) {
+                        crate::projects::CloseBehavior::Hide => {
                             let _ = window.hide();
                         }
-                        "quit" => crate::projects::request_quit(window.app_handle()),
+                        crate::projects::CloseBehavior::Quit => {
+                            crate::projects::request_quit(window.app_handle())
+                        }
                         // The frontend shows the dialog and answers with `close_action`.
-                        _ => {
+                        crate::projects::CloseBehavior::Ask => {
                             let _ = window.emit("close-requested", ());
                         }
                     }

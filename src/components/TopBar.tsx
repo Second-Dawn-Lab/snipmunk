@@ -1,3 +1,4 @@
+import { useExperimentalScroll } from "../experimental";
 import { IconButton, Select } from "@seconddawn/ui";
 import { useState } from "react";
 import { useT } from "../i18n";
@@ -33,7 +34,7 @@ export interface ZoomApi {
   zoomOut: () => void;
 }
 
-const MODES: { id: CaptureMode; icon: AppIconName }[] = [
+const ALL_MODES: { id: CaptureMode; icon: AppIconName }[] = [
   { id: "rectangle", icon: "rectangle" },
   { id: "window", icon: "window" },
   { id: "fullscreen", icon: "fullscreen" },
@@ -70,6 +71,8 @@ export function TopBar(props: {
   // Save, Copy and Share work for recordings too (they use the rendered video); Edit in Paint does not.
   const offShare = !share.hasCapture || share.busy;
   const soonTip: string | undefined = undefined;
+  const scrollOn = useExperimentalScroll();
+  const MODES = ALL_MODES.filter((m) => m.id !== "scrolling" || scrollOn);
   const [modeOpen, setModeOpen] = useState(false);
   const [zoomOpen, setZoomOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);

@@ -1,6 +1,6 @@
 # Snipmunk roadmap
 
-Status: Phases 1 to 7 are done (Phase 7 ✅ with session 7-B6). The product has three modes: Screenshots (one clipboard list), Recording (current recording + project tabs) and Documents (next phase, 7.5). Next: Phase 7.5 Documents, then Phase 8.
+Status: Phases 1 to 7 are done (Phase 7 ✅; the scrolling screenshot is parked, see Phase 8). The product has three modes: Screenshots (one clipboard list), Recording (current recording + project tabs) and Documents (next phase, 7.5). Next: Phase 7.5 Documents, then Phase 8.
 
 ## Phase 1: Repo setup ✅
 Project folder, README, license, `.gitignore`, roadmap and icon placeholder.
@@ -83,7 +83,7 @@ Everything that leaves the app uses the shared renderer (marks, crop, rotation, 
 - **6.1 fixes** (from the Phase 6 manual tests): Grid pastes in Word and Paint (24-bit padded clipboard bitmap), an option to leave the file list off the clipboard so Outlook gets the pictures inline, the Text tool makes one box per activation and goes back to Select, small and monospace text is read again enlarged and lines only one pass found are kept, card and IBAN detection tolerates O/l/S/B read for digits (checksums still decide), the Quick redact main button redacts at once, the text layer's right-click menu works, "Open folder" opens the real folder, the list view's check box and trash no longer overlap, every notice is a toast, a clear page when the dev server is gone, the caret goes where the user clicked, and `tauri-plugin-dialog` replaces `rfd`.
 - See `docs/manual-tests-phase-6.md`.
 
-## Phase 7: Screen recording, effects, export and projects ✅
+## Phase 7: Screen recording, effects, export and projects ✅ (scrolling screenshot parked)
 Done (Part A, fixes from the 6.1 retest): Copy ▾ with "Copy as files", "Redact only this" in the text layer's menu, the Save dialog's folder row, marks that lock like the Snipping Tool's, hold-to-shape for the pen and highlighter.
 
 Done in the recorder sessions (details in `docs/manual-tests-phase-7.md`):
@@ -92,7 +92,8 @@ Done in the recorder sessions (details in `docs/manual-tests-phase-7.md`):
 - Session 7-B3 so far: export fixes (Original is the full size, resolution list limited to the recording, size estimate from the real bitrate, trimmed exports seek instead of decoding from the start), export dialog with elapsed/left time and a finished view, player timeline with scrubbing / frame step / trim mode, edit-webcam handles, device pickers in the quick menu, **screenshots are one list without groups** (old groups are merged by capture time; the group engine stays in the code for Documents), "Delete all…", and the **package format of project files** (`src-tauri/src/package.rs`: one stored ZIP with a manifest, append-only small saves, atomic creation, crash repair) with commands to save, inspect, change the effects of and "Save as" a `.snpr`.
 - Session 7-B4: the **recording model change** is done: the recording mode shows the current recording (in `%TEMP%\Snipmunk\current`) or one opened `.snpr` project; Save as project, Open (Ctrl+O), Save (Ctrl+S), Save as, Close, Recent projects, the questions before a new recording and before Quit, a journal of unsaved project edits, low-disk warning, the file association, and the player reading a project straight from the file by offset. Small fixes (Save count, list header, playhead, webcam border colour and thickness) are in too.
 - Session 7-B5: the recording flow is fixed (a new recording closes an open project and is what you see afterwards; Discard recording; one Quit/restart path), the project header is one compact bar (rename, status chip, File menu, one main button), the **live webcam bubble** is done (excluded from capture, draggable and resizable from the countdown on; its place becomes the overlay), the `.snpr` icon with a video badge is registered by the installer hook, and the format is written down in `docs/snpr-format.md` (unknown data is kept on save; a newer major version is refused).
-- Session 7-B6 (the last of Phase 7): the header (File menu left, status right) and **tabs** (current recording first, projects after it; unsaved dot, Ctrl+Tab, Ctrl+W, only the active tab loads media); **lip sync** fixed (webcam pictures dated by the camera's own time, the webcam begins at its first real picture; a test measures webcam, screen and sound offsets) with a "Webcam sync" slider (`effects.webcam.syncMs`); **Split and delete parts** (`effects.cuts`, undo/redo; format 1.1) honoured by the player, export, Copy and Share; the **scrolling screenshot** (UI Automation, wheel and scroll-bar fallbacks, one tall image, up to 32 000 px); `scripts\build-installer.bat`.
+- Session 7-B6 (the last of Phase 7): the header (File menu left, status right) and **tabs** (current recording first, projects after it; unsaved dot, Ctrl+Tab, Ctrl+W, only the active tab loads media); **lip sync** fixed (webcam pictures dated by the camera's own time, the webcam begins at its first real picture; a test measures webcam, screen and sound offsets) with a "Webcam sync" slider (`effects.webcam.syncMs`); **Split and delete parts** (`effects.cuts`, undo/redo; format 1.1) honoured by the player, export, Copy and Share; the **scrolling screenshot**; `scripts\build-installer.bat`.
+- Session 7-B7: tabs with a clear shape and `Name*` for unsaved (the recording tab has a × too), a redesigned webcam sync control, the **scrolling screenshot is now MANUAL scrolling** (you scroll; Snipmunk watches the area and places every picture on a growing canvas: up or down, sticky header/footer once, lazy images, "Scroll slower" when too fast; auto scrolling was removed because it failed in Chrome and Notepad++), tray Quit that exits at once when nothing is unsaved (the dialog was missing in screenshot mode) and asks "Stop and keep the recording?" while recording, and a clearer installer script. **Phase 7 is done.**
 - **Carried to Phase 8**: a GPU export path (the decoder is the limit at 3440x1440); the installer registration of `.snpr` is untested until an installer is built.
 
 ## Phase 7.5: Documents mode (Tango-style guides)
@@ -115,6 +116,12 @@ Details:
 
 ## Phase 8: Polish and the first release (v0.1.0)
 - Memory reduction (about 700 MB now, goal **under 300 MB**): **one shared WebView2 environment** for all windows, and the **hidden windows (overlay, floating bar, bubble) created only when needed** instead of pre-created; GPU export path everywhere; avoid reading text twice (OCR).
+- **Webcam bubble resize during recording** (failed in the hand test of 7-B6).
+- **Remove the unused `windows` crate features** that were added for the auto scrolling screenshot (UI Automation, `PrintWindow`, and others only it used).
+- **Scrolling screenshot, rebuilt** (parked in 7-B8 after it failed real tests; the code is kept behind `SNIPMUNK_EXPERIMENTAL_SCROLL=1` in debug builds):
+  - (a) A **Snipmunk browser extension for Chrome/Edge** that renders the full page in the browser (like Safari's full-page screenshot on iPhone) and sends it to Snipmunk.
+  - (b) For **other apps**: read the real scroll position (scrollbar info / UI Automation) to place the frames, frame-to-frame matching only for fine-tuning, and per-frame detection of rows that stay still (sticky bars wherever they appear, floating decorations).
+  - (c) **Test windows that copy the real failures**: a sticky bar that sticks mid-page, floating images, a GitHub-like sticky tab bar, a code editor with repetitive lines (YAML).
 - **Updater**: the update check is registered; add the page's restart button that calls `restart_app` (the unsaved-changes dialog runs first).
 - Node 24 for GitHub Actions in all repositories.
 - Installer with file associations, updater key, code signing (SignPath).

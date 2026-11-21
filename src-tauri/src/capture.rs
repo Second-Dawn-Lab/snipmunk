@@ -463,7 +463,9 @@ pub fn capture_cancel(app: AppHandle) {
 /// The mode bar of an overlay changed the mode: remember it and tell the other overlays.
 #[tauri::command]
 pub fn capture_set_mode(app: AppHandle, mode: String) -> CmdResult<()> {
-    if !["rectangle", "window", "fullscreen", "freeform", "scrolling"].contains(&mode.as_str()) {
+    let known = ["rectangle", "window", "fullscreen", "freeform"].contains(&mode.as_str())
+        || (mode == "scrolling" && crate::scrollshot::experimental());
+    if !known {
         return Err(CmdError::new("bad_request", "unknown capture mode"));
     }
     if app.state::<Capture>().recording.load(Ordering::SeqCst) {
@@ -654,7 +656,7 @@ pub fn capture_finish(app: AppHandle, args: FinishArgs) -> CmdResult<()> {
         });
         return Ok(());
     }
-    if args.mode == "scrolling" {
+    if args.mode == "scrolling" && crate::scrollshot::experimental() {
         // Pictures are taken fresh after every scroll step; the frozen screenshots are not needed.
         let area = recording_area_scrolling(&run.rects, index, &args);
         let title = args

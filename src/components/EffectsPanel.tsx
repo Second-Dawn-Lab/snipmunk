@@ -1,6 +1,7 @@
 import { Button, Switch } from "@seconddawn/ui";
 import { useT } from "../i18n";
 import type { Effects } from "../recording/effects";
+import { SyncControl } from "./SyncControl";
 import { ClickControls, CursorControls, WebcamControls, type FieldRow } from "./EffectsControls";
 
 const row: FieldRow = ({ id, label, children }) => (
@@ -36,30 +37,9 @@ export function EffectsPanel(props: { effects: Effects; hasWebcam: boolean; onCh
             label: t("fx.webcamShow"),
             children: <Switch label={t("fx.webcamShow")} checked={effects.webcam.show} onChange={(show) => onChange({ ...effects, webcam: { ...effects.webcam, show } })} />,
           })}
-          {effects.webcam.show &&
-            row({
-              id: "webcamSync",
-              label: t("fx.webcamSync"),
-              children: (
-                <span className="syncrow" title={t("fx.webcamSyncHint")}>
-                  <input
-                    type="range"
-                    min={-500}
-                    max={500}
-                    step={10}
-                    dir="ltr"
-                    value={effects.webcam.syncMs}
-                    aria-label={t("fx.webcamSync")}
-                    onChange={(e) => onChange({ ...effects, webcam: { ...effects.webcam, syncMs: Number(e.target.value) } })}
-                    onDoubleClick={() => onChange({ ...effects, webcam: { ...effects.webcam, syncMs: 0 } })}
-                  />
-                  <output dir="ltr" className="syncrow__value">{effects.webcam.syncMs > 0 ? "+" : ""}{effects.webcam.syncMs} ms</output>
-                  <button type="button" className="syncrow__reset" disabled={effects.webcam.syncMs === 0} aria-label={t("fx.webcamSyncReset")} title={t("fx.webcamSyncReset")} onClick={() => onChange({ ...effects, webcam: { ...effects.webcam, syncMs: 0 } })}>
-                    ↺
-                  </button>
-                </span>
-              ),
-            })}
+          {effects.webcam.show && (
+            <SyncControl value={effects.webcam.syncMs} onChange={(syncMs) => onChange({ ...effects, webcam: { ...effects.webcam, syncMs } })} />
+          )}
           {effects.webcam.show && <WebcamControls row={row} free value={effects.webcam} onChange={(webcam) => onChange({ ...effects, webcam })} />}
         </section>
       )}

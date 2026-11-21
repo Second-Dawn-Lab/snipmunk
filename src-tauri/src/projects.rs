@@ -464,19 +464,71 @@ pub fn leave(app: &tauri::AppHandle) {
     }
 }
 
+/// What Snipmunk holds that Quit has to ask about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuitState {
+    /// A recording is running.
+    pub recording: bool,
+    /// A scrolling screenshot is running.
+    pub scrolling: bool,
+    /// An unsaved current recording or an edited project.
+    pub unsaved: bool,
+}
+
+/// What Quit does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QuitPlan {
+    /// Nothing to ask about: leave at once, without showing any window.
+    Exit,
+    /// Bring the main window to the front (focused) and show the dialog: "Stop and keep the recording?" first when a recording
+    /// runs, then the list of what is not saved.
+    Ask,
+}
+
+pub fn quit_plan(s: QuitState) -> QuitPlan {
+    if s.recording || s.scrolling || s.unsaved {
+        QuitPlan::Ask
+    } else {
+        QuitPlan::Exit
+    }
+}
+
+/// What the close button of the window does, from the setting `close_action`: hide to the tray, quit (asking first when needed), or
+/// ask what to do. Anything unknown asks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CloseBehavior {
+    Hide,
+    Quit,
+    Ask,
+}
+
+pub fn close_behavior(setting: &str) -> CloseBehavior {
+    match setting {
+        "background" => CloseBehavior::Hide,
+        "quit" => CloseBehavior::Quit,
+        _ => CloseBehavior::Ask,
+    }
+}
+
 fn quit_or_ask(app: &tauri::AppHandle, restart: bool) {
     use tauri::{Emitter, Manager};
-    let unsaved = {
-        let state = app.state::<crate::commands::AppState>();
-        has_unsaved(&state)
+    let state = QuitState {
+        recording: crate::recording::is_recording(app),
+        scrolling: crate::scrollshot::running(),
+        unsaved: {
+            let s = app.state::<crate::commands::AppState>();
+            has_unsaved(&s)
+        },
     };
-    if unsaved {
-        crate::tray::show_main(app);
-        RESTART.store(restart, Ordering::SeqCst);
-        let _ = app.emit("quit-requested", ());
-    } else {
-        RESTART.store(restart, Ordering::SeqCst);
-        leave(app);
+    RESTART.store(restart, Ordering::SeqCst);
+    match quit_plan(state) {
+        QuitPlan::Exit => leave(app),
+        QuitPlan::Ask => {
+            // The window comes forward, focused, and the page shows the dialog (in every mode of the window).
+            crate::tray::show_main(app);
+            let _ = app.emit("quit-requested", state);
+        }
     }
 }
 
@@ -500,6 +552,40 @@ pub fn has_unsaved(state: &crate::commands::AppState) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn quit_exits_at_once_only_when_nothing_is_running_or_unsaved() {
+        assert_eq!(quit_plan(QuitState::default()), QuitPlan::Exit);
+        for s in [
+            QuitState {
+                recording: true,
+                ..Default::default()
+            },
+            QuitState {
+                scrolling: true,
+                ..Default::default()
+            },
+            QuitState {
+                unsaved: true,
+                ..Default::default()
+            },
+            QuitState {
+                recording: true,
+                scrolling: true,
+                unsaved: true,
+            },
+        ] {
+            assert_eq!(quit_plan(s), QuitPlan::Ask, "{s:?}");
+        }
+    }
+
+    #[test]
+    fn the_close_button_hides_quits_or_asks_and_an_unknown_setting_asks() {
+        assert_eq!(close_behavior("background"), CloseBehavior::Hide);
+        assert_eq!(close_behavior("quit"), CloseBehavior::Quit);
+        assert_eq!(close_behavior("ask"), CloseBehavior::Ask);
+        assert_eq!(close_behavior("something else"), CloseBehavior::Ask);
+    }
 
     #[test]
     fn a_project_has_a_stable_id_and_the_temp_folder_can_be_moved_for_tests() {

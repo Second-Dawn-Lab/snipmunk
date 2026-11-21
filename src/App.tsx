@@ -86,5 +86,6 @@ function Root({ label }: { label: string }) {
   if (label === "recbar") return <RecBar />;
   if (label === "webcambubble") return <WebcamBubble />;
   if (label === "scrollpill") return <ScrollPill />;
+  if (label === "scrollframe") return <div className="recframe recframe--scroll" />;
   return <MainWindow />;
 }

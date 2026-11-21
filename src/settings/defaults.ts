@@ -24,8 +24,6 @@ export interface Settings {
   autoCopyToClipboard: boolean;
   /** The scrolling screenshot stops at this height (pixels). */
   scrollMaxHeight: number;
-  /** The scrolling screenshot scrolls the window back to the top when it is done. */
-  scrollBack: boolean;
   showMagnifier: boolean;
   // The last colors and sizes picked in the annotation tool popovers. Colors are "#rrggbb"; fill and outline
   // may also be "none". Opacities are 0 to 100.
@@ -129,7 +127,6 @@ export const defaultSettings: Settings = {
   afterCapture: "front",
   autoCopyToClipboard: true,
   scrollMaxHeight: 20000,
-  scrollBack: true,
   showMagnifier: true,
   lastPenColor: "#E53935",
   lastPenSize: 4,

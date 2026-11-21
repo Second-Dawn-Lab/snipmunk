@@ -922,7 +922,7 @@ export function MainWindow() {
             onEdited={rec.edited}
           />}
         </div>
-        {recMode && rec.dialogs}
+        {rec.dialogs}
         {dropGroup && (
           <div className={`dropoverlay${dropGroup.color ? ` gc-${dropGroup.color}` : ""}`} aria-hidden="true">
             <div className="dropoverlay__msg">

@@ -1,3 +1,4 @@
+import { useExperimentalScroll } from "../experimental";
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { AppIcon, type AppIconName } from "../components/AppIcons";
 import { useT } from "../i18n";
@@ -152,8 +153,9 @@ export function Overlay() {
     void ipc.captureCancel();
   };
 
-  /** The modes of this selection: a recording has no freeform area and no scrolling. */
-  const modes = info?.purpose === "recording" ? MODE_ORDER.filter((m) => m !== "freeform" && m !== "scrolling") : MODE_ORDER;
+  /** The modes of this selection: a recording has no freeform area and no scrolling; scrolling is parked (development switch). */
+  const scrollOn = useExperimentalScroll();
+  const modes = MODE_ORDER.filter((m) => (m !== "scrolling" || scrollOn) && (info?.purpose !== "recording" || (m !== "freeform" && m !== "scrolling")));
   const finish = (rect: Box, extra: { points?: [number, number][]; windowTitle?: string; windowHwnd?: number } = {}) => {
     void ipc.captureFinish({
       label,
@@ -192,6 +194,7 @@ export function Overlay() {
       }
       const next = modeForKey(e.key);
       if ((next === "freeform" || next === "scrolling") && info?.purpose === "recording") return;
+      if (next === "scrolling" && !scrollOn) return;
       if (next) {
         e.preventDefault();
         chooseMode(next);

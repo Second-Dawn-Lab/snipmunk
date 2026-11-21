@@ -320,10 +320,12 @@ export const ipc = {
   onCaptureAdded: (cb: (a: { captureId: string; groupId: string }) => void) =>
     on<{ captureId: string; groupId: string }>("capture-added", cb),
   onCaptureError: (cb: (message: string) => void) => on<string>("capture-error", cb),
-  /** The Stop button of the scrolling screenshot's pill. */
-  scrollStop: () => call<void>("scroll_stop"),
-  onScrollProgress: (cb: (p: { height: number; n: number }) => void) => on<{ height: number; n: number }>("scroll-progress", cb),
-  onScrollDone: (cb: (reason: string) => void) => on<string>("scroll-done", cb),
+  /** Is the parked scrolling screenshot switched on (development builds with SNIPMUNK_EXPERIMENTAL_SCROLL=1 only)? */
+  experimentalScroll: () => call<boolean>("experimental_scroll"),
+  /** The Done and Cancel buttons of the scrolling screenshot's pill. */
+  scrollDone: () => call<void>("scroll_done"),
+  scrollCancel: () => call<void>("scroll_cancel"),
+  onScrollProgress: (cb: (p: { height: number; n: number; state: string }) => void) => on<{ height: number; n: number; state: string }>("scroll-progress", cb),
   overlayInfo: (label: string) => call<OverlayInfo | null>("capture_overlay_info", { label }),
   overlayReady: (label: string) => call<void>("capture_overlay_ready", { label }),
   onCaptureOpen: (cb: (run: number) => void) => on<number>("capture-open", cb),
@@ -386,7 +388,9 @@ export const ipc = {
   pickProjectSave: (start: string | undefined, name: string) => call<string | null>("pick_project_save", { start: start ?? null, name }),
   pickProjectOpen: (start?: string) => call<string | null>("pick_project_open", { start: start ?? null }),
   onOpenProject: (cb: (path: string) => void) => on<string>("open-project", cb),
-  onQuitRequested: (cb: () => void) => on<null>("quit-requested", () => cb()),
+  /** Quit wants an answer: what is running or unsaved. */
+  onQuitRequested: (cb: (what: { recording: boolean; scrolling: boolean; unsaved: boolean }) => void) =>
+    on<{ recording: boolean; scrolling: boolean; unsaved: boolean }>("quit-requested", cb),
   onSaveFirst: (cb: (what: { current: boolean; project: boolean }) => void) => on<{ current: boolean; project: boolean }>("recording-save-first", cb),
   /** Open a file with the program Windows has for it. */
   openFile: (path: string) => call<void>("open_file", { path }),

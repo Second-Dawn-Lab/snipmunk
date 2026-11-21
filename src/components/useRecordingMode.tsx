@@ -194,6 +194,25 @@ export function useRecordingMode(args: {
     [dirtyIds, closeNow],
   );
 
+  /** The × of the recording tab: an unsaved recording asks (Save as project / Discard / Cancel); one that is a project already just closes. */
+  const [closeCurrentAsk, setCloseCurrentAsk] = useState(false);
+  // Quit while a recording runs: "Stop and keep the recording?", then the usual list. A scrolling capture is thrown away on quit.
+  const [stopAsk, setStopAsk] = useState(false);
+  const [quitScrolling, setQuitScrolling] = useState(false);
+  const discardCurrent = useCallback(
+    () =>
+      ipc
+        .discardCurrentRecording()
+        .then(() => setCurrentId(null))
+        .catch((e) => setError(errorText(e))),
+    [setError, errorText],
+  );
+  const closeCurrent = useCallback(() => {
+    if (!current) return;
+    if (!current.savedPath) setCloseCurrentAsk(true);
+    else void discardCurrent();
+  }, [current, discardCurrent]);
+
   const saveAs = useCallback(async () => {
     if (!project) return;
     try {
@@ -234,7 +253,12 @@ export function useRecordingMode(args: {
 
   // Quit: one dialog that lists what is not saved.
   useEffect(() => {
-    const p = ipc.onQuitRequested(() => setQuitAsk(true));
+    const p = ipc.onQuitRequested((what) => {
+      setQuitScrolling(what.scrolling);
+      // A running recording is asked about first; then the list of what is not saved.
+      if (what.recording) setStopAsk(true);
+      else setQuitAsk(true);
+    });
     return () => void p.then((fn) => fn());
   }, []);
 
@@ -273,9 +297,10 @@ export function useRecordingMode(args: {
       } else if (k === "o") {
         e.preventDefault();
         open();
-      } else if (k === "w" && project) {
+      } else if (k === "w") {
         e.preventDefault();
-        closeTab(project.id);
+        if (project) closeTab(project.id);
+        else closeCurrent();
       }
     };
     window.addEventListener("keydown", onKey);
@@ -405,7 +430,7 @@ export function useRecordingMode(args: {
     </div>
   );
 
-  // The tabs: the current recording first (no ×), then the projects. They shrink, then scroll.
+  // The tabs: the current recording first, then the projects (each with a ×; an unsaved one is "Name*"). They shrink, then scroll.
   const strip = useRef<HTMLDivElement>(null);
   const [overflowing, setOverflowing] = useState(false);
   useEffect(() => {
@@ -426,32 +451,43 @@ export function useRecordingMode(args: {
         </button>
         <div className="rectabs__strip" ref={strip}>
           {current && (
-            <button
-              type="button"
-              role="tab"
-              aria-selected={!project}
-              className={`rectab${!project ? " rectab--active" : ""}`}
-              title={current.name}
-              onClick={() => setActiveKey(CURRENT)}
-            >
-              <span className="rectab__dot rectab__dot--rec" aria-hidden="true" />
-              <span className="rectab__name">{current.name}</span>
-              <span className="rectab__note">{currentUnsaved ? t("proj.notSaved") : t("proj.statusSaved")}</span>
-            </button>
+            <span className={`rectab${!project ? " rectab--active" : ""}`} role="presentation" title={current.name}>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={!project}
+                className="rectab__main"
+                onClick={() => setActiveKey(CURRENT)}
+                onAuxClick={(e) => e.button === 1 && closeCurrent()}
+              >
+                <span className="rectab__name">{current.name}</span>
+                {currentUnsaved && (
+                  <span className="rectab__mark" title={t("proj.unsavedDot")} aria-label={t("proj.unsavedDot")}>
+                    *
+                  </span>
+                )}
+              </button>
+              <button type="button" className="rectab__close" aria-label={t("proj.closeTab", { name: current.name })} title={t("proj.closeCurrent")} onClick={closeCurrent}>
+                <AppIcon name="close" size={11} />
+              </button>
+            </span>
           )}
           {tabs.map((p) => (
-            <span key={p.id} className={`rectab${project?.id === p.id ? " rectab--active" : ""}`} role="presentation">
+            <span key={p.id} className={`rectab${project?.id === p.id ? " rectab--active" : ""}`} role="presentation" title={`${p.name}\n${p.path}`}>
               <button
                 type="button"
                 role="tab"
                 aria-selected={project?.id === p.id}
                 className="rectab__main"
-                title={p.path}
                 onClick={() => setActiveKey(p.id)}
                 onAuxClick={(e) => e.button === 1 && closeTab(p.id)}
               >
                 <span className="rectab__name">{p.name}</span>
-                {dirtyIds.includes(p.id) && <span className="recheader__dot" role="img" aria-label={t("proj.unsavedDot")} title={t("proj.unsavedDot")} />}
+                {dirtyIds.includes(p.id) && (
+                  <span className="rectab__mark" title={t("proj.unsavedDot")} aria-label={t("proj.unsavedDot")}>
+                    *
+                  </span>
+                )}
               </button>
               <button type="button" className="rectab__close" aria-label={t("proj.closeTab", { name: p.name })} title={t("proj.close")} onClick={() => closeTab(p.id)}>
                 <AppIcon name="close" size={11} />
@@ -541,6 +577,41 @@ export function useRecordingMode(args: {
         <p>{t("proj.discardBody")}</p>
       </Dialog>
       <Dialog
+        open={closeCurrentAsk}
+        title={t("proj.closeAskTitle")}
+        onClose={() => setCloseCurrentAsk(false)}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setCloseCurrentAsk(false)}>
+              {t("session.cancel")}
+            </Button>
+            <Button
+              variant="danger"
+              onClick={() => {
+                setCloseCurrentAsk(false);
+                void discardCurrent();
+              }}
+            >
+              {t("proj.askDiscard")}
+            </Button>
+            <Button
+              variant="primary"
+              onClick={() =>
+                void saveCurrent().then((ok) => {
+                  if (!ok) return;
+                  setCloseCurrentAsk(false);
+                  void discardCurrent();
+                })
+              }
+            >
+              {t("proj.askSave")}
+            </Button>
+          </>
+        }
+      >
+        <p>{t("proj.closeAskBody")}</p>
+      </Dialog>
+      <Dialog
         open={ask !== null && step === "tab"}
         title={t("proj.editsTitle", { name: askTab?.name ?? "" })}
         onClose={() => setAsk(null)}
@@ -590,6 +661,36 @@ export function useRecordingMode(args: {
         <p>{t("proj.askBody")}</p>
       </Dialog>
       <Dialog
+        open={stopAsk}
+        title={t("proj.stopAskTitle")}
+        onClose={() => (setStopAsk(false), void ipc.cancelQuit())}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => (setStopAsk(false), void ipc.cancelQuit())}>
+              {t("session.cancel")}
+            </Button>
+            <Button
+              variant="primary"
+              onClick={() => {
+                setStopAsk(false);
+                // The recording is stopped and kept as the current recording; then the list of what is not saved.
+                void ipc
+                  .stopRecording()
+                  .then(() => setQuitAsk(true))
+                  .catch((e) => {
+                    setError(errorText(e));
+                    void ipc.cancelQuit();
+                  });
+              }}
+            >
+              {t("proj.stopKeep")}
+            </Button>
+          </>
+        }
+      >
+        <p>{t("proj.stopAskBody")}</p>
+      </Dialog>
+      <Dialog
         open={quitAsk}
         title={t("proj.quitTitle")}
         onClose={() => (setQuitAsk(false), void ipc.cancelQuit())}
@@ -622,6 +723,7 @@ export function useRecordingMode(args: {
           {dirtyTabs.map((p) => (
             <li key={p.id}>{t("proj.quitItemProject", { name: p.name })}</li>
           ))}
+          {quitScrolling && <li>{t("proj.quitItemScrolling")}</li>}
         </ul>
       </Dialog>
       <Dialog

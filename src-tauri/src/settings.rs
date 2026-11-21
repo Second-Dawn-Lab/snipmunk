@@ -39,8 +39,6 @@ pub struct Settings {
     pub auto_copy_to_clipboard: bool,
     /// The scrolling screenshot stops at this height (pixels).
     pub scroll_max_height: u32,
-    /// The scrolling screenshot scrolls the window back to the top when it is done.
-    pub scroll_back: bool,
     /// Show the magnifier loupe while selecting.
     pub show_magnifier: bool,
     // The last colors and sizes picked in the annotation tool popovers (used by the tools from Phase 5).
@@ -153,7 +151,6 @@ impl Default for Settings {
             after_capture: "front".into(),
             auto_copy_to_clipboard: true,
             scroll_max_height: 20_000,
-            scroll_back: true,
             show_magnifier: true,
             last_pen_color: "#E53935".into(),
             last_pen_size: 4,
@@ -271,11 +268,13 @@ impl Settings {
             &["list", "medium", "large"],
             &d.gallery_view,
         );
-        one_of(
-            &mut self.capture_mode,
-            &["rectangle", "window", "fullscreen", "freeform", "scrolling"],
-            &d.capture_mode,
-        );
+        // A saved "scrolling" mode (the parked scrolling screenshot) becomes Rectangle unless the development switch is on.
+        let modes: &[&str] = if crate::scrollshot::experimental() {
+            &["rectangle", "window", "fullscreen", "freeform", "scrolling"]
+        } else {
+            &["rectangle", "window", "fullscreen", "freeform"]
+        };
+        one_of(&mut self.capture_mode, modes, &d.capture_mode);
         one_of(
             &mut self.after_capture,
             &["front", "background"],
@@ -593,6 +592,20 @@ mod tests {
             s.merge(serde_json::json!({ "language": l })).unwrap();
             assert_eq!(s.language, *l);
         }
+    }
+
+    #[test]
+    fn a_saved_scrolling_mode_becomes_rectangle_because_the_scrolling_screenshot_is_parked() {
+        // (the development switch is not set in the tests)
+        assert!(!crate::scrollshot::experimental());
+        let mut s = Settings::default();
+        s.merge(serde_json::json!({"captureMode": "scrolling"}))
+            .unwrap();
+        assert_eq!(s.capture_mode, "rectangle");
+        // Loading a file that has it goes through the same check.
+        let mut loaded: Settings = serde_json::from_str(r#"{"captureMode":"scrolling"}"#).unwrap();
+        loaded.normalize();
+        assert_eq!(loaded.capture_mode, "rectangle");
     }
 
     #[test]

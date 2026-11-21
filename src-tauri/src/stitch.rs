@@ -1,67 +1,64 @@
-#![allow(clippy::chunks_exact_to_as_chunks, clippy::too_many_arguments)]
-//! Stitching the pictures of a scrolling screenshot into one tall image (no Windows code; unit tested with generated pages).
+#![allow(
+    clippy::chunks_exact_to_as_chunks,
+    clippy::too_many_arguments,
+    clippy::needless_range_loop
+)]
+//! The canvas of a scrolling screenshot (no Windows code; unit tested with generated pages).
 //!
-//! The pictures are the same window or area after every scroll step (RGBA, the same size). To put one under the other:
+//! The user scrolls by hand, up or down, at their own pace, and a picture of the area arrives about fifteen times a second
+//! (BGRA, always the same size). Every picture is put where it belongs on a growing canvas:
 //!
-//! * **Sticky bands.** The rows at the top that are the same in two pictures at the same place are a fixed header, the rows at the
-//!   bottom a fixed footer (both found from the first two pictures that differ, at most a third of the picture each). The header
-//!   is kept once, with the first picture; the footer once, at the end; the pictures are only used between them.
-//! * **The moving scrollbar.** The columns at the right edge are left out when rows are compared (a scrollbar's thumb moves), and the
-//!   columns of the scrollbar that were found moving are cut off the finished image.
-//! * **Overlap.** Every row of the middle part is reduced to a hash. The picture was scrolled by `d` rows when the rows of the new
-//!   picture equal the rows `d` further down in the old one. All `d` are tried; the one that matches the most rows that are not
-//!   plain background wins (a few rows may differ: a blinking caret, an animated banner). Where there is only background in the
-//!   overlap (a blank stretch of a page) the distance of the last step is used.
+//! * **Sticky bands.** The rows at the top (and bottom) that stay the same while the content moves are a fixed header (footer). They
+//!   are found by comparing the first picture with the first one that differs a lot from it, and are kept once: the header above the
+//!   canvas, the footer below it. The pictures are only used between them.
+//! * **Placement.** Every row of the middle part is reduced to a hash (the columns at the right edge, where a scrollbar moves, are
+//!   left out). A picture lies at `p` on the canvas when its rows equal the canvas rows from `p` on. Positions near the last one
+//!   (one page up or down) are tried; the one that matches the most rows that are not plain background wins. So scrolling back up
+//!   finds the content that is on the canvas already and adds nothing twice; content above the first picture is added above, content
+//!   below the last one is added below.
+//! * **Newest wins.** A row that is on the canvas already but differs in the new picture (an image that loaded later) is replaced.
+//! * **Too fast.** When no position matches (the scroll jumped further than a page, or the content changed completely) the picture is
+//!   not used and the canvas is `lost`: the next pictures are tried against the whole canvas, so scrolling back to something that was
+//!   captured finds the place again. Nothing that was captured is lost.
 
-/// A picture: RGBA rows, top first.
+/// A picture: BGRA rows, top first.
 pub struct Picture<'a> {
     pub width: usize,
     pub height: usize,
-    pub rgba: &'a [u8],
+    pub bgra: &'a [u8],
 }
 
-/// How the stitcher used a picture.
+/// What happened to a picture.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Pushed {
-    /// This many new rows were added at the bottom.
-    Added(usize),
-    /// The picture is the same as the one before: the page did not move (the end).
+pub enum Placed {
+    /// The picture is the same as the one before.
     Same,
-    /// No overlap with the picture before was found: the scroll went too far (or the content changed completely).
-    NoOverlap,
+    /// Not much has moved yet: the sticky bands are not known, the picture waits.
+    Waiting,
+    /// Placed; this many rows were added (0 = only rows that were there were looked at or replaced).
+    Added(usize),
+    /// No place was found: the scroll was too fast (or the page changed). Nothing was changed.
+    Lost,
 }
 
 /// The columns at the right edge that are not compared (a scrollbar is up to this wide, in pixels).
 const EDGE: usize = 48;
-/// Fewer matching rows than this share of the overlap is not a match.
-const MIN_RATIO: f32 = 0.985;
+/// A picture has to differ in this share of its rows from the first one before the sticky bands are measured.
+const BANDS_AFTER_PERCENT: usize = 30;
+/// The least overlap (rows) a position needs.
+const MIN_OVERLAP: usize = 16;
 /// At least this many rows that are not plain background must match.
-const MIN_INFORMATIVE: usize = 4;
+const MIN_INFORMATIVE: usize = 6;
+/// At least this share of the overlapping rows must match (some rows differ: a loaded image, an animation).
+const MIN_MATCH_PERCENT: usize = 60;
 
 struct Rows {
     hash: Vec<u64>,
-    /// The row is not one colour (text, an edge, an image).
     busy: Vec<bool>,
 }
 
-pub struct Stitcher {
-    width: usize,
-    frame_h: usize,
-    /// Everything stitched so far (RGBA), without the footer.
-    out: Vec<u8>,
-    height: usize,
-    prev: Vec<u8>,
-    header: Option<usize>,
-    footer: usize,
-    footer_rows: Vec<u8>,
-    /// The widest scrollbar found moving.
-    scrollbar: usize,
-    last_d: Option<usize>,
-    compare_w: usize,
-}
-
 fn row_stats(p: &Picture, y: usize, compare_w: usize) -> (u64, bool) {
-    let row = &p.rgba[y * p.width * 4..y * p.width * 4 + compare_w * 4];
+    let row = &p.bgra[y * p.width * 4..y * p.width * 4 + compare_w * 4];
     let mut h: u64 = 0xcbf29ce484222325;
     let first = [row[0], row[1], row[2]];
     let mut busy = false;
@@ -88,103 +85,154 @@ fn rows_of(p: &Picture, range: std::ops::Range<usize>, compare_w: usize) -> Rows
     Rows { hash, busy }
 }
 
-impl Stitcher {
-    /// Start with the first picture.
-    pub fn new(first: &Picture) -> Self {
+pub struct Canvas {
+    width: usize,
+    frame_h: usize,
+    compare_w: usize,
+    /// The first picture, until the sticky bands are known.
+    first: Option<Vec<u8>>,
+    /// (header rows, footer rows) once known.
+    bands: Option<(usize, usize)>,
+    header: Vec<u8>,
+    footer: Vec<u8>,
+    body: Vec<u8>,
+    hash: Vec<u64>,
+    busy: Vec<bool>,
+    /// Where the last picture's middle part lies on the body.
+    last_p: i64,
+    prev: Vec<u8>,
+    scrollbar: usize,
+    lost: bool,
+    max_rows: usize,
+    at_max: bool,
+}
+
+impl Canvas {
+    /// Start with the first picture; the canvas is never taller than `max_rows`.
+    pub fn new(first: &Picture, max_rows: usize) -> Self {
         let compare_w = first.width.saturating_sub(EDGE.min(first.width / 6)).max(1);
         Self {
             width: first.width,
             frame_h: first.height,
-            out: first.rgba.to_vec(),
-            height: first.height,
-            prev: first.rgba.to_vec(),
-            header: None,
-            footer: 0,
-            footer_rows: Vec::new(),
-            scrollbar: 0,
-            last_d: None,
             compare_w,
+            first: Some(first.bgra.to_vec()),
+            bands: None,
+            header: Vec::new(),
+            footer: Vec::new(),
+            body: Vec::new(),
+            hash: Vec::new(),
+            busy: Vec::new(),
+            last_p: 0,
+            prev: first.bgra.to_vec(),
+            scrollbar: 0,
+            lost: false,
+            max_rows,
+            at_max: false,
         }
     }
 
-    /// The height of the image so far (rows).
+    fn header_rows(&self) -> usize {
+        self.header.len() / (self.width * 4)
+    }
+
+    fn footer_rows(&self) -> usize {
+        self.footer.len() / (self.width * 4)
+    }
+
+    /// The height of the finished image so far (rows).
     pub fn height(&self) -> usize {
-        self.height
-    }
-
-    /// The rows between the sticky bands (the whole picture until two pictures have shown where the bands are).
-    pub fn content_height(&self) -> usize {
-        self.frame_h - self.header.unwrap_or(0) - self.footer
-    }
-
-    /// Add the next picture. `hint` is the expected scroll distance in rows when it is known. `scrolled` says that the scroll
-    /// really moved (the window said so): then a picture that is plain background in both is a blank stretch of the page, not the
-    /// end, and the rows are added with the distance of the step before.
-    pub fn push(&mut self, next: &Picture, hint: Option<usize>, scrolled: bool) -> Pushed {
-        if next.width != self.width || next.height != self.frame_h {
-            return Pushed::NoOverlap;
+        match self.bands {
+            None => self.frame_h,
+            Some(_) => self.header_rows() + self.hash.len() + self.footer_rows(),
         }
-        let prev = Picture {
-            width: self.width,
-            height: self.frame_h,
-            rgba: &self.prev,
-        };
+    }
+
+    /// The canvas stopped growing because it reached the maximum height.
+    pub fn at_max(&self) -> bool {
+        self.at_max
+    }
+
+    /// The last picture could not be placed (and no later one could be yet).
+    #[cfg(test)]
+    pub fn lost(&self) -> bool {
+        self.lost
+    }
+
+    /// Put the next picture on the canvas.
+    pub fn push(&mut self, next: &Picture) -> Placed {
+        if next.width != self.width || next.height != self.frame_h {
+            return Placed::Lost;
+        }
+        if next.bgra == self.prev.as_slice() {
+            return Placed::Same;
+        }
         let h = self.frame_h;
         let cw = self.compare_w;
-        let all_prev = rows_of(&prev, 0..h, cw);
-        let all_next = rows_of(next, 0..h, cw);
-        if all_prev.hash == all_next.hash {
-            let d = hint.or(self.last_d);
-            if let (true, Some(d)) = (scrolled && !all_prev.busy.iter().any(|&b| b), d) {
-                let top = self.header.unwrap_or(0);
-                let d = d.min(h - top - self.footer);
-                let from = (h - self.footer - d) * self.width * 4;
-                let to = (h - self.footer) * self.width * 4;
-                self.out.extend_from_slice(&next.rgba[from..to]);
-                self.height += d;
-                return Pushed::Added(d);
+        let rows = rows_of(next, 0..h, cw);
+        if self.bands.is_none() {
+            let first = self.first.clone().unwrap_or_default();
+            let f0 = Picture {
+                width: self.width,
+                height: h,
+                bgra: &first,
+            };
+            let base = rows_of(&f0, 0..h, cw);
+            let differ = (0..h).filter(|&i| base.hash[i] != rows.hash[i]).count();
+            if differ * 100 < BANDS_AFTER_PERCENT * h {
+                self.prev.copy_from_slice(next.bgra);
+                return Placed::Waiting;
             }
-            return Pushed::Same;
-        }
-        // The sticky bands come from the first two pictures that differ.
-        if self.header.is_none() {
             let cap = h / 3;
             let top = (0..cap)
-                .take_while(|&i| all_prev.hash[i] == all_next.hash[i])
+                .take_while(|&i| base.hash[i] == rows.hash[i])
                 .count();
             let bottom = (0..cap)
-                .take_while(|&i| all_prev.hash[h - 1 - i] == all_next.hash[h - 1 - i])
+                .take_while(|&i| base.hash[h - 1 - i] == rows.hash[h - 1 - i])
                 .count();
-            self.header = Some(top);
-            self.footer = bottom;
-            self.footer_rows = self.prev[(h - bottom) * self.width * 4..].to_vec();
-            // The footer is not part of what was stitched so far.
-            self.out.truncate(self.out.len() - bottom * self.width * 4);
-            self.height -= bottom;
+            let rw = self.width * 4;
+            self.header = first[..top * rw].to_vec();
+            self.footer = first[(h - bottom) * rw..].to_vec();
+            self.body = first[top * rw..(h - bottom) * rw].to_vec();
+            self.hash = base.hash[top..h - bottom].to_vec();
+            self.busy = base.busy[top..h - bottom].to_vec();
+            self.bands = Some((top, bottom));
+            self.last_p = 0;
+            self.first = None;
         }
-        let top = self.header.unwrap_or(0);
-        let region = top..h - self.footer;
-        let hc = region.len();
-        if hc < 8 {
-            return Pushed::NoOverlap;
+        let (top, bottom) = self.bands.unwrap_or((0, 0));
+        let hc = h - top - bottom;
+        if hc < MIN_OVERLAP {
+            return Placed::Lost;
         }
-        let a = &all_prev.hash[region.clone()];
-        let b = &all_next.hash[region.clone()];
-        let busy = &all_prev.busy[region.clone()];
-        let hint = hint.or(self.last_d);
-        let mut best: Option<(usize, usize, usize)> = None; // (informative, d closeness, d)
-        let mut blank_ok: Vec<usize> = Vec::new();
-        let min_overlap = 8usize;
-        for d in 1..=hc.saturating_sub(min_overlap) {
-            let n = hc - d;
-            // Cheap exit: the first and last rows of the overlap decide most wrong distances at once.
-            let (mut matched, mut informative) = (0usize, 0usize);
-            let allowed_miss = ((n as f32) * (1.0 - MIN_RATIO)) as usize;
-            let mut miss = 0usize;
-            for i in 0..n {
-                if b[i] == a[i + d] {
+        let f_hash = &rows.hash[top..h - bottom];
+        let f_busy = &rows.busy[top..h - bottom];
+        let body_h = self.hash.len() as i64;
+        let (lo, hi) = if self.lost {
+            (
+                -(hc as i64) + MIN_OVERLAP as i64,
+                body_h - MIN_OVERLAP as i64,
+            )
+        } else {
+            (
+                self.last_p - hc as i64 + MIN_OVERLAP as i64,
+                self.last_p + hc as i64 - MIN_OVERLAP as i64,
+            )
+        };
+        // (informative matches, closeness, position)
+        let mut best: Option<(usize, i64, i64)> = None;
+        for p in lo..=hi {
+            let from = (-p).max(0) as usize;
+            let to = ((body_h - p).min(hc as i64)).max(0) as usize;
+            if to <= from || to - from < MIN_OVERLAP {
+                continue;
+            }
+            let n = to - from;
+            let allowed_miss = n * (100 - MIN_MATCH_PERCENT) / 100;
+            let (mut matched, mut informative, mut miss) = (0usize, 0usize, 0usize);
+            for i in from..to {
+                if f_hash[i] == self.hash[(p + i as i64) as usize] {
                     matched += 1;
-                    if busy[i + d] {
+                    if f_busy[i] {
                         informative += 1;
                     }
                 } else {
@@ -194,97 +242,167 @@ impl Stitcher {
                     }
                 }
             }
-            if miss > allowed_miss {
+            if miss > allowed_miss
+                || informative < MIN_INFORMATIVE
+                || matched * 100 < MIN_MATCH_PERCENT * n
+            {
                 continue;
             }
-            let _ = matched;
-            if informative >= MIN_INFORMATIVE {
-                let close = hint.map_or(0, |h| h.abs_diff(d));
-                let better = match best {
-                    None => true,
-                    Some((bi, bc, _)) => informative > bi || (informative == bi && close < bc),
-                };
-                if better {
-                    best = Some((informative, close, d));
-                }
-            } else {
-                blank_ok.push(d);
+            let close = (p - self.last_p).abs();
+            let better = match best {
+                None => true,
+                Some((bi, bc, _)) => informative > bi || (informative == bi && close < bc),
+            };
+            if better {
+                best = Some((informative, close, p));
             }
         }
-        let d = match best {
-            Some((_, _, d)) => d,
-            None => match hint.and_then(|h| blank_ok.iter().copied().min_by_key(|d| d.abs_diff(h)))
-            {
-                Some(d) => d,
-                None => return Pushed::NoOverlap,
-            },
+        let Some((_, _, mut p)) = best else {
+            self.lost = true;
+            return Placed::Lost;
         };
-        // The scrollbar: columns at the right edge that differ in the overlap.
+        self.lost = false;
+        let rw = self.width * 4;
+        let mut added = 0usize;
+        // The scrollbar: columns at the right edge that differ where the rows are the same.
         let edge_from = self.width - EDGE.min(self.width / 6);
-        let mut sb = 0;
+        let from = (-p).max(0) as usize;
+        let to = ((body_h - p).min(hc as i64)).max(0) as usize;
         for x in edge_from..self.width {
             let mut diff = 0;
-            for i in 0..hc - d {
-                let ya = (top + i + d) * self.width * 4 + x * 4;
-                let yb = (top + i) * self.width * 4 + x * 4;
-                if self.prev[ya..ya + 3] != next.rgba[yb..yb + 3] {
-                    diff += 1;
-                    if diff >= 2 {
-                        break;
+            for i in from..to {
+                if f_hash[i] == self.hash[(p + i as i64) as usize] {
+                    let a = (p + i as i64) as usize * rw + x * 4;
+                    let b = (top + i) * rw + x * 4;
+                    if self.body[a..a + 3] != next.bgra[b..b + 3] {
+                        diff += 1;
+                        if diff >= 2 {
+                            break;
+                        }
                     }
                 }
             }
             if diff >= 2 {
-                sb = sb.max(self.width - x);
+                self.scrollbar = self.scrollbar.max(self.width - x);
                 break;
             }
         }
-        self.scrollbar = self.scrollbar.max(sb);
-        // The new rows are the last `d` rows of the middle part.
-        let from = (top + hc - d) * self.width * 4;
-        let to = (top + hc) * self.width * 4;
-        self.out.extend_from_slice(&next.rgba[from..to]);
-        self.height += d;
-        self.prev.copy_from_slice(next.rgba);
-        self.last_d = Some(d);
-        Pushed::Added(d)
+        let room = self.max_rows.saturating_sub(top + bottom);
+        // Above the canvas: new rows at the front.
+        if p < 0 {
+            let want = (-p) as usize;
+            let take = want.min(room.saturating_sub(self.hash.len()));
+            if take < want {
+                self.at_max = true;
+            }
+            if take > 0 {
+                let src_from = (top + want - take) * rw;
+                let src_to = (top + want) * rw;
+                self.body
+                    .splice(0..0, next.bgra[src_from..src_to].iter().copied());
+                self.hash
+                    .splice(0..0, f_hash[want - take..want].iter().copied());
+                self.busy
+                    .splice(0..0, f_busy[want - take..want].iter().copied());
+                added += take;
+            }
+            // The picture's row `want - take` is now the first row of the canvas.
+            p = -((want - take) as i64);
+        }
+        // Rows that are there already: the newest picture of a row wins.
+        let from = (-p).max(0) as usize;
+        let to = ((self.hash.len() as i64 - p).min(hc as i64)).max(0) as usize;
+        for i in from..to {
+            let r = (p + i as i64) as usize;
+            if f_hash[i] != self.hash[r] {
+                self.body[r * rw..(r + 1) * rw]
+                    .copy_from_slice(&next.bgra[(top + i) * rw..(top + i + 1) * rw]);
+                self.hash[r] = f_hash[i];
+                self.busy[r] = f_busy[i];
+            }
+        }
+        // Below the canvas: new rows at the end.
+        let have = self.hash.len() as i64;
+        if p + hc as i64 > have {
+            let start = (have - p).max(0) as usize;
+            let want = hc - start;
+            let take = want.min(room.saturating_sub(self.hash.len()));
+            if take < want {
+                self.at_max = true;
+            }
+            if take > 0 {
+                self.body
+                    .extend_from_slice(&next.bgra[(top + start) * rw..(top + start + take) * rw]);
+                self.hash.extend_from_slice(&f_hash[start..start + take]);
+                self.busy.extend_from_slice(&f_busy[start..start + take]);
+                added += take;
+            }
+        }
+        self.footer = next.bgra[(h - bottom) * rw..].to_vec();
+        self.last_p = p.max(-(hc as i64));
+        self.prev.copy_from_slice(next.bgra);
+        Placed::Added(added)
     }
 
-    /// The finished image (RGBA, width, height): the footer added once, the scrollbar cut off.
-    pub fn finish(mut self) -> (Vec<u8>, usize, usize) {
-        let fb = self.footer_rows.len() / (self.width * 4).max(1);
-        if fb > 0 {
-            // The footer of the last picture (it is the same in all of them).
-            let rows = self.footer_rows.clone();
-            self.out.extend_from_slice(&rows);
-            self.height += fb;
-        }
+    /// The finished image (BGRA, width, height): header, canvas, footer, the scrollbar cut off.
+    pub fn finish(self) -> (Vec<u8>, usize, usize) {
+        let rw = self.width * 4;
+        let (data, height) = match self.bands {
+            None => (self.first.unwrap_or(self.prev), self.frame_h),
+            Some(_) => {
+                let mut v =
+                    Vec::with_capacity(self.header.len() + self.body.len() + self.footer.len());
+                v.extend_from_slice(&self.header);
+                v.extend_from_slice(&self.body);
+                v.extend_from_slice(&self.footer);
+                let h = v.len() / rw;
+                (v, h)
+            }
+        };
         let keep = self.width - self.scrollbar.min(self.width.saturating_sub(1));
         if keep == self.width {
-            return (self.out, self.width, self.height);
+            return (data, self.width, height);
         }
-        let mut cropped = Vec::with_capacity(keep * self.height * 4);
-        for y in 0..self.height {
-            let s = y * self.width * 4;
-            cropped.extend_from_slice(&self.out[s..s + keep * 4]);
+        let mut cropped = Vec::with_capacity(keep * height * 4);
+        for y in 0..height {
+            let s = y * rw;
+            cropped.extend_from_slice(&data[s..s + keep * 4]);
         }
-        (cropped, keep, self.height)
+        (cropped, keep, height)
     }
 
-    /// A small picture of the image so far for the progress pill: the last rows, at most `max_h` tall and `max_w` wide (RGBA).
+    /// A small picture of the whole canvas for the pill (RGBA), at most `max_w` x `max_h`.
     pub fn thumbnail(&self, max_w: usize, max_h: usize) -> (Vec<u8>, usize, usize) {
-        let scale = (self.width as f32 / max_w as f32).max(1.0);
+        let rw = self.width * 4;
+        let rows: Vec<&[u8]> = match self.bands {
+            None => vec![self.first.as_deref().unwrap_or(&self.prev)],
+            Some(_) => vec![&self.header, &self.body, &self.footer],
+        };
+        let total: usize = rows.iter().map(|r| r.len() / rw).sum();
+        let scale = (self.width as f32 / max_w as f32)
+            .max(total as f32 / max_h as f32)
+            .max(1.0);
         let tw = ((self.width as f32 / scale) as usize).max(1);
-        let rows_src = ((max_h as f32 * scale) as usize).min(self.height).max(1);
-        let th = ((rows_src as f32 / scale) as usize).max(1);
+        let th = ((total as f32 / scale) as usize).max(1);
         let mut out = Vec::with_capacity(tw * th * 4);
-        let y0 = self.height - rows_src;
         for ty in 0..th {
-            let sy = (y0 + (ty as f32 * scale) as usize).min(self.height - 1);
+            let mut sy = ((ty as f32 * scale) as usize).min(total.saturating_sub(1));
+            let mut part = 0;
+            while part < rows.len() && sy >= rows[part].len() / rw {
+                sy -= rows[part].len() / rw;
+                part += 1;
+            }
+            let part = part.min(rows.len() - 1);
+            let row = rows[part];
+            let sy = sy.min((row.len() / rw).saturating_sub(1));
             for tx in 0..tw {
                 let sx = ((tx as f32 * scale) as usize).min(self.width - 1);
-                let i = (sy * self.width + sx) * 4;
-                out.extend_from_slice(&self.out[i..i + 4]);
+                let i = sy * rw + sx * 4;
+                if i + 4 <= row.len() {
+                    out.extend_from_slice(&[row[i + 2], row[i + 1], row[i], 255]);
+                } else {
+                    out.extend_from_slice(&[255, 255, 255, 255]);
+                }
             }
         }
         (out, tw, th)
@@ -295,12 +413,13 @@ impl Stitcher {
 mod tests {
     use super::*;
 
-    /// A generated page: `w` x `rows` with rows of pseudo-random "text" and blank stretches where `blank(y)` says so.
-    fn page(w: usize, rows: usize, blank: impl Fn(usize) -> bool) -> Vec<u8> {
+    /// A generated page of `rows` rows of pseudo-random "text".
+    fn page(w: usize, rows: usize) -> Vec<u8> {
         let mut v = vec![255u8; w * rows * 4];
         let mut seed = 12345u64;
         for y in 0..rows {
-            if blank(y) {
+            // Some blank rows between "paragraphs".
+            if y % 53 > 40 {
                 continue;
             }
             for x in 0..w {
@@ -319,41 +438,35 @@ mod tests {
         v
     }
 
-    /// The window at scroll position `at` of a page: sticky header and footer, the scrollbar on the right with a moving thumb.
-    fn view(
-        page: &[u8],
+    struct Setup {
         w: usize,
-        total: usize,
-        at: usize,
         h: usize,
         header: usize,
         footer: usize,
         sb: usize,
-    ) -> Vec<u8> {
+    }
+
+    /// The window at scroll position `at` of a page: sticky header and footer, the scrollbar on the right with a moving thumb.
+    fn view(page: &[u8], total: usize, at: usize, s: &Setup) -> Vec<u8> {
+        let (w, h) = (s.w, s.h);
         let mut v = vec![0u8; w * h * 4];
-        let body = h - header - footer;
+        let body = h - s.header - s.footer;
         for y in 0..h {
-            let src_row: Option<usize> = if y < header || y >= h - footer {
-                None
-            } else {
-                Some(at + (y - header))
-            };
             for x in 0..w {
                 let i = (y * w + x) * 4;
-                let px: [u8; 4] = if x >= w - sb {
-                    // The scrollbar: a track with a thumb whose place depends on the position.
-                    let thumb = (at * body / total.max(1)) + header;
+                let px: [u8; 4] = if x >= w - s.sb {
+                    let thumb = (at * body / total.max(1)) + s.header;
                     if y >= thumb && y < thumb + 20 {
                         [90, 90, 90, 255]
                     } else {
                         [230, 230, 230, 255]
                     }
-                } else if y < header {
-                    [30, 60, 120, 255]
-                } else if y >= h - footer {
+                } else if y < s.header {
                     [120, 60, 30, 255]
+                } else if y >= h - s.footer {
+                    [30, 60, 120, 255]
                 } else {
-                    let r = src_row.unwrap().min(total - 1);
+                    let r = (at + (y - s.header)).min(total - 1);
                     let j = (r * w + x) * 4;
                     [page[j], page[j + 1], page[j + 2], 255]
                 };
@@ -363,153 +476,261 @@ mod tests {
         v
     }
 
-    fn run(
-        w: usize,
-        total: usize,
-        h: usize,
-        header: usize,
-        footer: usize,
-        sb: usize,
-        step: usize,
-        blank: impl Fn(usize) -> bool,
-    ) -> (Vec<u8>, usize, usize, Vec<u8>) {
-        let pg = page(w, total, blank);
-        let body = h - header - footer;
-        let mut at = 0;
-        let first = view(&pg, w, total, 0, h, header, footer, sb);
-        let mut st = Stitcher::new(&Picture {
-            width: w,
-            height: h,
-            rgba: &first,
-        });
-        loop {
-            let next_at = (at + step).min(total - body);
-            let pic = view(&pg, w, total, next_at, h, header, footer, sb);
-            match st.push(
-                &Picture {
-                    width: w,
-                    height: h,
-                    rgba: &pic,
-                },
-                None,
-                next_at > at,
-            ) {
-                Pushed::Same => break,
-                Pushed::Added(_) => {}
-                Pushed::NoOverlap => panic!("no overlap at {next_at}"),
-            }
-            at = next_at;
-            if at + body >= total {
-                // One more push of the end: the same picture ends it.
-                let again = view(&pg, w, total, at, h, header, footer, sb);
-                assert_eq!(
-                    st.push(
-                        &Picture {
-                            width: w,
-                            height: h,
-                            rgba: &again
-                        },
-                        None,
-                        false
-                    ),
-                    Pushed::Same
-                );
-                break;
-            }
+    fn pic<'a>(s: &Setup, d: &'a [u8]) -> Picture<'a> {
+        Picture {
+            width: s.w,
+            height: s.h,
+            bgra: d,
         }
-        let (img, iw, ih) = st.finish();
-        (img, iw, ih, pg)
     }
 
-    #[test]
-    fn a_page_with_sticky_bands_and_a_moving_scrollbar_comes_out_as_the_page() {
-        let (w, total, h, header, footer, sb) =
-            (200usize, 3000usize, 400usize, 40usize, 30usize, 17usize);
-        let (img, iw, ih, pg) = run(w, total, h, header, footer, sb, 250, |_| false);
-        // The scrollbar is cut off; header once, then the page, then the footer once.
-        assert_eq!(iw, w - sb);
-        assert_eq!(ih, header + total + footer);
+    fn check(img: &[u8], iw: usize, ih: usize, pg: &[u8], total: usize, s: &Setup) {
+        assert_eq!(iw, s.w - s.sb);
+        assert_eq!(ih, s.header + total + s.footer);
         let px = |y: usize, x: usize| &img[(y * iw + x) * 4..(y * iw + x) * 4 + 3];
-        assert_eq!(px(5, 5), [30, 60, 120]);
-        assert_eq!(px(ih - 3, 5), [120, 60, 30]);
-        for y in (0..total).step_by(7) {
-            for x in (0..iw).step_by(11) {
+        for y in (0..total).step_by(3) {
+            for x in (0..iw).step_by(7) {
                 assert_eq!(
-                    px(header + y, x),
-                    &pg[(y * w + x) * 4..(y * w + x) * 4 + 3],
+                    px(s.header + y, x),
+                    &pg[(y * s.w + x) * 4..(y * s.w + x) * 4 + 3],
                     "row {y} col {x}"
                 );
             }
         }
-    }
-
-    #[test]
-    fn a_blank_stretch_is_stitched_with_the_distance_of_the_step_before() {
-        let (w, total, h) = (160usize, 2400usize, 300usize);
-        let (img, iw, ih, pg) = run(w, total, h, 0, 0, 0, 200, |y| (900..1500).contains(&y));
-        assert_eq!((iw, ih), (w, total));
-        for y in (0..total).step_by(5) {
-            assert_eq!(
-                &img[(y * iw) * 4..(y * iw) * 4 + 12],
-                &pg[(y * w) * 4..(y * w) * 4 + 12],
-                "row {y}"
-            );
+        if s.header > 0 {
+            assert_eq!(px(2, 2), [120, 60, 30]);
+        }
+        if s.footer > 0 {
+            assert_eq!(px(ih - 3, 2), [30, 60, 120]);
         }
     }
 
-    #[test]
-    fn a_very_tall_page_is_stitched() {
-        let (w, total, h) = (96usize, 40_000usize, 500usize);
-        let (img, iw, ih, pg) = run(w, total, h, 20, 20, 0, 420, |_| false);
-        assert_eq!((iw, ih), (w, total + 40));
-        assert_eq!(img.len(), iw * ih * 4);
-        for y in (0..total).step_by(97) {
-            assert_eq!(
-                &img[((y + 20) * iw) * 4..((y + 20) * iw) * 4 + 16],
-                &pg[(y * w) * 4..(y * w) * 4 + 16],
-                "row {y}"
-            );
+    /// Feed the positions one after the other (every one is a picture); returns the canvas.
+    fn run(s: &Setup, total: usize, path: &[usize]) -> (Canvas, Vec<u8>, Vec<Placed>) {
+        let pg = page(s.w, total);
+        let first = view(&pg, total, path[0], s);
+        let mut c = Canvas::new(&pic(s, &first), 100_000);
+        let mut log = Vec::new();
+        for &at in &path[1..] {
+            let d = view(&pg, total, at, s);
+            log.push(c.push(&pic(s, &d)));
         }
+        (c, pg, log)
+    }
+
+    fn steps(from: usize, to: usize, step: usize) -> Vec<usize> {
+        let mut v = Vec::new();
+        let mut at = from as i64;
+        let dir = if to >= from {
+            step as i64
+        } else {
+            -(step as i64)
+        };
+        while (dir > 0 && at < to as i64) || (dir < 0 && at > to as i64) {
+            v.push(at as usize);
+            at += dir;
+        }
+        v.push(to);
+        v
     }
 
     #[test]
-    fn a_scroll_that_went_too_far_has_no_overlap_and_the_same_picture_is_the_end() {
-        let (w, total, h) = (120usize, 3000usize, 300usize);
-        let pg = page(w, total, |_| false);
-        let first = view(&pg, w, total, 0, h, 0, 0, 0);
-        let mut st = Stitcher::new(&Picture {
-            width: w,
-            height: h,
-            rgba: &first,
-        });
+    fn scrolling_down_gives_the_page_with_the_header_and_footer_once_and_no_scrollbar() {
+        let s = Setup {
+            w: 200,
+            h: 400,
+            header: 40,
+            footer: 30,
+            sb: 17,
+        };
+        let total = 3000;
+        let body = s.h - s.header - s.footer;
+        let (c, pg, log) = run(&s, total, &steps(0, total - body, 45));
+        assert!(!log.contains(&Placed::Lost), "{log:?}");
+        let (img, iw, ih) = c.finish();
+        check(&img, iw, ih, &pg, total, &s);
+    }
+
+    #[test]
+    fn scrolling_back_up_and_down_adds_nothing_twice() {
+        let s = Setup {
+            w: 160,
+            h: 300,
+            header: 24,
+            footer: 0,
+            sb: 0,
+        };
+        let total = 2400;
+        let body = s.h - s.header;
+        let mut path = steps(0, 1200, 40);
+        path.extend(steps(1200, 500, 35));
+        path.extend(steps(500, total - body, 50));
+        let (c, pg, log) = run(&s, total, &path);
+        assert!(!log.contains(&Placed::Lost), "{log:?}");
+        let (img, iw, ih) = c.finish();
+        check(&img, iw, ih, &pg, total, &s);
+    }
+
+    #[test]
+    fn starting_in_the_middle_and_scrolling_up_adds_rows_above_and_the_header_stays_on_top() {
+        let s = Setup {
+            w: 160,
+            h: 300,
+            header: 24,
+            footer: 20,
+            sb: 0,
+        };
+        let total = 2000;
+        let body = s.h - s.header - s.footer;
+        let mut path = steps(800, 0, 40);
+        path.extend(steps(0, total - body, 60));
+        let (c, pg, log) = run(&s, total, &path);
+        assert!(!log.contains(&Placed::Lost), "{log:?}");
+        let (img, iw, ih) = c.finish();
+        check(&img, iw, ih, &pg, total, &s);
+    }
+
+    #[test]
+    fn a_jump_that_is_too_fast_is_lost_and_scrolling_back_finds_the_place_again() {
+        let s = Setup {
+            w: 160,
+            h: 300,
+            header: 24,
+            footer: 20,
+            sb: 0,
+        };
+        let total = 4000;
+        let body = s.h - s.header - s.footer;
+        let pg = page(s.w, total);
+        let first = view(&pg, total, 0, &s);
+        let mut c = Canvas::new(&pic(&s, &first), 100_000);
+        for at in steps(0, 600, 40) {
+            let d = view(&pg, total, at, &s);
+            c.push(&pic(&s, &d));
+        }
+        let height = c.height();
+        // A jump of 2000 rows: nothing overlaps.
+        let far = view(&pg, total, 2600, &s);
+        assert_eq!(c.push(&pic(&s, &far)), Placed::Lost);
+        assert!(c.lost());
+        assert_eq!(c.height(), height, "nothing was changed");
+        // Still too far: lost again; nothing is added.
+        let far2 = view(&pg, total, 2400, &s);
+        assert_eq!(c.push(&pic(&s, &far2)), Placed::Lost);
+        // Back near what was captured: the place is found again (the whole canvas is searched) and the scroll goes on.
+        for at in steps(500, total - body, 45) {
+            let d = view(&pg, total, at, &s);
+            let r = c.push(&pic(&s, &d));
+            assert_ne!(r, Placed::Lost, "at {at}");
+        }
+        assert!(!c.lost());
+        let (img, iw, ih) = c.finish();
+        check(&img, iw, ih, &pg, total, &s);
+    }
+
+    #[test]
+    fn an_image_that_loads_later_replaces_the_placeholder_rows() {
+        let s = Setup {
+            w: 160,
+            h: 300,
+            header: 0,
+            footer: 0,
+            sb: 0,
+        };
+        let total = 1500;
+        let mut pg = page(s.w, total);
+        let truth = pg.clone();
+        // Rows 700..800 are a grey placeholder at first.
+        for y in 700..800 {
+            for x in 0..s.w {
+                let i = (y * s.w + x) * 4;
+                pg[i..i + 4].copy_from_slice(&[200, 200, 200, 255]);
+            }
+        }
+        let first = view(&pg, total, 400, &s);
+        let mut c = Canvas::new(&pic(&s, &first), 100_000);
+        // The placeholder is seen while scrolling down; then the image is loaded and the next pictures show it.
+        for at in steps(400, 900, 40) {
+            let d = view(&pg, total, at, &s);
+            c.push(&pic(&s, &d));
+        }
+        for at in steps(900, 560, 30) {
+            let d = view(&truth, total, at, &s);
+            c.push(&pic(&s, &d));
+        }
+        for at in steps(560, total - s.h, 40) {
+            let d = view(&truth, total, at, &s);
+            c.push(&pic(&s, &d));
+        }
+        let (img, iw, ih) = c.finish();
+        // Rows 400.. of the page start the canvas.
+        assert_eq!(iw, s.w);
+        let row = |y: usize| &img[((y - 400) * iw) * 4..((y - 400) * iw) * 4 + 12];
+        for y in (700..800).step_by(5) {
+            assert_eq!(row(y), &truth[(y * s.w) * 4..(y * s.w) * 4 + 12], "row {y}");
+        }
+        assert_eq!(ih, total - 400);
+    }
+
+    #[test]
+    fn a_page_of_forty_thousand_rows_and_the_maximum_height() {
+        let s = Setup {
+            w: 96,
+            h: 500,
+            header: 20,
+            footer: 20,
+            sb: 0,
+        };
+        let total = 40_000;
+        let body = s.h - s.header - s.footer;
+        let pg = page(s.w, total);
+        let first = view(&pg, total, 0, &s);
+        let mut c = Canvas::new(&pic(&s, &first), 100_000);
+        for at in steps(0, total - body, 150) {
+            let d = view(&pg, total, at, &s);
+            assert_ne!(c.push(&pic(&s, &d)), Placed::Lost, "at {at}");
+        }
+        let (img, iw, ih) = c.finish();
+        assert_eq!((iw, ih), (s.w, total + 40));
         assert_eq!(
-            st.push(
-                &Picture {
-                    width: w,
-                    height: h,
-                    rgba: &first
-                },
-                None,
-                false
-            ),
-            Pushed::Same
+            &img[((20 + 30_000) * iw) * 4..((20 + 30_000) * iw) * 4 + 16],
+            &pg[(30_000 * s.w) * 4..(30_000 * s.w) * 4 + 16]
         );
-        let far = view(&pg, w, total, 1500, h, 0, 0, 0);
-        assert_eq!(
-            st.push(
-                &Picture {
-                    width: w,
-                    height: h,
-                    rgba: &far
-                },
-                None,
-                true
-            ),
-            Pushed::NoOverlap
-        );
-        assert_eq!(st.height(), h);
-        let (t, tw, th) = st.thumbnail(60, 40);
+        // With a maximum the canvas stops growing and says so.
+        let mut c = Canvas::new(&pic(&s, &first), 3000);
+        for at in steps(0, 8000, 150) {
+            let d = view(&pg, total, at, &s);
+            c.push(&pic(&s, &d));
+        }
+        assert!(c.at_max());
+        assert!(c.height() <= 3000, "{}", c.height());
+        let (t, tw, th) = c.thumbnail(60, 90);
         assert_eq!(t.len(), tw * th * 4);
-        assert!(tw <= 60 && th <= 40);
+        assert!(tw <= 60 && th <= 90);
+    }
+
+    #[test]
+    fn a_small_move_waits_and_a_picture_that_did_not_change_is_the_same() {
+        let s = Setup {
+            w: 120,
+            h: 200,
+            header: 0,
+            footer: 0,
+            sb: 0,
+        };
+        let pg = page(s.w, 1000);
+        let first = view(&pg, 1000, 0, &s);
+        let mut c = Canvas::new(&pic(&s, &first), 10_000);
+        assert_eq!(c.push(&pic(&s, &first)), Placed::Same);
+        // Only a few rows change (a blinking caret): nothing has been scrolled.
+        let mut small = first.clone();
+        for b in small[..40 * 4].iter_mut() {
+            *b = !*b;
+        }
+        assert_eq!(c.push(&pic(&s, &small)), Placed::Waiting);
+        assert_eq!(c.height(), s.h);
+        let (img, iw, ih) = c.finish();
+        assert_eq!((iw, ih), (s.w, s.h));
+        assert_eq!(img.len(), iw * ih * 4);
     }
 }
