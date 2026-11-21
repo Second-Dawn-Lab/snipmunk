@@ -8,7 +8,6 @@ describe("defaultSettings", () => {
       theme: "system",
       closeAction: "background",
       captureHotkey: "Ctrl+Alt+PrintScreen",
-      newSessionAction: "ask",
       clearOnExit: false,
       retentionDays: 30,
       defaultCopyMode: "separate",

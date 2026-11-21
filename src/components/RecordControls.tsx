@@ -1,10 +1,12 @@
 import { Select } from "@seconddawn/ui";
 import { useState } from "react";
 import { useT } from "../i18n";
+import { ipc } from "../ipc";
 import type { Settings } from "../settings/defaults";
 import { AppIcon } from "./AppIcons";
 import { MenuItem } from "./MenuItem";
 import { Pop } from "./Pop";
+import { DeviceSelect, useDevices } from "../settings/RecordingPage";
 
 const AREAS = ["rectangle", "window", "fullscreen"] as const;
 const COUNTDOWNS = [0, 3, 5, 10] as const;
@@ -18,7 +20,7 @@ export function RecordControls(props: { settings: Settings; onPatch: (change: Pa
   const { settings, onPatch } = props;
   const [areaOpen, setAreaOpen] = useState(false);
   const [optionsOpen, setOptionsOpen] = useState(false);
-  const soon = t("rec.soon");
+  const devices = useDevices();
   return (
     <>
       <Pop
@@ -124,12 +126,44 @@ export function RecordControls(props: { settings: Settings; onPatch: (change: Pa
             <span>{t("rec.mic")}</span>
           </label>
           {settings.recMic && <p className="recopts__note">{t("rec.micDefault")}</p>}
-          {(["webcam", "cursor", "clickFx"] as const).map((k) => (
-            <div key={k} className="recopts__soon" aria-disabled="true" title={soon}>
-              <span>{t(`rec.${k}`)}</span>
-              <em>{soon}</em>
-            </div>
-          ))}
+          <label className="recopts__row">
+            <span>{t("settings.micDevice")}</span>
+            <DeviceSelect label={t("settings.micDevice")} value={settings.micDevice} devices={devices.mic} onChange={(micDevice) => onPatch({ micDevice })} />
+          </label>
+          <label className="recopts__row">
+            <span>{t("settings.systemDevice")}</span>
+            <DeviceSelect label={t("settings.systemDevice")} value={settings.systemDevice} devices={devices.system} onChange={(systemDevice) => onPatch({ systemDevice })} />
+          </label>
+          <label className="recopts__row">
+            <span>{t("settings.webcamDevice")}</span>
+            <DeviceSelect label={t("settings.webcamDevice")} value={settings.webcamDevice} devices={devices.webcam} onChange={(webcamDevice) => onPatch({ webcamDevice })} />
+          </label>
+          <label className="recopts__check">
+            <input type="checkbox" checked={settings.webcamOn} onChange={(e) => onPatch({ webcamOn: e.target.checked })} />
+            <span>{t("rec.webcam")}</span>
+          </label>
+          <label className="recopts__check">
+            <input type="checkbox" checked={settings.cursorShow} onChange={(e) => onPatch({ cursorShow: e.target.checked })} />
+            <span>{t("rec.cursor")}</span>
+          </label>
+          <label className="recopts__check">
+            <input
+              type="checkbox"
+              checked={settings.clickEffect !== "off"}
+              onChange={(e) => onPatch({ clickEffect: e.target.checked ? "ripple" : "off" })}
+            />
+            <span>{t("rec.clickFx")}</span>
+          </label>
+          <button
+            type="button"
+            className="recopts__more"
+            onClick={() => {
+              setOptionsOpen(false);
+              void ipc.openSettings("recording");
+            }}
+          >
+            {t("rec.moreSettings")}
+          </button>
         </div>
       </Pop>
     </>

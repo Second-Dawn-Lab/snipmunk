@@ -20,6 +20,7 @@ export function RecBar() {
   const [busy, setBusy] = useState(false);
   const [sound, setSound] = useState(true);
   const [mic, setMic] = useState(false);
+  const [webcam, setWebcam] = useState(false);
   const capsule = useRef<HTMLDivElement>(null);
   const live = clock.recording;
 
@@ -32,6 +33,7 @@ export function RecBar() {
       .then((s) => {
         setSound(s.recSystemSound);
         setMic(s.recMic);
+        setWebcam(s.webcamOn);
       })
       .catch(() => undefined);
     const state = ipc.onRecordingState((s) => {
@@ -41,6 +43,7 @@ export function RecBar() {
     const settings = ipc.onSettingsChanged((s) => {
       setSound(s.recSystemSound);
       setMic(s.recMic);
+      setWebcam(s.webcamOn);
     });
     const counting = ipc.onRecCountdown((n) => setCount(n > 0 ? n : null));
     const timer = setInterval(() => setNow(Date.now()), 250);
@@ -75,9 +78,10 @@ export function RecBar() {
     setBusy(true);
     void ipc.discardRecording().catch(() => undefined);
   };
-  const toggle = (key: "recSystemSound" | "recMic", value: boolean) => {
+  const toggle = (key: "recSystemSound" | "recMic" | "webcamOn", value: boolean) => {
     if (key === "recSystemSound") setSound(value);
-    else setMic(value);
+    else if (key === "recMic") setMic(value);
+    else setWebcam(value);
     void ipc.setSettings({ [key]: value }).catch(() => undefined);
   };
 
@@ -119,6 +123,7 @@ export function RecBar() {
           {iconBtn(t("rec.discard"), "trash", () => setAsking(true))}
           {iconBtn(t("rec.soundToggle"), sound ? "speaker" : "speakerOff", () => toggle("recSystemSound", !sound), sound)}
           {iconBtn(t("rec.micToggle"), mic ? "mic" : "micOff", () => toggle("recMic", !mic), mic)}
+          {iconBtn(t("rec.webcamToggle"), webcam ? "webcam" : "webcamOff", () => toggle("webcamOn", !webcam), webcam)}
           {live ? (
             <button type="button" className="floatbar__btn floatbar__btn--danger floatbar__btn--stop" disabled={busy} onClick={stop}>
               {t("rec.stop")}

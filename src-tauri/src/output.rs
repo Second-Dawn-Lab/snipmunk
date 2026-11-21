@@ -143,7 +143,7 @@ pub fn deliver(app: &AppHandle, frame: Frame, title: Option<String>) -> Result<(
     Ok(())
 }
 
-/// Write a screenshot into the folder of the setting, in a subfolder named like its group. Never replaces a file.
+/// Write a screenshot into the folder of the setting (no group subfolders: screenshots are one list). Never replaces a file.
 fn auto_save(
     settings: &crate::settings::Settings,
     group_name: &str,
@@ -154,7 +154,7 @@ fn auto_save(
         &settings.auto_save_dir,
         crate::recstore::default_pictures_dir,
     );
-    let dir = root.join(crate::recstore::safe_name(group_name));
+    let dir = root;
     std::fs::create_dir_all(&dir).ok()?;
     // The number of the screenshot in its group is the number of files already there plus one.
     let number = std::fs::read_dir(&dir).map(|d| d.count()).unwrap_or(0) + 1;
@@ -231,8 +231,8 @@ mod tests {
         };
         let a = auto_save(&settings, "Group 1", &capture, b"one").unwrap();
         let b = auto_save(&settings, "Group 1", &capture, b"two").unwrap();
-        assert_eq!(a, dir.path().join("Group 1").join("My_ shot.png"));
-        assert_eq!(b, dir.path().join("Group 1").join("My_ shot (2).png"));
+        assert_eq!(a, dir.path().join("My_ shot.png"));
+        assert_eq!(b, dir.path().join("My_ shot (2).png"));
         assert_eq!(std::fs::read(&a).unwrap(), b"one");
     }
 }

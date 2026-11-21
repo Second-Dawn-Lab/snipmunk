@@ -35,7 +35,6 @@ import {
   deleteTargets,
   groupOrFirst,
   sortCaptures,
-  totalCaptures,
   validActive,
   zoomIn,
   zoomOut,
@@ -52,6 +51,7 @@ import { ContextMenu, type MenuEntry } from "./ContextMenu";
 import { DeleteGroupDialog } from "./DeleteGroupDialog";
 import type { GalleryActions } from "./Gallery";
 import { GroupTabs } from "./GroupTabs";
+import { ExportDialog } from "./ExportDialog";
 import { HotkeyNotice } from "./HotkeyNotice";
 import { MenuItem } from "./MenuItem";
 import { Preview, type ZoomMode } from "./Preview";
@@ -125,13 +125,14 @@ export function MainWindow() {
   const [ocrPending, setOcrPending] = useState(0);
   const searchBox = useRef<HTMLInputElement>(null);
   const ix = useRef(new SearchIndex()).current;
-  const [confirmNew, setConfirmNew] = useState(false);
   const [unfinished, setUnfinished] = useState<string[]>([]);
   const [micDenied, setMicDenied] = useState(false);
   const tRef = useRef(t);
   tRef.current = t;
   const [groupToDelete, setGroupToDelete] = useState<Group | null>(null);
   const [pendingDelete, setPendingDelete] = useState<string[] | null>(null);
+  // "Delete all": every screenshot of the list, after a question.
+  const [deletingAll, setDeletingAll] = useState(false);
   const [menu, setMenu] = useState<CardMenu | null>(null);
   const [cardDropTab, setCardDropTab] = useState<string | null>(null);
   const [zoomMode, setZoomMode] = useState<ZoomMode>("fit");
@@ -323,6 +324,11 @@ export function MainWindow() {
         "disk-start": "rec.notice.diskStart",
         "disk-full": "rec.notice.diskFull",
         "mic-none": "rec.notice.micNone",
+        "mic-fallback": "rec.notice.micFallback",
+        "webcam-none": "rec.notice.webcamNone",
+        "webcam-denied": "rec.notice.webcamDenied",
+        "webcam-fallback": "rec.notice.webcamFallback",
+        "system-fallback": "rec.notice.systemFallback",
         "system-none": "rec.notice.systemNone",
       };
       setError(tRef.current((keys[kind] ?? "rec.notice.sourceGone") as Parameters<typeof t>[0]));
@@ -387,6 +393,15 @@ export function MainWindow() {
     [session, view.sel, currentId],
   );
 
+  const deleteAll = async () => {
+    setDeletingAll(false);
+    const ids = shownIds.slice();
+    applyChange({ selection: clearSelection(), active: undefined });
+    for (const id of ids) {
+      if ((await run(ipc.deleteCapture(id))) === null) break;
+    }
+  };
+
   const confirmDelete = async () => {
     const ids = pendingDelete ?? [];
     setPendingDelete(null);
@@ -409,7 +424,7 @@ export function MainWindow() {
     [effectiveZoom, capture],
   );
 
-  const dialogOpen = pendingDelete !== null || confirmNew || groupToDelete !== null;
+  const dialogOpen = pendingDelete !== null || groupToDelete !== null || deletingAll;
 
   // Keyboard: Del deletes, Ctrl+A selects all, Esc clears the selection, F2 renames, Ctrl+0 / Ctrl++ / Ctrl+- / Ctrl+1
   // zoom the preview. Not while the user is typing or a dialog is open.
@@ -591,7 +606,7 @@ export function MainWindow() {
     if (parts.length > 0) setNotice(parts.join(" "));
   };
 
-  // --- recordings: Save, Copy, Share and drag out use the rendered file (final.mp4 in the recording's folder) ---------------
+  // --- recordings: Save, Copy, Share and drag out use the rendered file ("<recording name>.mp4" in the recording's folder) ---------------
   const [rendering, setRendering] = useState<{ id: string; progress: number } | null>(null);
   useEffect(() => {
     const p = ipc.onRenderProgress((e) => setRendering((r) => (r && r.id === e.captureId ? { ...r, progress: e.progress } : r)));
@@ -602,7 +617,10 @@ export function MainWindow() {
     setRendering({ id: c.id, progress: 0 });
     let rendered: { file: string; thumb: string } | null = null;
     try {
-      rendered = await ipc.renderRecording(c.id);
+      const r = await ipc.renderRecording(c.id);
+      // Never use a file that was made for another recording.
+      if (r.captureId !== c.id) throw new Error("wrong recording");
+      rendered = r;
     } catch (e) {
       if ((e as Partial<CmdError>).code !== "cancelled") setError(messageOf(e));
     } finally {
@@ -621,18 +639,9 @@ export function MainWindow() {
       setNotice(t("rec.copied"));
     });
   const recShare = (c: Capture) => void withRendered(c, (r) => ipc.exportShare([r.file]));
-  const recSave = (c: Capture) =>
-    void (async () => {
-      // The folder first (the picker starts in the recording's group folder), then the render.
-      const start = c.videoDir ? c.videoDir.replace(/[\\/][^\\/]*$/, "") : undefined;
-      const folder = await ipc.pickFolder(start).catch(() => null);
-      if (!folder) return;
-      await withRendered(c, async (r) => {
-        const name = `${c.name.replace(/[<>:"/\\|?*]/g, "_")}.mp4`;
-        const saved = await ipc.exportSave([r.file], [name], folder);
-        setNotice(t("save.done", { count: saved.length }), { label: t("save.openFolder"), run: () => void ipc.openFolder(saved[0] ?? folder).catch((e) => setError(messageOf(e))) });
-      });
-    })();
+  // Export (instead of Save) for a recording: the export dialog asks for the format, the size and the place.
+  const [exporting, setExporting] = useState<Capture | null>(null);
+  const recSave = (c: Capture) => setExporting(c);
 
   const share = useShareActions({
     session,
@@ -656,8 +665,6 @@ export function MainWindow() {
 
   if (!session || !group) return null;
 
-  const count = totalCaptures(rawSession ?? session);
-
   /** The captures with these ids, in the order of the list (the group's current order). */
   const byIds = (ids: readonly string[]): Capture[] => {
     const want = new Set(ids);
@@ -673,23 +680,6 @@ export function MainWindow() {
   const openHit = (h: SearchHit) => {
     setGroupId(h.group.id);
     setViews((prev) => ({ ...prev, [h.group.id]: { sel: emptySelection, active: h.capture.id } }));
-  };
-
-  const startNewSession = async (discard: boolean) => {
-    setConfirmNew(false);
-    const next = await run(ipc.newSession(discard, newGroupName([])));
-    if (next) {
-      setGroupId(null);
-      setViews({});
-    }
-  };
-
-  const onNewSession = () => {
-    if (count === 0) return void startNewSession(false);
-    // "autoExport" needs the export feature (a later version): until then it keeps the captures, like "ask" -> keep.
-    if (settings.newSessionAction === "clear") return void startNewSession(true);
-    if (settings.newSessionAction === "autoExport") return void startNewSession(false);
-    setConfirmNew(true);
   };
 
   const addGroup = async () => {
@@ -714,12 +704,11 @@ export function MainWindow() {
   // --- the card menu ---------------------------------------------------------------------------------------------
 
   const closeMenu = () => setMenu(null);
-  /** What "Show in File Explorer" shows: a recording's video, or the file a screenshot was saved to automatically. */
-  const explorerTarget = (id: string | undefined): string | null => {
+  /** Does this card have something to show in Explorer? The path itself is worked out by the backend when it is clicked. */
+  const canShowInExplorer = (id: string | undefined): boolean => {
     const c = id ? byIds([id])[0] : undefined;
-    if (!c) return null;
-    if (c.kind === "video") return c.videoDir && c.videoFile ? `${c.videoDir}\${c.videoFile}` : null;
-    return c.savedPath ?? null;
+    if (!c) return false;
+    return c.kind === "video" ? !!c.videoDir || !!c.videoFile : !!c.savedPath;
   };
 
   const cardMenuEntries = (m: CardMenu): MenuEntry[] => {
@@ -734,7 +723,7 @@ export function MainWindow() {
         onSelect: () => setRenamingId(m.ids[0]),
       },
       ...(recMode ? [] : ([{ kind: "item", id: "duplicate", label: t("ctx.duplicate"), icon: "duplicate", onSelect: () => void duplicate(m.ids) }] as MenuEntry[])),
-      {
+      ...(!recMode ? [] : [{
         kind: "sub",
         id: "move",
         label: t("ctx.moveTo"),
@@ -761,12 +750,12 @@ export function MainWindow() {
             />
           </div>
         ),
-      },
+      } as MenuEntry]),
       { kind: "separator", id: "sep1" },
       { kind: "item", id: "copy", label: t("ctx.copy"), icon: "copy", onSelect: () => (recMode ? recCopy(byIds(m.ids)[0]) : void share.copy(byIds(m.ids), copyMode)) },
-      { kind: "item", id: "save", label: t("ctx.save"), icon: "save", onSelect: () => (recMode ? recSave(byIds(m.ids)[0]) : share.save(byIds(m.ids))) },
-      ...(explorerTarget(m.ids[0])
-        ? ([{ kind: "item", id: "explorer", label: t("ctx.showInExplorer"), icon: "folder", onSelect: () => void ipc.openFolder(explorerTarget(m.ids[0]) as string).catch((e) => setError(messageOf(e))) }] as MenuEntry[])
+      { kind: "item", id: "save", label: recMode ? t("ctx.export") : t("ctx.save"), icon: "save", onSelect: () => (recMode ? recSave(byIds(m.ids)[0]) : share.save(byIds(m.ids))) },
+      ...(canShowInExplorer(m.ids[0])
+        ? ([{ kind: "item", id: "explorer", label: t("ctx.showInExplorer"), icon: "folder", onSelect: () => void ipc.showInExplorer(m.ids[0] as string).catch((e) => setError(messageOf(e))) }] as MenuEntry[])
         : []),
       { kind: "separator", id: "sep2" },
       { kind: "item", id: "delete", label: t("ctx.delete"), icon: "trash", danger: true, onSelect: () => setPendingDelete(m.ids) },
@@ -780,7 +769,6 @@ export function MainWindow() {
       <TopBar
         settings={settings}
         onPatch={(change) => void patch(change)}
-        onNewSession={onNewSession}
         onOpenSettings={() => void ipc.openSettings()}
         onCapture={(mode) => void ipc.startCapture(mode).catch((e) => setError(messageOf(e)))}
         zoom={zoom}
@@ -803,6 +791,12 @@ export function MainWindow() {
       <HotkeyNotice onOpenSettings={() => void ipc.openSettings()} />
 
       <Toasts toasts={toasts} onClose={closeToast} />
+      <ExportDialog
+        capture={exporting}
+        defaultFolder={exporting?.videoDir ? exporting.videoDir.replace(/[\\/][^\\/]*$/, "") : ""}
+        onClose={() => setExporting(null)}
+        onError={(e) => setError(messageOf(e))}
+      />
       {rendering && (
         <div className="renderbar" role="status" aria-live="polite">
           <span>{t("rec.rendering", { percent: Math.round(rendering.progress * 100) })}</span>
@@ -816,6 +810,7 @@ export function MainWindow() {
 
       <main className="panels">
         <div className={`panel panel--left panel--${galleryView}`}>
+          {recMode && (
           <GroupTabs
             groups={session.groups}
             activeId={group.id}
@@ -831,6 +826,7 @@ export function MainWindow() {
             onColor={(id, color) => void run(ipc.setGroupColor(id, color))}
             onEmoji={(id, emoji) => void run(ipc.setGroupEmoji(id, emoji))}
           />
+          )}
           <div className="searchbar" role="search">
             <input
               ref={searchBox}
@@ -853,6 +849,7 @@ export function MainWindow() {
                 <Icon name="close" size={14} />
               </button>
             )}
+            {recMode && (
             <span className="segmented" role="group" aria-label={t("search.scope")}>
               <button type="button" className="segmented__btn" aria-pressed={scope === "group"} onClick={() => setScope("group")}>
                 {t("search.scopeGroup")}
@@ -861,6 +858,7 @@ export function MainWindow() {
                 {t("search.scopeAll")}
               </button>
             </span>
+            )}
           </div>
           {searching && unread > 0 && ocrPending > 0 && (
             <p className="searchbar__hint" role="status">
@@ -891,6 +889,7 @@ export function MainWindow() {
             onView={(next) => void patch({ galleryView: next })}
             onSelectAll={() => applyChange(selectEvery(view.sel, shownIds, currentId))}
             onClearAll={() => applyChange({ selection: clearSelection(), active: undefined })}
+            onDeleteAll={recMode ? undefined : () => setDeletingAll(true)}
           />
           )}
         </div>
@@ -964,26 +963,21 @@ export function MainWindow() {
       {menu && <ContextMenu x={menu.x} y={menu.y} label={t("captures.title", { count: menu.ids.length })} entries={cardMenuEntries(menu)} onClose={closeMenu} />}
 
       <Dialog
-        open={confirmNew}
-        title={t("session.newTitle")}
-        onClose={() => setConfirmNew(false)}
+        open={deletingAll}
+        title={t("captures.deleteAllTitle")}
+        onClose={() => setDeletingAll(false)}
         footer={
           <>
-            <Button variant="ghost" onClick={() => setConfirmNew(false)}>
-              {t("session.keepCurrent")}
+            <Button variant="ghost" onClick={() => setDeletingAll(false)}>
+              {t("session.cancel")}
             </Button>
-            <Button variant="primary" onClick={() => void startNewSession(false)}>
-              {t("session.startFresh")}
+            <Button variant="danger" onClick={() => void deleteAll()}>
+              {t("captures.deleteAll")}
             </Button>
           </>
         }
       >
-        <p>
-          {settings.retentionDays > 0
-            ? t("session.freshBody", { count, days: settings.retentionDays })
-            : t("session.freshBodyForever", { count })}
-        </p>
-        <p className="dialog__hint">{t("session.exportHint")}</p>
+        <p>{t("captures.deleteAllBody", { count: shownIds.length })}</p>
       </Dialog>
 
       <Dialog

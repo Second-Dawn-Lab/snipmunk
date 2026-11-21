@@ -1,6 +1,6 @@
 # Snipmunk roadmap
 
-Status: Phases 1 to 5.5 (including the 3.1 and 4.1 fixes) are done. Phase 6 (copy and share, gallery search, fixes from Phase 5.5 testing) is the current one.
+Status: Phases 1 to 6 are done. Phase 7 (recording, effects, export, projects) is in its last session; the product now has three modes: Screenshots (one clipboard list), Recording (current recording + project files) and Documents (next phase).
 
 ## Phase 1: Repo setup ✅
 Project folder, README, license, `.gitignore`, roadmap and icon placeholder.
@@ -83,31 +83,31 @@ Everything that leaves the app uses the shared renderer (marks, crop, rotation, 
 - **6.1 fixes** (from the Phase 6 manual tests): Grid pastes in Word and Paint (24-bit padded clipboard bitmap), an option to leave the file list off the clipboard so Outlook gets the pictures inline, the Text tool makes one box per activation and goes back to Select, small and monospace text is read again enlarged and lines only one pass found are kept, card and IBAN detection tolerates O/l/S/B read for digits (checksums still decide), the Quick redact main button redacts at once, the text layer's right-click menu works, "Open folder" opens the real folder, the list view's check box and trash no longer overlap, every notice is a toast, a clear page when the dev server is gone, the caret goes where the user clicked, and `tauri-plugin-dialog` replaces `rfd`.
 - See `docs/manual-tests-phase-6.md`.
 
-## Phase 7: Screen recording (in progress)
-Done (Part A, fixes from the 6.1 retest): Copy ▾ with "Copy as files" (replaces the 6.1 setting), "Redact only this" in the text layer's menu, the Save dialog's folder row with "Change…", marks that lock like the Snipping Tool's (only the mark just made is editable; Undo, Eraser and "Erase all mark-ups" remove committed ones), hold-to-shape for the pen and highlighter (line, arrow, ellipse, rectangle, triangle, star).
+## Phase 7: Screen recording, effects, export and projects (in progress; 7-B3 is the last session)
+Done (Part A, fixes from the 6.1 retest): Copy ▾ with "Copy as files", "Redact only this" in the text layer's menu, the Save dialog's folder row, marks that lock like the Snipping Tool's, hold-to-shape for the pen and highlighter.
 
-Scope of Part B (screen recording, Windows first, behind a platform abstraction so macOS ScreenCaptureKit can follow in Phase 9):
-- The screen is recorded **without the cursor** (Windows.Graphics.Capture); system audio (WASAPI loopback), microphone, webcam and the cursor track (positions, shapes, buttons) are separate tracks; cursor effects, webcam overlay and trim are applied when playing and rendering, so everything can be changed afterwards.
-- Hardware H.264 through Media Foundation, written to disk as it goes in a crash-safe layout; recovery offered at the next start.
-- A recording is a "video" capture in the group (cards with a 🎥 icon and the duration); a player with live effects and a side panel; trim; render, copy, save as MP4; convert to GIF.
-- Native recorder status (session 7-B1b): P1 (one bar), S1 (recordings in <Videos>\Snipmunk\<Group>\<Recording>, never deleted automatically, migration, move offer), S2 (automatic saving of screenshots), S3 (Show in File Explorer), M3 rest, M4 (system sound and microphone tracks), M5 (cursor track), M7 (player), M8 (rendered final.mp4 for Save, Copy, drag and Share) and M9 (Ctrl+Alt+R) are done and tested with generated input; the real screen, cursor and audio checks are listed in docs/manual-tests-phase-7.md. Not in this session: cursor halo, click effects, cursor size, webcam, trim, effects panel, GIF (7-B2).
-- Native recorder status (before that): M6 (10 s segments, lossless join with the `mp4` crate, crash recovery dialog, disk checks, monitor-gone stop) and pause/resume are done, unit-tested and checked live with generated frames (record, pause, kill, recover); disk-full and monitor-gone are not checked live. Left: M3 sound/mic toggles and bar placement, M4 audio, M5, M7, M8, M9.
-- Native recorder status (before that): H1 (freeze of every recording: a lock held across window calls while the main thread waited for it; now atomics, no lock across window calls, dev watchdog) and H2 (focus after minimize) are done; the pipeline is tested with generated frames only (no screen capture in tests). M6, rest of M3, M4, M5, M7, M8, M9 are next.
-- Native recorder status (earlier): F1 to F4 (rectangle orientation, own options icon, tile cards, window behaviour) and the floating bar with timer, Stop and Discard (M3, partly) are done; pause, audio, cursor track, crash safety, player, render and Ctrl+Alt+R (M3 rest, M4 to M9) are next. The `snipmunk-img` scheme serves recordings with range requests for the player.
-- Native recorder status: R0 (separate recording UI, recording groups with migration) and M2 (rectangle / window / full screen areas through the selection overlay, countdown, red frame, own windows excluded, fps limit, bitrate) are done as well; M0 (text frame) and M1 (full screen or one of Snipmunk's own windows to MP4 through windows-capture, Media Foundation H.264, stop makes a video card) are done; M2 to M9 (areas and countdown, floating bar, audio, cursor track, crash recovery, player, render, Ctrl+Alt+R) are next.
-- Built so far: the pure logic in `src/recording/` (cursor track and click effects, webcam layout, trim and pause timeline, disk space levels, render cache key, GIF plan). The native recorder, the recording UI, the player, render and GIF export are not built yet. See `docs/manual-tests-phase-7.md`.
+Done in the recorder sessions (details in `docs/manual-tests-phase-7.md`):
+- Native recorder (Windows.Graphics.Capture without the cursor, Media Foundation H.264, crash-safe 10 s segments with lossless join and recovery, pause/resume), system sound (WASAPI loopback) and microphone as separate tracks, cursor track, webcam as its own video (generated camera tested), floating bar, Ctrl+Alt+R.
+- Player with cursor halo/size, click effects (ripple, burst), webcam overlay, trim, effects panel; export dialog (MP4 or GIF, quality, resolution, aspect ratio with bars or crop); Copy, drag and Share use the default export, named after the recording.
+- Session 7-B3 so far: export fixes (Original is the full size, resolution list limited to the recording, size estimate from the real bitrate, trimmed exports seek instead of decoding from the start), export dialog with elapsed/left time and a finished view, player timeline with scrubbing / frame step / trim mode, edit-webcam handles, device pickers in the quick menu, **screenshots are one list without groups** (old groups are merged by capture time; the group engine stays in the code for Documents), "Delete all…", and the **package format of project files** (`src-tauri/src/package.rs`: one stored ZIP with a manifest, append-only small saves, atomic creation, crash repair) with commands to save, inspect, change the effects of and "Save as" a `.snpr`.
+- **Not done yet (carry over)**: the recording model change in the UI (only the current recording in `%TEMP%\Snipmunk\current`, tabs for projects, Save as project / Open project dialogs, quit and new-recording questions, journal of unsaved project edits, file association, "Recent projects"), the live webcam bubble during recording (A6), a GPU export path (the decoder is the limit at 3440x1440), and the Settings cleanup that goes with the model change.
 
-## Phase 7.5: Snipmunk Studio and copy options
-- **Snipmunk Studio**: auto-zoom on clicks, cursor smoothing, more effects, an editor for recordings (Windows and macOS).
-- Stack and Grid options: numbers and labels on the captures, the gap, the background colour, the number of columns.
+## Phase 7.5: Documents mode (Tango-style guides)
+- "Start guide" captures a step on every click (screenshot + click marker); a hotkey adds a manual step.
+- Automatic step text from the clicked element's name ("Click 'Save'") through UI Automation, in the UI language; typing steps ("Type '…'"), password fields always hidden.
+- Screenshot per step as window, screen or zoom around the click.
+- Vertical step editor: title, description, screenshot; reorder, delete, merge.
+- Editing tools on step screenshots: blur, shapes, arrows, highlight boxes, callout bubbles, step number badges.
+- Drag screenshots from the clipboard list, or GIF/video clips from recordings, into a guide.
+- Groups and sections reuse the group engine; export to PDF, Word, Markdown and HTML; branding (title page, logo, colours, author).
+- `.snpd` project files on the same package format as `.snpr` (`package.rs`, another `kind`).
+- Later in 7.5 or after: Snipmunk Studio (auto-zoom on clicks, cursor smoothing, multi-clip timeline), Stack/Grid options.
 
-## Phase 8: Polish, installer and the first release
-- **Auto-keep sessions**: every change is saved at once (storage foundation: Phase 2)
-- **New session** behaviour: ask, export automatically or clear
-- **Clear on exit** and **retention** (delete old sessions after N days, default 30)
-- Export folder, save and export
-- Installer
-- **v0.1.0**: first Windows release
+## Phase 8: Polish and the first release (v0.1.0)
+- Memory reduction (about 700 MB now, goal under 300 MB), GPU export path everywhere, avoid reading text twice (OCR).
+- Node 24 for GitHub Actions in all repositories.
+- Installer with file associations, updater key, code signing (SignPath).
+- README and screenshots, a full manual test pass.
 
 ## Phase 9: macOS
-**v0.2.0**: macOS support.
+**v0.2.0**: macOS support (ScreenCaptureKit behind the platform abstraction).

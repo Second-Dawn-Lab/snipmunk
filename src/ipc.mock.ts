@@ -168,15 +168,14 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       case "close_action":
       case "set_maximize_rect":
         return null;
+      case "audio_devices":
+        return { mic: [{ id: "mic1", name: "Test microphone", isDefault: true }], system: [{ id: "out1", name: "Test speakers", isDefault: true }] };
+      case "webcam_devices":
+        return [{ id: "cam1", name: "Test camera", isDefault: true }];
+      case "take_settings_tab":
+        return null;
       case "get_current_session":
         return session;
-      case "new_session":
-        groupNumber = 1;
-        return updated((s) => {
-          s.id = id("s");
-          s.createdAt = Date.now();
-          s.groups = [{ id: id("g"), name: String(args.groupName ?? "Group 1"), order: 0, color: null, emoji: null, captures: [] }];
-        });
       case "create_group":
         return updated((s) => {
           groupNumber++;

@@ -30,6 +30,8 @@ export function CaptureList(props: {
   onView: (view: GalleryView) => void;
   onSelectAll: () => void;
   onClearAll: () => void;
+  /** Delete every capture of the list (asks first); not offered when missing. */
+  onDeleteAll?: () => void;
 }) {
   const { t, locale } = useT();
   const title = t("captures.title", { count: props.captures.length });
@@ -73,6 +75,11 @@ export function CaptureList(props: {
         <Button variant="ghost" disabled={props.selected.size === 0} onClick={props.onClearAll}>
           {t("captures.clearAll")}
         </Button>
+        {props.onDeleteAll && (
+          <Button variant="ghost" disabled={props.captures.length === 0} onClick={props.onDeleteAll}>
+            {t("captures.deleteAll")}
+          </Button>
+        )}
       </div>
 
       {props.captures.length === 0 ? (

@@ -210,6 +210,27 @@ const paths = {
       <path d="M5.500 11a6.500 6.500 0 0 0 13 0M12 17.500V21M9 21h6M4 4l16 16" />
     </>
   ),
+  scissors: (
+    <>
+      <circle cx="6" cy="6" r="2.800" />
+      <circle cx="6" cy="18" r="2.800" />
+      <path d="M8.200 7.700 20 18M8.200 16.300 20 6" />
+    </>
+  ),
+  webcam: (
+    <>
+      <circle cx="12" cy="10" r="6.500" />
+      <circle cx="12" cy="10" r="2.200" />
+      <path d="M8 21h8M12 16.500V21" />
+    </>
+  ),
+  webcamOff: (
+    <>
+      <circle cx="12" cy="10" r="6.500" />
+      <circle cx="12" cy="10" r="2.200" />
+      <path d="M8 21h8M12 16.500V21M4 4l16 16" />
+    </>
+  ),
   clock: (
     <>
       <circle cx="12" cy="12" r="9" />

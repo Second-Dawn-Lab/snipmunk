@@ -145,9 +145,25 @@ pub fn open_url(url: String) -> CmdResult<()> {
 
 // --- windows ---------------------------------------------------------------
 
+/// The page the settings window is to show when it opens (set by "More recording settings…", taken by the window).
+static SETTINGS_TAB: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+/// Open the settings window, on the page `tab` when given.
 #[tauri::command]
-pub fn open_settings(app: AppHandle) {
+pub fn open_settings(app: AppHandle, tab: Option<String>) {
+    let existing = app.get_webview_window("settings").is_some();
+    *SETTINGS_TAB.lock().unwrap() = tab;
     tray::open_settings_window(&app);
+    if existing {
+        // An open window takes the page now; a new one asks for it when it has loaded.
+        let _ = app.emit("settings-tab", ());
+    }
+}
+
+/// The page that was asked for with `open_settings` (once).
+#[tauri::command]
+pub fn take_settings_tab() -> Option<String> {
+    SETTINGS_TAB.lock().unwrap().take()
 }
 
 #[tauri::command]
@@ -220,6 +236,21 @@ pub fn default_folders() -> Value {
     })
 }
 
+/// The microphones and the outputs (whose sound can be recorded) that Windows has now, with the default of each. Only the list is read:
+/// no device is opened. The settings window asks again every few seconds, so plugging a device in or out shows up.
+#[tauri::command]
+pub async fn audio_devices() -> Value {
+    tauri::async_runtime::spawn_blocking(|| {
+        #[cfg(windows)]
+        let (mic, system) = crate::audio::wasapi::list_devices();
+        #[cfg(not(windows))]
+        let (mic, system): (Vec<()>, Vec<()>) = (Vec::new(), Vec::new());
+        serde_json::json!({ "mic": mic, "system": system })
+    })
+    .await
+    .unwrap_or_else(|_| serde_json::json!({ "mic": [], "system": [] }))
+}
+
 /// Cards of recordings that were deleted or moved away in Explorer are removed (the page asks when the recordings are shown).
 #[tauri::command]
 pub async fn refresh_recordings(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Session> {
@@ -268,19 +299,6 @@ pub fn set_active_group(state: State<'_, AppState>, group_id: Option<String>) {
 #[tauri::command]
 pub fn get_current_session(state: State<'_, AppState>) -> Session {
     state.sessions.lock().unwrap().session().clone()
-}
-
-/// Start an empty session. The old one stays on disk (retention removes it later) unless `discard_previous`.
-#[tauri::command]
-pub fn new_session(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    discard_previous: bool,
-    group_name: Option<String>,
-) -> CmdResult<Session> {
-    change_session(&app, &state, |s| {
-        s.new_session(discard_previous, group_name.clone())
-    })
 }
 
 #[tauri::command]
@@ -539,4 +557,18 @@ mod range_tests {
         assert_eq!(parse_range("items=0-1", 1000), None);
         assert_eq!(parse_range("bytes=0-1", 0), None);
     }
+}
+
+/// The cameras Windows has now (only their names are read: no camera is opened).
+#[tauri::command]
+pub async fn webcam_devices() -> Value {
+    tauri::async_runtime::spawn_blocking(|| {
+        #[cfg(windows)]
+        let list = crate::webcam::list_devices();
+        #[cfg(not(windows))]
+        let list: Vec<()> = Vec::new();
+        serde_json::json!(list)
+    })
+    .await
+    .unwrap_or_else(|_| serde_json::json!([]))
 }

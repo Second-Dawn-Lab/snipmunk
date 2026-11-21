@@ -5,6 +5,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { mockImageUrl, mockInvoke, mockListen } from "./ipc.mock";
 import type { OcrResult } from "./ocr/types";
+import type { Effects } from "./recording/effects";
 import type { Settings } from "./settings/defaults";
 
 export const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -40,6 +41,23 @@ export interface Capture {
   source: "screenshot" | "imported" | null;
   /** The editable marks, crop and rotation (see src/annotate/schema.ts); `null` for a capture nobody edited. */
   annotations: unknown;
+}
+
+/** A microphone, an output or a camera as the pickers list it. */
+export interface AudioDevice {
+  id: string;
+  name: string;
+  isDefault: boolean;
+}
+
+/** What an export makes (the export dialog). */
+export interface ExportSettings {
+  format: "mp4" | "gif";
+  /** MP4: high | standard | small. GIF: low | high. */
+  quality: "high" | "standard" | "small" | "low";
+  resolution: "original" | "1080" | "720" | "480";
+  aspect: "original" | "16:9" | "9:16" | "1:1";
+  fit: "bars" | "crop";
 }
 
 export interface Group {
@@ -183,7 +201,13 @@ export const ipc = {
   onSettingsChanged: (cb: (s: Settings) => void) => on<Settings>("settings-changed", cb),
 
   // windows
-  openSettings: () => call<void>("open_settings"),
+  openSettings: (tab?: string) => call<void>("open_settings", { tab: tab ?? null }),
+  takeSettingsTab: () => call<string | null>("take_settings_tab"),
+  onSettingsTab: (cb: () => void) => on<null>("settings-tab", () => cb()),
+  /** The microphones and outputs Windows has now (only the list is read; no device is opened). */
+  audioDevices: () => call<{ mic: AudioDevice[]; system: AudioDevice[] }>("audio_devices"),
+  /** The cameras Windows has now (only the list is read; no camera is opened). */
+  webcamDevices: () => call<AudioDevice[]>("webcam_devices"),
   quitApp: () => call<void>("quit_app"),
   closeAction: (action: "background" | "quit", remember: boolean) =>
     call<void>("close_action", { action, remember }),
@@ -208,8 +232,21 @@ export const ipc = {
   refreshRecordings: () => call<Session>("refresh_recordings"),
   moveRecordings: () => call<number>("move_recordings"),
   onRecordingsMove: (cb: (p: { done: number; total: number }) => void) => on<{ done: number; total: number }>("recordings-move", cb),
-  /** Render a recording to final.mp4 (the cursor drawn, the sound mixed); the same file again while nothing changed. */
-  renderRecording: (captureId: string) => call<{ file: string; thumb: string; made: boolean; seconds: number }>("render_recording", { captureId }),
+  /** Render a recording to "<recording name>.mp4" (the cursor drawn, the sound mixed); the same file again while nothing changed. */
+  /** Change how a recording looks (cursor, click effects, webcam overlay, trim); written to its recording.json before this returns. */
+  setEffects: (captureId: string, effects: Effects) => call<Effects>("set_effects", { captureId, effects }),
+  /** Export with the settings of the export dialog into a folder (a taken name gets " (2)"); progress comes as render-progress. */
+  exportRecording: (captureId: string, settings: ExportSettings, folder: string, fileName: string) =>
+    call<{ captureId: string; file: string; seconds: number; width: number; height: number; frames: number; bytes: number }>("export_recording", {
+      captureId,
+      settings,
+      folder,
+      fileName,
+    }),
+  /** The size of the picture, the length, the frame rate and the size of the file an export will have. */
+  estimateExport: (captureId: string, settings: ExportSettings) =>
+    call<{ width: number; height: number; fps: number; durationMs: number; bytes: number }>("estimate_export", { captureId, settings }),
+  renderRecording: (captureId: string) => call<{ captureId: string; file: string; thumb: string; made: boolean; seconds: number }>("render_recording", { captureId }),
   cancelRender: () => call<void>("cancel_render"),
   onRenderProgress: (cb: (p: { captureId: string; progress: number }) => void) => on<{ captureId: string; progress: number }>("render-progress", cb),
   pauseRecording: (pause: boolean) => call<RecState>("pause_recording", { pause }),
@@ -248,9 +285,6 @@ export const ipc = {
   // session
   getCurrentSession: () => call<Session>("get_current_session"),
   onSessionChanged: (cb: (s: Session) => void) => on<Session>("session-changed", cb),
-  /** `groupName` names the first group of the new session (in the user's language). */
-  newSession: (discardPrevious: boolean, groupName?: string) =>
-    call<Session>("new_session", { discardPrevious, groupName: groupName ?? null }),
   /** Save the annotations of a capture (`null` = none). Written to disk before it returns. */
   setAnnotations: (captureId: string, annotations: unknown) => call<Session>("set_annotations", { captureId, annotations }),
   /** Replace the stored picture of a capture (burn redactions in, or undo that). Same size as before. */
@@ -282,6 +316,10 @@ export const ipc = {
   shareSupported: () => call<boolean>("share_supported"),
   exportDrag: (files: string[], preview: string) => call<void>("export_drag", { files, preview }),
   openFolder: (path: string) => call<void>("open_folder", { path }),
+  /** Open a file with the program Windows has for it. */
+  openFile: (path: string) => call<void>("open_file", { path }),
+  /** Show a recording (its video selected) or an automatically saved screenshot in Explorer; the path is resolved by the backend. */
+  showInExplorer: (captureId: string) => call<void>("show_in_explorer", { captureId }),
   sessionImagesFolder: () => call<string>("session_images_folder"),
   picturesFolder: () => call<string>("pictures_folder"),
   pickFolder: (start?: string) => call<string | null>("pick_folder", { start: start ?? null }),

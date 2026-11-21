@@ -21,8 +21,6 @@ pub struct Settings {
     pub always_on_top: bool,
     /// Where "export" puts screenshots ("" = not chosen yet).
     pub export_folder: String,
-    /// What "New session" does with the current screenshots: "ask" | "autoExport" | "clear"
-    pub new_session_action: String,
     /// Delete the kept session when Snipmunk quits.
     pub clear_on_exit: bool,
     /// Kept sessions older than this many days are deleted at startup (0 = keep forever).
@@ -88,6 +86,28 @@ pub struct Settings {
     pub rec_mic: bool,
     /// The shortcut that starts and stops a recording, from any program.
     pub record_hotkey: String,
+    /// The microphone and the output device whose sound is recorded ("" = the Windows default; the id of a WASAPI endpoint).
+    pub mic_device: String,
+    pub system_device: String,
+    /// How the cursor looks in recordings (defaults for new recordings; each recording keeps its own): shown, size ("1" | "1.5" | "2"),
+    /// the highlight halo and its colour.
+    pub cursor_show: bool,
+    pub cursor_size: String,
+    pub cursor_halo: bool,
+    pub cursor_halo_color: String,
+    /// Click effects: "off" | "ripple" | "burst", the colours of the left and right button, the size ("small" | "medium" | "large").
+    pub click_effect: String,
+    pub click_left_color: String,
+    pub click_right_color: String,
+    pub click_size: String,
+    /// The webcam: recorded with the screen, its device ("" = the first one), and how it is laid over the video.
+    pub webcam_on: bool,
+    pub webcam_device: String,
+    /// "circle" | "rounded" | "rect"; size "s" | "m" | "l"; position "top-left" | "top-right" | "bottom-left" | "bottom-right".
+    pub webcam_shape: String,
+    pub webcam_size: String,
+    pub webcam_position: String,
+    pub webcam_border: bool,
     /// Where recordings are kept ("" = the Windows Videos folder + Snipmunk) and the automatic saving of screenshots.
     pub recordings_dir: String,
     pub auto_save_screenshots: bool,
@@ -118,7 +138,6 @@ impl Default for Settings {
             capture_hotkey: "Ctrl+Alt+PrintScreen".into(),
             always_on_top: false,
             export_folder: String::new(),
-            new_session_action: "ask".into(),
             clear_on_exit: false,
             retention_days: 30,
             default_copy_mode: "separate".into(),
@@ -159,6 +178,22 @@ impl Default for Settings {
             rec_system_sound: true,
             rec_mic: false,
             record_hotkey: "Ctrl+Alt+R".into(),
+            mic_device: String::new(),
+            system_device: String::new(),
+            cursor_show: true,
+            cursor_size: "1".into(),
+            cursor_halo: false,
+            cursor_halo_color: "#FFD60A".into(),
+            click_effect: "ripple".into(),
+            click_left_color: "#3B82F6".into(),
+            click_right_color: "#F97316".into(),
+            click_size: "medium".into(),
+            webcam_on: false,
+            webcam_device: String::new(),
+            webcam_shape: "circle".into(),
+            webcam_size: "m".into(),
+            webcam_position: "bottom-right".into(),
+            webcam_border: true,
             recordings_dir: String::new(),
             auto_save_screenshots: false,
             auto_save_dir: String::new(),
@@ -168,6 +203,11 @@ impl Default for Settings {
             last_save_folder: String::new(),
         }
     }
+}
+
+/// "#RRGGBB"
+pub fn is_hex_color(s: &str) -> bool {
+    s.len() == 7 && s.starts_with('#') && s[1..].chars().all(|c| c.is_ascii_hexdigit())
 }
 
 /// Custom words: trimmed, not empty, not longer than 100 characters, no duplicates (case-insensitive), at most 200.
@@ -289,6 +329,40 @@ impl Settings {
         if ![30, 60].contains(&self.rec_fps) {
             self.rec_fps = d.rec_fps;
         }
+        one_of(&mut self.cursor_size, &["1", "1.5", "2"], &d.cursor_size);
+        one_of(
+            &mut self.click_effect,
+            &["off", "ripple", "burst"],
+            &d.click_effect,
+        );
+        one_of(
+            &mut self.click_size,
+            &["small", "medium", "large"],
+            &d.click_size,
+        );
+        one_of(
+            &mut self.webcam_shape,
+            &["circle", "rounded", "rect"],
+            &d.webcam_shape,
+        );
+        one_of(&mut self.webcam_size, &["s", "m", "l"], &d.webcam_size);
+        one_of(
+            &mut self.webcam_position,
+            &["top-left", "top-right", "bottom-left", "bottom-right"],
+            &d.webcam_position,
+        );
+        for (c, dc) in [
+            (&mut self.cursor_halo_color, &d.cursor_halo_color),
+            (&mut self.click_left_color, &d.click_left_color),
+            (&mut self.click_right_color, &d.click_right_color),
+        ] {
+            if !is_hex_color(c) {
+                *c = dc.clone();
+            }
+        }
+        self.mic_device = self.mic_device.trim().chars().take(300).collect();
+        self.system_device = self.system_device.trim().chars().take(300).collect();
+        self.webcam_device = self.webcam_device.trim().chars().take(300).collect();
         self.recordings_dir = self.recordings_dir.trim().chars().take(400).collect();
         self.auto_save_dir = self.auto_save_dir.trim().chars().take(400).collect();
         self.quick_redact_words = clean_words(std::mem::take(&mut self.quick_redact_words));
@@ -296,11 +370,6 @@ impl Settings {
             &mut self.close_action,
             &["background", "quit", "ask"],
             &d.close_action,
-        );
-        one_of(
-            &mut self.new_session_action,
-            &["ask", "autoExport", "clear"],
-            &d.new_session_action,
         );
         one_of(
             &mut self.default_copy_mode,
@@ -337,7 +406,6 @@ mod tests {
         let s = Settings::default();
         assert_eq!(s.capture_hotkey, "Ctrl+Alt+PrintScreen");
         assert_eq!(s.close_action, "background");
-        assert_eq!(s.new_session_action, "ask");
         assert_eq!(s.retention_days, 30);
         assert_eq!(s.default_copy_mode, "separate");
         assert!(!s.clear_on_exit && !s.launch_at_login && !s.always_on_top);
@@ -467,7 +535,6 @@ mod tests {
             "captureHotkey",
             "alwaysOnTop",
             "exportFolder",
-            "newSessionAction",
             "clearOnExit",
             "retentionDays",
             "defaultCopyMode",

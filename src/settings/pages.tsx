@@ -17,7 +17,7 @@ const RETENTION_CHOICES = [0, 7, 14, 30, 90, 365];
 const REPO = "https://github.com/Second-Dawn-Lab/snipmunk";
 
 /** One setting: a row of the design system, with an id the search can scroll to and highlight. */
-function Setting(props: { id: string; title: string; description?: string; children?: ReactNode }) {
+export function Setting(props: { id: string; title: string; description?: string; children?: ReactNode }) {
   return (
     <div className="setting" id={`setting-${props.id}`}>
       <Row title={props.title} description={props.description}>
@@ -215,7 +215,7 @@ function WordList({ settings, set }: PageProps) {
 }
 
 /** A folder setting: the folder in use (the default when none is chosen), Choose… and Default. */
-function FolderSetting(props: { label: string; value: string; fallback: string; onChange: (folder: string) => void }) {
+export function FolderSetting(props: { label: string; value: string; fallback: string; onChange: (folder: string) => void }) {
   const { t } = useT();
   return (
     <div className="foldersetting">
@@ -237,34 +237,13 @@ function FolderSetting(props: { label: string; value: string; fallback: string; 
   );
 }
 
-export function CapturePage({ settings, set }: PageProps) {
+export function ScreenshotsPage({ settings, set }: PageProps) {
   const { t } = useT();
   const [recording, setRecording] = useState(false);
-  const [recordingKey, setRecordingKey] = useState(false);
   const [defaults, setDefaults] = useState({ recordings: "", pictures: "" });
-  // After the recordings folder changed: the recordings that are in another folder can be moved (with progress).
-  const [toMove, setToMove] = useState(0);
-  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   useEffect(() => {
     void ipc.defaultFolders().then(setDefaults).catch(() => undefined);
-    const p = ipc.onRecordingsMove(setProgress);
-    return () => void p.then((fn) => fn());
   }, []);
-  const changeRecordingsDir = (recordingsDir: string) => {
-    set({ recordingsDir });
-    // The backend applies the setting before this asks (set_settings has returned by then).
-    setTimeout(() => void ipc.recordingsInfo().then((i) => setToMove(i.toMove)).catch(() => undefined), 300);
-  };
-  const move = () => {
-    setProgress({ done: 0, total: toMove });
-    void ipc
-      .moveRecordings()
-      .catch(() => undefined)
-      .finally(() => {
-        setProgress(null);
-        setToMove(0);
-      });
-  };
   return (
     <>
       <HotkeyNotice />
@@ -272,10 +251,6 @@ export function CapturePage({ settings, set }: PageProps) {
         <Setting id="captureHotkey" title={t("settings.captureHotkey")} description={t("settings.captureHotkeyDesc")}>
           <Kbd keys={settings.captureHotkey} />
           <Button onClick={() => setRecording(true)}>{t("settings.shortcutChange")}</Button>
-        </Setting>
-        <Setting id="recordHotkey" title={t("settings.recordHotkey")} description={t("settings.recordHotkeyDesc")}>
-          <Kbd keys={settings.recordHotkey} />
-          <Button onClick={() => setRecordingKey(true)}>{t("settings.shortcutChange")}</Button>
         </Setting>
         <Setting id="captureMode" title={t("settings.captureMode")} description={t("settings.captureModeDesc")}>
           <Select
@@ -324,20 +299,6 @@ export function CapturePage({ settings, set }: PageProps) {
             onChange={(showMagnifier) => set({ showMagnifier })}
           />
         </Setting>
-        <Setting id="recordingsDir" title={t("settings.recordingsDir")} description={t("settings.recordingsDirDesc")}>
-          <FolderSetting label={t("settings.recordingsDir")} value={settings.recordingsDir} fallback={defaults.recordings} onChange={changeRecordingsDir} />
-        </Setting>
-        {toMove > 0 && (
-          <div className="foldersetting__move" role="status">
-            <span>{progress ? t("settings.recMoving", { done: progress.done, total: progress.total }) : t("settings.recMoveAsk", { count: toMove })}</span>
-            {!progress && (
-              <>
-                <Button onClick={move}>{t("settings.recMove")}</Button>
-                <Button onClick={() => setToMove(0)}>{t("settings.recLeave")}</Button>
-              </>
-            )}
-          </div>
-        )}
         <Setting id="autoSave" title={t("settings.autoSave")} description={t("settings.autoSaveDesc")}>
           <Switch label={t("settings.autoSave")} checked={settings.autoSaveScreenshots} onChange={(autoSaveScreenshots) => set({ autoSaveScreenshots })} />
         </Setting>
@@ -357,18 +318,6 @@ export function CapturePage({ settings, set }: PageProps) {
           </>
         )}
       </Section>
-      {recordingKey && (
-        <ShortcutDialog
-          current={settings.recordHotkey}
-          fallback="Ctrl+Alt+R"
-          other={settings.captureHotkey}
-          onClose={() => setRecordingKey(false)}
-          onSave={(recordHotkey) => {
-            setRecordingKey(false);
-            set({ recordHotkey });
-          }}
-        />
-      )}
       {recording && (
         <ShortcutDialog
           current={settings.captureHotkey}
@@ -417,18 +366,6 @@ export function SessionsPage({ settings, set }: PageProps) {
     : [...RETENTION_CHOICES, settings.retentionDays].sort((a, b) => a - b);
   return (
     <Section>
-      <Setting id="newSessionAction" title={t("settings.newSessionAction")} description={t("settings.newSessionActionDesc")}>
-        <Select
-          label={t("settings.newSessionAction")}
-          value={settings.newSessionAction}
-          onChange={(newSessionAction) => set({ newSessionAction })}
-          options={[
-            { value: "ask", label: t("settings.newSessionAsk") },
-            { value: "autoExport", label: t("settings.newSessionExport") },
-            { value: "clear", label: t("settings.newSessionClear") },
-          ]}
-        />
-      </Setting>
       <Setting id="galleryView" title={t("settings.galleryView")} description={t("settings.galleryViewDesc")}>
         <Select
           label={t("settings.galleryView")}

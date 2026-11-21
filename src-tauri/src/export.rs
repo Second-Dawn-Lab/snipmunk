@@ -574,6 +574,43 @@ pub fn open_folder(path: String) -> CmdResult<()> {
         .map_err(|e| CmdError::new("io", e.to_string()))
 }
 
+/// Open a file with the program Windows has for it (the exported video in the player of the person's choice).
+#[tauri::command]
+pub fn open_file(path: String) -> CmdResult<()> {
+    let p = PathBuf::from(&path);
+    if !p.is_file() {
+        return Err(CmdError::new("not_found", "this file does not exist"));
+    }
+    #[cfg(windows)]
+    {
+        if shell_execute("open", &p) {
+            return Ok(());
+        }
+        Err(CmdError::new("io", "the file could not be opened"))
+    }
+    #[cfg(not(windows))]
+    {
+        open_folder(path)
+    }
+}
+
+/// Show a recording (its video, selected) or an automatically saved screenshot in Explorer. The path is worked out here from the
+/// current state of the library, so it is right after a rename, a move to another group or a new recordings folder.
+#[tauri::command]
+pub fn show_in_explorer(
+    state: tauri::State<'_, crate::commands::AppState>,
+    capture_id: String,
+) -> CmdResult<()> {
+    let path = state.sessions.lock().unwrap().explorer_path(&capture_id);
+    match path {
+        Some(p) => open_folder(p.to_string_lossy().into_owned()),
+        None => Err(CmdError::new(
+            "not_found",
+            "the file or folder is not there any more",
+        )),
+    }
+}
+
 /// The command line argument for Explorer: a folder to open, or `/select,"file"` to show a file in its folder.
 pub fn explorer_arg(path: &Path, select: bool) -> String {
     let p = path.to_string_lossy().replace('/', "\\");

@@ -165,6 +165,12 @@ pub fn join(segments: &[PathBuf], out: &Path) -> Result<Joined, String> {
 
 /// The segment files of a recording folder (`screen-000.mp4`, `screen-001.mp4`, ...), in order.
 pub fn segments_in(dir: &Path) -> Vec<PathBuf> {
+    segments_named(dir, "screen")
+}
+
+/// The segment files `<prefix>-000.mp4`, ... of a folder, in order.
+pub fn segments_named(dir: &Path, prefix: &str) -> Vec<PathBuf> {
+    let start = format!("{prefix}-");
     let mut v: Vec<PathBuf> = std::fs::read_dir(dir)
         .map(|rd| {
             rd.filter_map(|e| e.ok())
@@ -172,7 +178,7 @@ pub fn segments_in(dir: &Path) -> Vec<PathBuf> {
                 .filter(|p| {
                     p.file_name()
                         .and_then(|n| n.to_str())
-                        .is_some_and(|n| n.starts_with("screen-") && n.ends_with(".mp4"))
+                        .is_some_and(|n| n.starts_with(&start) && n.ends_with(".mp4"))
                 })
                 .collect()
         })

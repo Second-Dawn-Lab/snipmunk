@@ -3,12 +3,15 @@
 mod audio;
 mod capture;
 mod commands;
+mod compose;
 mod cursor;
+mod effects;
 mod error;
 mod export;
 mod freeform;
 mod gallery;
 mod geometry;
+mod gifexport;
 mod hotkey;
 mod import;
 mod language;
@@ -16,6 +19,7 @@ mod mp4join;
 mod naming;
 mod ocr;
 mod output;
+mod package;
 mod placement;
 mod popups;
 mod recording;
@@ -27,6 +31,7 @@ mod startup;
 mod thumbs;
 mod titlebar;
 mod tray;
+mod webcam;
 mod webview;
 mod winlist;
 
@@ -72,7 +77,6 @@ pub fn run() {
             commands::open_url,
             commands::set_active_group,
             commands::get_current_session,
-            commands::new_session,
             commands::create_group,
             commands::rename_group,
             commands::delete_group,
@@ -97,6 +101,16 @@ pub fn run() {
             render::cancel_render,
             commands::recordings_info,
             commands::default_folders,
+            commands::audio_devices,
+            commands::webcam_devices,
+            effects::set_effects,
+            package::project_save,
+            package::project_info,
+            package::project_set_effects,
+            package::project_save_as,
+            render::export_recording,
+            render::estimate_export,
+            commands::take_settings_tab,
             commands::refresh_recordings,
             commands::move_recordings,
             recording::unfinished_recordings,
@@ -113,6 +127,8 @@ pub fn run() {
             export::clipboard_formats,
             export::export_open_editor,
             export::open_folder,
+            export::show_in_explorer,
+            export::open_file,
             export::session_images_folder,
             export::share_supported,
             export::pictures_folder,

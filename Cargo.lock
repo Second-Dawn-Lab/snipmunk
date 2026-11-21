@@ -4572,10 +4572,12 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "arboard",
+ "color_quant",
  "dawn-capture",
  "dawn-core",
  "dawn-hotkeys",
  "drag",
+ "gif",
  "image",
  "mp4",
  "serde",

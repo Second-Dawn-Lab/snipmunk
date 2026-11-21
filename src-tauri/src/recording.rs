@@ -59,6 +59,12 @@ pub struct RecordingInfo {
     pub mic_file: Option<String>,
     /// The cursor track (`cursor.jsonl`, see cursor.rs), when there is one.
     pub cursor_file: Option<String>,
+    /// The webcam video (`webcam.mp4`), when the webcam was recorded, and where in the recording (ms, pauses cut out) it starts.
+    pub webcam_file: Option<String>,
+    pub webcam_start_ms: u64,
+    /// How the recording looks when played and exported (cursor, click effects, webcam overlay, trim); `None` in recordings of
+    /// earlier versions (the defaults of the settings then).
+    pub effects: Option<crate::effects::Effects>,
 }
 
 /// The rows of a BGRA picture in reverse order. A raw buffer given to the Media Foundation encoder is read as a bottom-up bitmap
@@ -215,26 +221,38 @@ pub fn apply_audio_settings(app: &AppHandle) {
     }
     let app = app.clone();
     std::thread::spawn(move || {
-        let (system, mic) = {
+        let (system, mic, devices) = {
             let s = app.state::<AppState>();
             let s = s.settings.lock().unwrap();
-            (s.rec_system_sound, s.rec_mic)
+            (
+                s.rec_system_sound,
+                s.rec_mic,
+                (s.system_device.clone(), s.mic_device.clone()),
+            )
+        };
+        let (webcam_on, webcam_device) = {
+            let s = app.state::<AppState>();
+            let s = s.settings.lock().unwrap();
+            (s.webcam_on, s.webcam_device.clone())
         };
         let notice = {
             let recorder = app.state::<Recorder>();
             let guard = recorder.active.lock().unwrap();
             #[cfg(windows)]
-            let n = guard
-                .as_ref()
-                .and_then(|a| a.handle.apply_audio(system, mic));
+            let n = guard.as_ref().map(|a| {
+                (
+                    a.handle.apply_audio(system, mic, &devices),
+                    a.handle.apply_webcam(webcam_on, &webcam_device),
+                )
+            });
             #[cfg(not(windows))]
-            let n: Option<&str> = {
-                let _ = (&guard, system, mic);
+            let n: Option<(Option<&str>, Option<&str>)> = {
+                let _ = (&guard, system, mic, &devices, webcam_on, &webcam_device);
                 None
             };
             n
         };
-        if let Some(kind) = notice {
+        for kind in notice.into_iter().flat_map(|(a, b)| [a, b]).flatten() {
             let _ = app.emit("recording-notice", kind);
         }
     });
@@ -581,7 +599,7 @@ fn start_now(app: &AppHandle, source: Source, minimize_main: bool) -> CmdResult<
     }
     let focus = focus_of(&source);
     let started = prepare_and_start(app, &state, source);
-    let active = match started {
+    let mut active = match started {
         Ok(a) => a,
         Err(e) => {
             recorder.release();
@@ -596,15 +614,30 @@ fn start_now(app: &AppHandle, source: Source, minimize_main: bool) -> CmdResult<
     // The audio tracks that the switches ask for (the microphone is only opened when it is on).
     #[cfg(windows)]
     {
-        let (system, mic) = {
+        let (system, mic, devices) = {
             let s = state.settings.lock().unwrap();
-            (s.rec_system_sound, s.rec_mic)
+            (
+                s.rec_system_sound,
+                s.rec_mic,
+                (s.system_device.clone(), s.mic_device.clone()),
+            )
         };
-        if let Some(kind) = active.handle.apply_audio(system, mic) {
+        if let Some(kind) = active.handle.apply_audio(system, mic, &devices) {
+            let _ = app.emit("recording-notice", kind);
+        }
+        let (webcam_on, webcam_device) = {
+            let s = state.settings.lock().unwrap();
+            (s.webcam_on, s.webcam_device.clone())
+        };
+        if let Some(kind) = active.handle.apply_webcam(webcam_on, &webcam_device) {
             let _ = app.emit("recording-notice", kind);
         }
     }
-    // The settings of the recording are on disk from the start: a recovery after a crash needs them.
+    // The settings of the recording are on disk from the start: a recovery after a crash needs them. The look of the recording
+    // (cursor, click effects, webcam overlay) starts from the defaults of the settings and can be changed afterwards.
+    active.info.effects = Some(crate::effects::Effects::from_settings(
+        &state.settings.lock().unwrap(),
+    ));
     let _ = write_info(&active.dir, &active.info);
     *recorder.active.lock().unwrap() = Some(active);
     announce(app, true, started_at);
@@ -1003,12 +1036,31 @@ fn finish(app: &AppHandle, state: &State<'_, AppState>, active: Active) -> CmdRe
             crate::audio::Kind::Mic => info.mic_file = name,
         }
     }
+    if let Some((segments, start_ms)) = &stats.webcam {
+        info.webcam_file = join_webcam(&dir, segments);
+        info.webcam_start_ms = *start_ms;
+    }
     write_info(&dir, &info)?;
     let _ = &rel_dir;
     let session = register(app, state, &dir, &info, Some(&group_id), &name)?;
     // The recording is done: Snipmunk comes back to the front with the new recording selected (the page does the selecting).
     crate::tray::show_main(app);
     Ok(session)
+}
+
+/// The webcam segments become `webcam.mp4` (the segment files are deleted when that worked); its file name, or `None` when there is
+/// no usable webcam video.
+fn join_webcam(dir: &Path, segments: &[PathBuf]) -> Option<String> {
+    let readable = crate::mp4join::readable(segments);
+    if readable.is_empty() {
+        return None;
+    }
+    crate::mp4join::join(&readable, &dir.join("webcam.mp4")).ok()?;
+    for s in segments {
+        let _ = std::fs::remove_file(s);
+    }
+    let _ = std::fs::remove_file(dir.join("webcam.json"));
+    Some("webcam.mp4".to_string())
 }
 
 /// Make the capture card of a finished recording folder (`first.png` is the picture of the card).
@@ -1168,6 +1220,16 @@ pub async fn recover_recording(
         .join("cursor.jsonl")
         .exists()
         .then(|| "cursor.jsonl".to_string());
+    // The webcam: its segments become one video, starting where the sidecar says.
+    let cam = crate::mp4join::segments_named(&dir, "webcam");
+    if !cam.is_empty() {
+        info.webcam_start_ms = std::fs::read(dir.join("webcam.json"))
+            .ok()
+            .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
+            .and_then(|v| v["startMs"].as_u64())
+            .unwrap_or(0);
+        info.webcam_file = join_webcam(&dir, &cam);
+    }
     write_info(&dir, &info)?;
     for s in &all {
         let _ = std::fs::remove_file(s);
@@ -1239,7 +1301,7 @@ pub fn recording_state(recorder: State<'_, Recorder>) -> RecordingState {
 }
 
 #[cfg(windows)]
-mod win {
+pub(crate) mod win {
     use std::path::Path;
     use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
     use std::sync::{Arc, Mutex};
@@ -1307,6 +1369,8 @@ mod win {
             closed: AtomicBool::new(false),
             first_png: dir.join("first.png"),
             first_done: AtomicBool::new(false),
+            paused_ms: AtomicU64::new(0),
+            pause_at: Mutex::new(None),
             crop: Mutex::new(None),
             t0: AtomicI64::new(i64::MIN),
             last_ms: AtomicU64::new(0),
@@ -1322,6 +1386,8 @@ mod win {
                 while !stop.load(Ordering::Relaxed) {
                     let frame = super::test_pattern(w as usize, h as usize, i);
                     if i == 0 {
+                        // (the webcam starts with the first picture)
+                        shared.first_done.store(true, Ordering::Relaxed);
                         shared.first_picture();
                         if let Some(img) = image::RgbaImage::from_raw(w, h, bgra_to_rgba(&frame)) {
                             let _ = img.save(&shared.first_png);
@@ -1357,6 +1423,7 @@ mod win {
             source: "synthetic",
             audio,
             cursor,
+            webcam: Mutex::new(WebcamSlot::default()),
         })
     }
 
@@ -1408,6 +1475,8 @@ mod win {
         segment_len: std::time::Duration,
         finishing: Vec<std::thread::JoinHandle<Result<(), String>>>,
         files: Vec<std::path::PathBuf>,
+        /// The start of the segment names: `screen` (`screen-000.mp4`) or `webcam`.
+        prefix: &'static str,
     }
 
     impl Segments {
@@ -1432,11 +1501,20 @@ mod win {
                 segment_len,
                 finishing: Vec::new(),
                 files: Vec::new(),
+                prefix: "screen",
             }
         }
 
+        /// Name the segments `<prefix>-000.mp4`, ... (the webcam's segments are told apart from the screen's this way).
+        pub fn named(mut self, prefix: &'static str) -> Self {
+            self.prefix = prefix;
+            self
+        }
+
         fn open(&mut self) -> Result<(), String> {
-            let path = self.dir.join(format!("screen-{:03}.mp4", self.index));
+            let path = self
+                .dir
+                .join(format!("{}-{:03}.mp4", self.prefix, self.index));
             let encoder = VideoEncoder::new(
                 VideoSettingsBuilder::new(self.w, self.h)
                     .sub_type(VideoSettingsSubType::H264)
@@ -1527,6 +1605,9 @@ mod win {
         closed: AtomicBool,
         first_png: std::path::PathBuf,
         first_done: AtomicBool,
+        /// Milliseconds of pauses so far, and when the current pause began (the webcam needs the recorded time).
+        paused_ms: AtomicU64,
+        pause_at: Mutex<Option<std::time::Instant>>,
         /// Cut the frames to this part (x, y, width, height) of the monitor.
         crop: Mutex<Option<(u32, u32, u32, u32)>>,
         t0: AtomicI64,
@@ -1558,6 +1639,15 @@ mod win {
         pub audio: Vec<(crate::audio::Kind, std::path::PathBuf)>,
         /// The cursor track file.
         pub cursor: Option<std::path::PathBuf>,
+        /// The webcam segments in order and where in the recording (ms) the webcam begins, when it was recorded.
+        pub webcam: Option<(Vec<std::path::PathBuf>, u64)>,
+    }
+
+    /// The webcam of a recording: running now, or finished (switched off in the middle; it is not started a second time).
+    #[derive(Default)]
+    pub struct WebcamSlot {
+        running: Option<crate::webcam::Webcam>,
+        done: Option<(Vec<std::path::PathBuf>, u64)>,
     }
 
     pub struct Handle {
@@ -1570,12 +1660,77 @@ mod win {
         pub source: &'static str,
         audio: Arc<Mutex<crate::audio::Audio>>,
         cursor: Arc<Mutex<Option<crate::cursor::poller::Cursor>>>,
+        webcam: Mutex<WebcamSlot>,
     }
 
     impl Handle {
+        /// Where in the recording we are, in milliseconds, with the pauses cut out.
+        fn recorded_ms(&self) -> u64 {
+            let s = &self.shared;
+            let mut paused = s.paused_ms.load(Ordering::Relaxed);
+            if let Some(at) = *s.pause_at.lock().unwrap() {
+                paused += at.elapsed().as_millis() as u64;
+            }
+            s.last_ms.load(Ordering::Relaxed).saturating_sub(paused)
+        }
+
+        /// Make the webcam match the switch: it is started the first time it is on and stopped when it is off (it records one stretch
+        /// per recording). A notice for the page is returned when the camera could not be used: `webcam-denied`, `webcam-none`,
+        /// or `webcam-fallback` (the chosen camera is gone, the first one is used).
+        pub fn apply_webcam(&self, on: bool, device: &str) -> Option<&'static str> {
+            let mut slot = self.webcam.lock().unwrap();
+            if on && slot.running.is_none() && slot.done.is_none() {
+                let dir = self.shared.first_png.parent()?.to_path_buf();
+                let shared = self.shared.clone();
+                let ready: Arc<dyn Fn() -> bool + Send + Sync> =
+                    Arc::new(move || shared.first_done.load(Ordering::Relaxed));
+                let start_ms = if self.shared.first_done.load(Ordering::Relaxed) {
+                    self.recorded_ms()
+                } else {
+                    0
+                };
+                match crate::webcam::Webcam::start(
+                    &dir,
+                    device,
+                    self.source == "synthetic",
+                    start_ms,
+                    ready,
+                ) {
+                    Ok(w) => {
+                        // Where it begins is on disk at once: a recording that is cut off is recovered with it.
+                        let _ = std::fs::write(
+                            dir.join("webcam.json"),
+                            format!("{{\"startMs\":{start_ms}}}"),
+                        );
+                        if self.shared.pause_at.lock().unwrap().is_some() {
+                            w.pause();
+                        }
+                        let fell = w.fell_back;
+                        slot.running = Some(w);
+                        return fell.then_some("webcam-fallback");
+                    }
+                    Err(n) => return Some(n),
+                }
+            }
+            if !on {
+                if let Some(w) = slot.running.take() {
+                    let start = w.start_ms;
+                    slot.done = Some((w.finish(), start));
+                }
+            }
+            None
+        }
+
         /// Make the audio tracks match the switches (system sound, microphone). A reason why one could not be made is returned.
-        pub fn apply_audio(&self, system: bool, mic: bool) -> Option<&'static str> {
+        pub fn apply_audio(
+            &self,
+            system: bool,
+            mic: bool,
+            devices: &(String, String),
+        ) -> Option<&'static str> {
             let mut a = self.audio.lock().unwrap();
+            a.system_device = devices.0.clone();
+            a.mic_device = devices.1.clone();
             a.apply(system, mic);
             a.notice.take()
         }
@@ -1594,7 +1749,16 @@ mod win {
             let segments = self.shared.segments.lock().unwrap().finish_all()?;
             let audio = self.audio.lock().unwrap().finish(end);
             let cursor = self.cursor.lock().unwrap().take().and_then(|c| c.finish());
+            let webcam = {
+                let mut slot = self.webcam.lock().unwrap();
+                if let Some(w) = slot.running.take() {
+                    let start = w.start_ms;
+                    slot.done = Some((w.finish(), start));
+                }
+                slot.done.take()
+            };
             Ok(Stats {
+                webcam,
                 cursor,
                 frames: self.shared.frames.load(Ordering::Relaxed),
                 last_ms: self.shared.last_ms.load(Ordering::Relaxed),
@@ -1604,7 +1768,11 @@ mod win {
         }
 
         pub fn pause(&self) {
+            *self.shared.pause_at.lock().unwrap() = Some(std::time::Instant::now());
             self.shared.segments.lock().unwrap().pause();
+            if let Some(w) = self.webcam.lock().unwrap().running.as_ref() {
+                w.pause();
+            }
             self.audio.lock().unwrap().pause();
             if let Some(c) = self.cursor.lock().unwrap().as_ref() {
                 c.pause();
@@ -1612,7 +1780,15 @@ mod win {
         }
 
         pub fn resume(&self) {
+            if let Some(at) = self.shared.pause_at.lock().unwrap().take() {
+                self.shared
+                    .paused_ms
+                    .fetch_add(at.elapsed().as_millis() as u64, Ordering::Relaxed);
+            }
             self.shared.segments.lock().unwrap().resume();
+            if let Some(w) = self.webcam.lock().unwrap().running.as_ref() {
+                w.resume();
+            }
             self.audio.lock().unwrap().resume();
             if let Some(c) = self.cursor.lock().unwrap().as_ref() {
                 c.resume();
@@ -1758,6 +1934,8 @@ mod win {
             closed: AtomicBool::new(false),
             first_png: dir.join("first.png"),
             first_done: AtomicBool::new(false),
+            paused_ms: AtomicU64::new(0),
+            pause_at: Mutex::new(None),
             crop: Mutex::new(crop),
             t0: AtomicI64::new(i64::MIN),
             last_ms: AtomicU64::new(0),
@@ -1799,6 +1977,7 @@ mod win {
             source,
             audio,
             cursor,
+            webcam: Mutex::new(WebcamSlot::default()),
         })
     }
 }
@@ -1921,6 +2100,9 @@ mod tests {
             system_file: Some("system.wav".into()),
             mic_file: None,
             cursor_file: Some("cursor.jsonl".into()),
+            webcam_file: Some("webcam.mp4".into()),
+            webcam_start_ms: 250,
+            effects: Some(crate::effects::Effects::default()),
         };
         write_info(dir.path(), &info).unwrap();
         let back: RecordingInfo =
@@ -1946,6 +2128,7 @@ mod segment_tests {
     /// file has all the pictures and the sum of the lengths. Also measures the join.
     #[test]
     fn segments_of_generated_frames_join_into_one_video_with_all_the_pictures() {
+        let _encoder = super::encoder_lock();
         let dir =
             tempfile::tempdir_in(std::env::var("SNIPMUNK_TEST_DIR").unwrap_or_else(|_| ".".into()))
                 .unwrap();
@@ -2000,6 +2183,7 @@ mod segment_tests {
 
     #[test]
     fn a_segment_cut_off_by_a_crash_is_left_out_and_the_rest_is_recovered() {
+        let _encoder = super::encoder_lock();
         let dir =
             tempfile::tempdir_in(std::env::var("SNIPMUNK_TEST_DIR").unwrap_or_else(|_| ".".into()))
                 .unwrap();
@@ -2034,6 +2218,14 @@ mod segment_tests {
         let joined = mp4join::join(&good, &dir.path().join("screen.mp4")).unwrap();
         assert!(joined.samples > 20);
     }
+}
+
+/// The tests that run the hardware video encoder one at a time: a PC only has a few encoder sessions, and tests that run side
+/// by side fail now and then when they are used up.
+#[cfg(test)]
+pub(crate) fn encoder_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    LOCK.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 #[cfg(all(test, windows))]
@@ -2107,7 +2299,8 @@ mod render_tests {
                 y: (h / 2) as i32 + ((ms as f64 / 500.0).sin() * (h / 4) as f64) as i32,
                 visible: true,
                 shape: "arrow".into(),
-                left: false,
+                // One left click at 1.5 s.
+                left: (1500..1560).contains(&ms),
                 right: false,
             };
             for l in s.feed(ms, &r) {
@@ -2132,8 +2325,572 @@ mod render_tests {
         write_info(dir, &info).unwrap();
     }
 
+    /// Export a generated recording with the default settings.
+    fn export(
+        dir: &Path,
+        name: &str,
+        cancel: &AtomicBool,
+    ) -> Result<crate::render::win::Exported, String> {
+        export_with(dir, name, crate::effects::ExportSettings::default(), cancel)
+    }
+
+    fn export_with(
+        dir: &Path,
+        name: &str,
+        settings: crate::effects::ExportSettings,
+        cancel: &AtomicBool,
+    ) -> Result<crate::render::win::Exported, String> {
+        crate::render::win::render(
+            &crate::render::win::Request {
+                dir,
+                out: dir.join(name),
+                settings,
+                system_volume: 1.0,
+                mic_volume: 1.0,
+                probe: None,
+            },
+            &|_| {},
+            cancel,
+        )
+    }
+
+    /// Mean absolute difference over the colour channels, sampled on a grid.
+    fn mean_diff(a: &[u8], b: &[u8], w: usize, h: usize) -> f64 {
+        let (mut sum, mut n) = (0u64, 0u64);
+        for y in (0..h).step_by(3) {
+            for x in (0..w).step_by(3) {
+                let i = (y * w + x) * 4;
+                for c in 0..3 {
+                    sum += (a[i + c] as i32 - b[i + c] as i32).unsigned_abs() as u64;
+                    n += 1;
+                }
+            }
+        }
+        sum as f64 / n as f64
+    }
+
+    /// A1: pictures rendered at awkward sizes (rows padded by the decoder, odd sizes) come out as the pattern, not sheared.
+    #[test]
+    fn rendered_pictures_match_the_pattern_at_awkward_sizes() {
+        let _encoder = super::encoder_lock();
+        let base = std::env::var("SNIPMUNK_TEST_DIR").unwrap_or_else(|_| ".".into());
+        let cancel = AtomicBool::new(false);
+        // 641x359 is recorded as 640x358 (the recorder and the render both drop the odd row and column).
+        for (w, h) in [
+            (676u32, 1182u32),
+            (1052, 802),
+            (1366, 768),
+            (3440, 1440),
+            (640, 358),
+        ] {
+            let dir = tempfile::tempdir_in(&base).unwrap();
+            generated(dir.path(), w, h, 10, 1);
+            let mut info: RecordingInfo =
+                serde_json::from_slice(&std::fs::read(dir.path().join("recording.json")).unwrap())
+                    .unwrap();
+            info.cursor_file = None;
+            info.system_file = None;
+            info.mic_file = None;
+            write_info(dir.path(), &info).unwrap();
+            for f in ["system.wav", "mic.wav", "cursor.jsonl"] {
+                let _ = std::fs::remove_file(dir.path().join(f));
+            }
+            // The recorded video itself first: if this is off, the fault is not in the render.
+            let (sw, sh, src) =
+                crate::render::win::read_frames(&dir.path().join("screen.mp4"), 6).unwrap();
+            assert_eq!((sw, sh), (w, h));
+            let d0 = mean_diff(
+                &src[0],
+                &test_pattern(w as usize, h as usize, 0),
+                w as usize,
+                h as usize,
+            );
+            assert!(
+                d0 < 12.0,
+                "{w}x{h} the recorded video itself: mean difference {d0}"
+            );
+            let r = export(dir.path(), "r.mp4", &cancel).unwrap();
+            let (ow, oh, frames) = crate::render::win::read_frames(&r.file, 6).unwrap();
+            assert_eq!((ow, oh), (w, h), "size of the output");
+            assert!(frames.len() >= 5, "{w}x{h}: {} frames", frames.len());
+            for i in [0usize, 4] {
+                let expected = test_pattern(w as usize, h as usize, i);
+                let d = mean_diff(&frames[i], &expected, w as usize, h as usize);
+                assert!(d < 12.0, "{w}x{h} frame {i}: mean difference {d}");
+            }
+        }
+    }
+
+    /// Where the time of a render goes (printed, not asserted): decoding alone, and sending pictures to the encoder alone.
+    #[test]
+    fn render_stage_timings() {
+        let _encoder = super::encoder_lock();
+        let base = std::env::var("SNIPMUNK_TEST_DIR").unwrap_or_else(|_| ".".into());
+        let (w, h) = (
+            std::env::var("SNIPMUNK_RENDER_W")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(1920u32),
+            std::env::var("SNIPMUNK_RENDER_H")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(1080u32),
+        );
+        let dir = tempfile::tempdir_in(base).unwrap();
+        generated(dir.path(), w, h, 30, 4);
+        let t = std::time::Instant::now();
+        let (_, _, f) =
+            crate::render::win::read_frames(&dir.path().join("screen.mp4"), 1000).unwrap();
+        eprintln!(
+            "decode only: {} frames in {:.2} s = {:.0} fps",
+            f.len(),
+            t.elapsed().as_secs_f64(),
+            f.len() as f64 / t.elapsed().as_secs_f64()
+        );
+        let t = std::time::Instant::now();
+        let flipped: Vec<Vec<u8>> = f
+            .iter()
+            .map(|p| flip_rows(p, w as usize, h as usize))
+            .collect();
+        eprintln!(
+            "flip only: {:.0} fps",
+            f.len() as f64 / t.elapsed().as_secs_f64()
+        );
+        use windows_capture::encoder::*;
+        let part = dir.path().join("enc.mp4");
+        let mut e = VideoEncoder::new(
+            VideoSettingsBuilder::new(w, h)
+                .sub_type(VideoSettingsSubType::H264)
+                .frame_rate(30)
+                .bitrate(bitrate_for(w, h, 30, "high")),
+            AudioSettingsBuilder::default().disabled(true),
+            ContainerSettingsBuilder::default(),
+            &part,
+        )
+        .unwrap();
+        let t = std::time::Instant::now();
+        for (i, fr) in flipped.iter().enumerate() {
+            e.send_frame_buffer(fr, i as i64 * 333_333).unwrap();
+        }
+        e.finish().unwrap();
+        eprintln!(
+            "encode only: {:.0} fps",
+            f.len() as f64 / t.elapsed().as_secs_f64()
+        );
+    }
+
+    /// Write the effects of a generated recording.
+    fn set_effects(dir: &Path, f: impl FnOnce(&mut crate::effects::Effects)) {
+        let mut info: RecordingInfo =
+            serde_json::from_slice(&std::fs::read(dir.join("recording.json")).unwrap()).unwrap();
+        let mut fx = info.effects.take().unwrap_or_default();
+        f(&mut fx);
+        info.effects = Some(fx);
+        write_info(dir, &info).unwrap();
+    }
+
+    #[test]
+    fn trim_aspect_ratio_halo_and_click_effects_are_applied_in_the_export() {
+        let _encoder = super::encoder_lock();
+        use crate::compose::{Aspect, Fit};
+        let base = std::env::var("SNIPMUNK_TEST_DIR").unwrap_or_else(|_| ".".into());
+        let dir = tempfile::tempdir_in(base).unwrap();
+        let (w, h, fps) = (640u32, 360u32, 15u32);
+        generated(dir.path(), w, h, fps, 4);
+        let cancel = AtomicBool::new(false);
+        // The plain export of 2 s with the cursor drawn but no effects.
+        set_effects(dir.path(), |fx| {
+            fx.click.kind = "off".into();
+            fx.trim = crate::effects::Trim {
+                start_ms: 1000,
+                end_ms: Some(3000),
+            };
+        });
+        let plain = export(dir.path(), "plain.mp4", &cancel).unwrap();
+        // About 2 s long: 30 pictures at 15 fps.
+        assert!(
+            (plain.frames as i64 - 30).abs() <= 2,
+            "{} pictures",
+            plain.frames
+        );
+        let f = std::fs::File::open(&plain.file).unwrap();
+        let size = f.metadata().unwrap().len();
+        let secs = mp4::Mp4Reader::read_header(std::io::BufReader::new(f), size)
+            .unwrap()
+            .duration()
+            .as_secs_f64();
+        assert!((secs - 2.0).abs() < 0.25, "{secs} s");
+        // The halo adds a yellow glow around the cursor and nothing elsewhere.
+        set_effects(dir.path(), |fx| {
+            fx.cursor.halo = true;
+            fx.cursor.halo_color = "#FFFF00".into();
+        });
+        let halo = export(dir.path(), "halo.mp4", &cancel).unwrap();
+        let (_, _, a) = crate::render::win::read_frames(&plain.file, 4).unwrap();
+        let (_, _, b) = crate::render::win::read_frames(&halo.file, 4).unwrap();
+        let ms = 1000.0 + 3.0 * 1000.0 / fps as f64;
+        let cx = w as f64 / 2.0 + (ms / 500.0).cos() * (w as f64 / 4.0);
+        let cy = h as f64 / 2.0 + (ms / 500.0).sin() * (h as f64 / 4.0);
+        let radius = h as f64 * 0.05;
+        let (mut near, mut far) = (0, 0);
+        for y in 0..h as usize {
+            for x in 0..w as usize {
+                let i = (y * w as usize + x) * 4;
+                let d: i32 = (0..3)
+                    .map(|c| (a[3][i + c] as i32 - b[3][i + c] as i32).abs())
+                    .sum();
+                if d > 60 {
+                    let dist = ((x as f64 - cx).powi(2) + (y as f64 - cy).powi(2)).sqrt();
+                    if dist <= radius + 6.0 {
+                        near += 1;
+                    } else {
+                        far += 1;
+                    }
+                }
+            }
+        }
+        assert!(near > 50, "the halo changed {near} pixels near the cursor");
+        assert!(far < near / 10, "and {far} elsewhere (compression noise)");
+
+        // 9:16 with bars: a tall picture, the recording in the middle, black above and below.
+        let tall = export_with(
+            dir.path(),
+            "tall.mp4",
+            crate::effects::ExportSettings {
+                aspect: Aspect::Tall,
+                fit: Fit::Bars,
+                resolution: "480".into(),
+                ..Default::default()
+            },
+            &cancel,
+        )
+        .unwrap();
+        assert_eq!((tall.width, tall.height), (480, 852));
+        let (tw, th, t) = crate::render::win::read_frames(&tall.file, 2).unwrap();
+        assert_eq!((tw, th), (480, 852));
+        let at = |x: usize, y: usize| t[1][(y * 480 + x) * 4];
+        assert!(at(240, 10) < 20 && at(240, 840) < 20, "black bars");
+        // Cropped 1:1: the middle of the recording.
+        let square = export_with(
+            dir.path(),
+            "square.mp4",
+            crate::effects::ExportSettings {
+                aspect: Aspect::Square,
+                fit: Fit::Crop,
+                ..Default::default()
+            },
+            &cancel,
+        )
+        .unwrap();
+        assert_eq!((square.width, square.height), (360, 360));
+        // 720p never makes a 360p picture bigger.
+        let small = export_with(
+            dir.path(),
+            "small.mp4",
+            crate::effects::ExportSettings {
+                resolution: "720".into(),
+                ..Default::default()
+            },
+            &cancel,
+        )
+        .unwrap();
+        assert_eq!((small.width, small.height), (640, 360));
+    }
+
+    #[test]
+    fn the_generated_webcam_is_recorded_across_a_pause_joined_and_drawn_over_the_export() {
+        let _encoder = super::encoder_lock();
+        use crate::effects::Effects;
+        let base = std::env::var("SNIPMUNK_TEST_DIR").unwrap_or_else(|_| ".".into());
+        let dir = tempfile::tempdir_in(base).unwrap();
+        generated(dir.path(), 640, 360, 15, 3);
+        // 1.5 s of webcam, a pause of 1 s, 1.5 s again: 3 s of video, in 3 segments (one of them after the pause).
+        let cam = crate::webcam::Webcam::start(
+            dir.path(),
+            crate::webcam::SYNTHETIC,
+            true,
+            500,
+            Arc::new(|| true),
+        )
+        .unwrap();
+        std::thread::sleep(Duration::from_millis(1500));
+        cam.pause();
+        std::thread::sleep(Duration::from_millis(1000));
+        cam.resume();
+        std::thread::sleep(Duration::from_millis(1500));
+        let segments = cam.finish();
+        assert!(segments.len() >= 2, "{segments:?}");
+        let name = join_webcam(dir.path(), &segments).unwrap();
+        assert_eq!(name, "webcam.mp4");
+        assert!(
+            crate::mp4join::segments_named(dir.path(), "webcam").is_empty(),
+            "the segments are gone"
+        );
+        let (cw, ch, frames) =
+            crate::render::win::read_frames(&dir.path().join("webcam.mp4"), 1000).unwrap();
+        assert_eq!((cw, ch), (640, 360));
+        let secs = frames.len() as f64 / 30.0;
+        assert!(
+            (secs - 3.0).abs() < 0.5,
+            "{secs} s of webcam (the pause is cut out)"
+        );
+        // The recording knows the webcam; with it shown the export has a disc in the corner, without it not.
+        let mut info: RecordingInfo =
+            serde_json::from_slice(&std::fs::read(dir.path().join("recording.json")).unwrap())
+                .unwrap();
+        info.webcam_file = Some(name);
+        info.webcam_start_ms = 500;
+        let mut fx = Effects::default();
+        fx.cursor.show = false;
+        fx.click.kind = "off".into();
+        info.effects = Some(fx.clone());
+        write_info(dir.path(), &info).unwrap();
+        let cancel = AtomicBool::new(false);
+        let with = export(dir.path(), "with.mp4", &cancel).unwrap();
+        fx.webcam.show = false;
+        info.effects = Some(fx.clone());
+        write_info(dir.path(), &info).unwrap();
+        let without = export(dir.path(), "without.mp4", &cancel).unwrap();
+        let (_, _, a) = crate::render::win::read_frames(&with.file, 20).unwrap();
+        let (_, _, b) = crate::render::win::read_frames(&without.file, 20).unwrap();
+        let rect = Effects::default().webcam_rect(640, 360);
+        let (inside, outside) = {
+            let (mut inside, mut outside) = (0u64, 0u64);
+            for y in 0..360usize {
+                for x in 0..640usize {
+                    let i = (y * 640 + x) * 4;
+                    let d: i32 = (0..3)
+                        .map(|c| (a[12][i + c] as i32 - b[12][i + c] as i32).abs())
+                        .sum();
+                    let in_rect = (x as i32) >= rect.0
+                        && (x as i32) < rect.0 + rect.2
+                        && (y as i32) >= rect.1
+                        && (y as i32) < rect.1 + rect.3;
+                    if d > 60 {
+                        if in_rect {
+                            inside += 1;
+                        } else {
+                            outside += 1;
+                        }
+                    }
+                }
+            }
+            (inside, outside)
+        };
+        assert!(
+            inside > 1500,
+            "the webcam disc covers the corner: {inside} pixels differ"
+        );
+        assert!(outside < 100, "and nothing else changed: {outside}");
+    }
+
+    /// A real-sized export (set SNIPMUNK_RENDER_W/H and SNIPMUNK_PROFILE_SECS; run with --ignored --nocapture): every effect on,
+    /// the webcam, both sound tracks. Prints where the time goes.
+    #[test]
+    #[ignore]
+    fn profile_a_real_sized_export() {
+        let _encoder = super::encoder_lock();
+        let env = |k: &str, d: u32| {
+            std::env::var(k)
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(d)
+        };
+        let base = std::env::var("SNIPMUNK_TEST_DIR").unwrap_or_else(|_| ".".into());
+        let dir = tempfile::tempdir_in(base).unwrap();
+        let (w, h, secs) = (
+            env("SNIPMUNK_RENDER_W", 3440),
+            env("SNIPMUNK_RENDER_H", 1440),
+            env("SNIPMUNK_PROFILE_SECS", 61),
+        );
+        let t = std::time::Instant::now();
+        generated(dir.path(), w, h, 30, secs);
+        // A webcam video of 1280x720.
+        let mut seg = win::Segments::new(
+            dir.path(),
+            1280,
+            720,
+            30,
+            "standard",
+            Duration::from_secs(10),
+        )
+        .named("webcam");
+        for i in 0..(30 * secs) as usize {
+            let f = flip_rows(&crate::webcam::pattern(1280, 720, i), 1280, 720);
+            seg.send_buffer(&f, i as i64 * (TICKS / 30)).unwrap();
+        }
+        let files = seg.finish_all().unwrap();
+        join_webcam(dir.path(), &files).unwrap();
+        let mut info: RecordingInfo =
+            serde_json::from_slice(&std::fs::read(dir.path().join("recording.json")).unwrap())
+                .unwrap();
+        info.webcam_file = Some("webcam.mp4".into());
+        let mut fx = crate::effects::Effects::default();
+        fx.cursor.halo = true;
+        fx.cursor.size = "2".into();
+        info.effects = Some(fx);
+        write_info(dir.path(), &info).unwrap();
+        eprintln!(
+            "generated {w}x{h} {secs} s in {:.0} s",
+            t.elapsed().as_secs_f64()
+        );
+        let cancel = AtomicBool::new(false);
+        let settings = crate::effects::ExportSettings {
+            quality: "high".into(),
+            ..Default::default()
+        };
+        let r = export_with(dir.path(), "profile.mp4", settings, &cancel).unwrap();
+        let bytes = std::fs::metadata(&r.file).unwrap().len();
+        eprintln!(
+            "export: {:.1} s for {secs} s = {:.2}x real time, {:.1} MB",
+            r.seconds,
+            secs as f64 / r.seconds,
+            bytes as f64 / 1e6
+        );
+    }
+
+    #[test]
+    fn a_trim_near_the_end_seeks_instead_of_decoding_from_the_start() {
+        let _encoder = super::encoder_lock();
+        let base = std::env::var("SNIPMUNK_TEST_DIR").unwrap_or_else(|_| ".".into());
+        let dir = tempfile::tempdir_in(base).unwrap();
+        generated(dir.path(), 320, 180, 30, 40);
+        let cancel = AtomicBool::new(false);
+        set_effects(dir.path(), |fx| {
+            fx.click.kind = "off".into();
+            fx.cursor.show = false;
+        });
+        let full = export(dir.path(), "full.mp4", &cancel).unwrap();
+        set_effects(dir.path(), |fx| {
+            fx.trim = crate::effects::Trim {
+                start_ms: 36000,
+                end_ms: Some(38000),
+            };
+        });
+        let cut = export(dir.path(), "cut.mp4", &cancel).unwrap();
+        eprintln!(
+            "full {:.2} s, trimmed (2 s at 36 s) {:.2} s",
+            full.seconds, cut.seconds
+        );
+        assert!(
+            (cut.frames as i64 - 60).abs() <= 3,
+            "{} pictures",
+            cut.frames
+        );
+        assert!(
+            cut.seconds < full.seconds * 0.5,
+            "a trimmed export is not slower than a full one"
+        );
+        // The first picture is the one of 36 s of the full export.
+        let (cw, ch, first) = crate::render::win::read_frames(&cut.file, 1).unwrap();
+        let (_, _, all) = crate::render::win::read_frames(&full.file, 1084).unwrap();
+        let best = (1078..1084)
+            .map(|i| mean_diff(&first[0], &all[i], cw as usize, ch as usize))
+            .fold(f64::MAX, f64::min);
+        assert!(
+            best < 6.0,
+            "the picture at the trim start differs by {best} from the full export at 36 s"
+        );
+    }
+
+    #[test]
+    fn click_effects_start_at_the_button_press_and_last_600_ms() {
+        let _encoder = super::encoder_lock();
+        let base = std::env::var("SNIPMUNK_TEST_DIR").unwrap_or_else(|_| ".".into());
+        let dir = tempfile::tempdir_in(base).unwrap();
+        generated(dir.path(), 320, 180, 10, 3);
+        let layer = crate::render::CursorLayer::load(dir.path(), "cursor.jsonl").unwrap();
+        assert!(layer.clicks_at(1400).is_empty(), "before the click");
+        let c = layer.clicks_at(1650);
+        assert_eq!(c.len(), 1);
+        assert!(c[0].3, "the left button");
+        assert!((c[0].0 - 150.0 / 600.0).abs() < 0.05, "age {}", c[0].0);
+        assert!(layer.clicks_at(2200).is_empty(), "after 600 ms it is gone");
+    }
+
+    #[test]
+    fn a_gif_is_made_with_the_chosen_rate_and_size_and_its_size_can_be_estimated() {
+        let _encoder = super::encoder_lock();
+        let base = std::env::var("SNIPMUNK_TEST_DIR").unwrap_or_else(|_| ".".into());
+        let dir = tempfile::tempdir_in(base).unwrap();
+        generated(dir.path(), 640, 360, 15, 4);
+        set_effects(dir.path(), |fx| {
+            fx.trim = crate::effects::Trim {
+                start_ms: 0,
+                end_ms: Some(2000),
+            };
+        });
+        let cancel = AtomicBool::new(false);
+        for (quality, fps, max_short) in [("low", 10u32, 360u32), ("high", 15, 360)] {
+            let started = std::time::Instant::now();
+            let settings = crate::effects::ExportSettings {
+                format: "gif".into(),
+                quality: quality.into(),
+                ..Default::default()
+            };
+            let r = export_with(
+                dir.path(),
+                &format!("{quality}.gif"),
+                settings.clone(),
+                &cancel,
+            )
+            .unwrap();
+            assert_eq!(r.fps, fps);
+            assert!(r.height <= max_short);
+            let bytes = std::fs::metadata(&r.file).unwrap().len();
+            eprintln!(
+                "gif {quality}: {}x{} {} pictures {} bytes in {:.2} s",
+                r.width,
+                r.height,
+                r.frames,
+                bytes,
+                started.elapsed().as_secs_f64()
+            );
+            let mut dec = gif::DecodeOptions::new()
+                .read_info(std::fs::File::open(&r.file).unwrap())
+                .unwrap();
+            assert_eq!(
+                (dec.width() as u32, dec.height() as u32),
+                (r.width, r.height)
+            );
+            let mut n = 0;
+            let mut delay = 0;
+            while let Some(f) = dec.read_next_frame().unwrap() {
+                n += 1;
+                delay = f.delay;
+            }
+            assert!(
+                (n as i64 - 2 * fps as i64).abs() <= 2,
+                "{n} pictures for 2 s at {fps} fps"
+            );
+            assert_eq!(delay as u32, (100.0 / fps as f64).round() as u32);
+            // The estimate is in the region of the real size.
+            let est = crate::render::win::render(
+                &crate::render::win::Request {
+                    dir: dir.path(),
+                    out: dir.path().join("probe"),
+                    settings,
+                    system_volume: 1.0,
+                    mic_volume: 1.0,
+                    probe: Some(24),
+                },
+                &|_| {},
+                &cancel,
+            )
+            .unwrap();
+            let frames_total = 2 * fps as u64;
+            let estimated = est.probe_bytes * frames_total / est.probe_frames.max(1) as u64;
+            eprintln!("gif {quality}: estimated {estimated} bytes for real {bytes}");
+            assert!(
+                estimated > bytes / 4 && estimated < bytes * 4,
+                "{estimated} vs {bytes}"
+            );
+        }
+    }
+
     #[test]
     fn a_generated_1080p_recording_renders_with_cursor_and_mixed_sound_faster_than_real_time() {
+        let _encoder = super::encoder_lock();
         let base = std::env::var("SNIPMUNK_TEST_DIR").unwrap_or_else(|_| ".".into());
         let dir = tempfile::tempdir_in(base).unwrap();
         let env = |k: &str, d: u32| {
@@ -2150,8 +2907,7 @@ mod render_tests {
         );
         generated(dir.path(), w, h, fps, secs);
         let cancel = AtomicBool::new(false);
-        let r = crate::render::win::render(dir.path(), 1.0, 1.0, &|_| {}, &cancel).unwrap();
-        assert!(r.made);
+        let r = export(dir.path(), "r.mp4", &cancel).unwrap();
         eprintln!(
             "render of {secs} s of {w}x{h} at {fps} fps: {} frames in {:.2} s = {:.1}x real time",
             r.frames,
@@ -2174,15 +2930,9 @@ mod render_tests {
         );
         let secs_out = reader.duration().as_secs_f64();
         assert!((secs_out - secs as f64).abs() < 0.3, "{secs_out}");
-        // A second render finds the file fresh and does nothing; a change makes it render again.
-        let again = crate::render::win::render(dir.path(), 1.0, 1.0, &|_| {}, &cancel).unwrap();
-        assert!(!again.made);
-        let louder = crate::render::win::render(dir.path(), 1.0, 0.5, &|_| {}, &cancel).unwrap();
-        assert!(louder.made);
         // A render that is cancelled leaves no partial file.
         let stop = AtomicBool::new(true);
-        std::fs::remove_file(dir.path().join("final.key")).unwrap();
-        assert!(crate::render::win::render(dir.path(), 1.0, 1.0, &|_| {}, &stop).is_err());
-        assert!(!dir.path().join("final.mp4.part").exists());
+        assert!(export(dir.path(), "r.mp4", &stop).is_err());
+        assert!(!dir.path().join("r.mp4.part").exists());
     }
 }

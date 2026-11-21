@@ -174,3 +174,123 @@ Gates are green (cargo fmt, clippy -D warnings, cargo test 186, tsc, eslint, vit
 ### M9 Recording shortcut
 - Ctrl+Alt+R (editable in Settings → Capture, with the same checks as the capture shortcut and a refusal when both use the same keys) starts the recording flow from any program and stops a running recording; inside Snipmunk's windows the page reports it and the backend runs each press once (per shortcut).
 - [ ] **[REAL INPUT]** Press Ctrl+Alt+R in another program: the area selection opens; press it again while recording: the recording stops and the card appears. Press it inside Snipmunk: it works once. Set it to the keys of the capture shortcut: the dialog refuses it.
+
+## Session 7-B2: fixes A1–A8 and effects, webcam, trim, export (B1–B7)
+
+Gates are green (cargo fmt, clippy -D warnings, cargo test, tsc, eslint, vitest). Everything below was tested with the development source `__synthetic__`, generated tones, a generated cursor movement and a **generated test camera** (a moving pattern, `__synthetic__` in the camera list of debug builds), in a test instance whose storage folders were under `E:\SecondDawn\_scratch`. **Nothing was captured from the real screen, the real cursor, the real system sound, the microphone or a real camera.** Listing devices reads names only.
+
+### A1 Rendered video is not distorted
+- Cause: Media Foundation pads the rows of a decoded picture (to 64 bytes) and its height (to 16); the render read the picture as if rows were `width x 4` bytes. Now the picture is read as NV12 (the decoder's own format) with the real pitch worked out from the buffer, and converted here. Tested with generated recordings of 676x1182, 1052x802, 1366x768, 3440x1440 and 640x358 (the even size of 641x359): the decoded export matches the test pattern.
+- [ ] **[REAL SCREEN]** Record a window of about 676x1182 (a tall one), Export and Copy: the video plays straight in another player, with no diagonal stripes.
+
+### A2 One render per recording, named after it
+- Cause: every recording rendered to the same file name (`final.mp4`) and the cache key did not contain the recording's folder, so a copied file or a stale key could be reused for another recording. Now the file is `<recording name>.mp4` in the recording's own folder, the key contains the folder, the name, the effects, the trim and the export settings, and the page refuses a file that was made for another recording.
+- [ ] Save/Export recording A, then Copy recording B and paste into Explorer: the pasted file is `B's name.mp4` and shows B. Rename a recording: the next Copy makes a new file.
+
+### A3 Show in File Explorer
+- Cause: the path was built in the page with a broken template string (`\${...}` kept the text of the variable), so it never existed. The backend now works the path out from the current state when the item is clicked (also after a group rename, a move to another group, a new recordings folder, a migration).
+- [ ] Right-click a recording after renaming its group, after moving it to another group and after changing the recordings folder (and moving them): Explorer opens with `screen.mp4` selected. Delete the folder in Explorer: the item reports that it is gone.
+
+### A4 Player controls
+- The browser's own video menu and controls are off (no `controls`, `controlsList`, no picture-in-picture, `contextmenu` prevented). The speaker and microphone buttons mute and unmute the track, the sliders set the volume, and the audio elements are forced back to that state if anything else changes them.
+- [ ] Right-click the video: no browser menu. Click the speaker: sound stops, the icon shows it; click again: sound is back; drag the slider to 0: the icon shows muted. Switch to another recording and back: still in step.
+
+### A5 Faster export
+- The encoder is the hardware H.264 encoder through Media Foundation (the capture library's transcoder with hardware acceleration on; software is the fallback). What was slow was reading the video: the colour conversion of Media Foundation. The video is now read as NV12 and converted on all cores.
+- Measured (generated input, release build, RTX 3060): 6 s of 1920x1080 at 30 fps in about 3.0 s (**2.0x** real time, before 1.1x); 6 s of 3440x1440 at 30 fps in about 5.7 s (**1.05x**: only just faster than real time, the CPU work of reading and the encoder's colour conversion are the limit).
+- [ ] Export a real 1080p recording and a real 3440x1440 one: note the time.
+
+### A6 No "New session"
+- The button (both tabs), the setting, its dialog and its texts are gone. Deleting a group of screenshots keeps its question (move or delete); deleting a group of recordings asks once: "Delete 'Group 1' and its 5 recordings permanently? The files in `<folder>` will be deleted and cannot be restored."
+- [ ] Delete a recording group with recordings: the dialog names the folder; after "Delete group" the folder is gone in Explorer. Delete an empty group: no question.
+
+### A7 Settings: Screenshots and Recording tabs
+- Screenshots: capture shortcut, default mode, delay, after capture, copy each capture, automatic saving (+ folder + naming), magnifier. Recording: recording shortcut, "Save recordings to" (+ move offer), microphone, sound of the computer, frame rate, quality, countdown, system sound and microphone defaults, cursor, click effect, webcam (+ device, shape, size, position, border). The gear menu of the recording bar keeps fps, quality, sound, microphone, webcam, cursor and click effect and has "More recording settings…" which opens the Recording page. The search finds every one of them.
+- [ ] Open the settings: the two pages are there; search for "halo", "camera", "microphone", "frame": each jumps to its setting. In the recording top bar: gear -> "More recording settings…" opens the Recording page (also when the window is already open).
+
+### A8 Device pickers
+- Microphone (WASAPI capture endpoints) and sound of the computer (render endpoints, loopback): "Default (name)" first, then the devices; the list is read again every 3 s; a chosen device that is gone is shown as "(not connected)" and the recording falls back to the Windows default with a message. Checked with the enumeration only (this PC: 2 microphones, 3 outputs, 1 camera); no device was opened.
+- [ ] **[REAL AUDIO]** Choose the second microphone and record with the microphone on: `mic.wav` has that microphone. Unplug the chosen device, start a recording: the message says the default is used. Plug a device in with the settings open: it appears within a few seconds.
+
+### B1 Cursor appearance and B2 click effects
+- Cursor on/off, size 1x / 1.5x / 2x, highlight halo with a colour; click effects Off / Ripple / Burst with a colour for the left and the right button and a size (small, medium, large). Drawn from the cursor track in the player and in every export; stored with the recording; defaults in Settings -> Recording.
+- [ ] **[REAL INPUT]** Record with real clicks: the ripple is at the place and time of each click (left and right in their colours); the halo follows the cursor; 2x makes the cursor twice as big in the player and in an exported file.
+
+### B3 Webcam
+- A separate video (`webcam.mp4`, recorded as 10 s segments `webcam-000.mp4`, ... like the screen, joined at the end; recovered after a crash with `webcam.json` telling where it starts), kept in step by the clock of the first screen picture, cut at pauses. On the floating bar the webcam can be switched on in the middle (it then starts at that time: `webcamStartMs`) and off (one stretch per recording). Overlay: circle / rounded square / rectangle, size S / M / L, four corners or dragged anywhere in the player, thin border.
+- Checked with the generated camera: 3 s of webcam across a pause, joined, drawn in the export; switched on after 2.1 s from the bar.
+- [ ] **[REAL CAMERA]** Record with the webcam on (choose it in the settings): the picture is in step with the screen and the sound (clap test), also after a pause; Windows' camera privacy off gives the message; unplugging the chosen camera falls back to the first one.
+
+### B4 Effects panel
+- Next to the player: cursor, click effects, webcam (only for recordings that have a webcam). A change shows in the player at once and is saved in `recording.json`; "Reset to defaults" restores the defaults of the settings (the trim stays).
+- [ ] Change the halo colour and the click effect, restart Snipmunk: the recording still has them. Export: the file has them.
+
+### B5 Trim
+- Two handles on the timeline (mouse or arrow keys, Shift = 1 s), saved with the recording; the preview plays only the kept part, the time shows the kept length; Export, Copy, drag out and Share use the kept part.
+- [ ] Trim the start and the end, play: it starts and stops there. Export and Copy: the file has the kept length.
+
+### B6 Export dialog
+- Button "Export" (instead of Save): MP4 (H.264 + AAC) or GIF; quality High / Standard / Small (MP4) or Low / High (GIF); resolution Original / 1080p / 720p / 480p (the shorter side, never larger than the recording); aspect ratio Original / 16:9 / 9:16 / 1:1 with black bars or crop (a small drawing shows the result); file name and folder (default: the recording's group folder); the size of the picture, length, frame rate and size of the file are shown (a GIF is measured by encoding its first pictures); a warning for a GIF over 50 MB; progress with Cancel; a message with "Show in File Explorer" when done. GIF: 10 fps and at most 360 px (Low) or 15 fps and at most 720 px (High), no sound; only the changed part of each picture is stored.
+- Measured (generated pattern, which is noisy and therefore a bad case for GIF): 2 s of 640x360 as GIF: Low 21 pictures, 1.08 MB in 0.41 s; High 28 pictures, 1.30 MB in 0.43 s (release build); the estimate was within 7 %.
+- [ ] Export the same recording as MP4 (each quality and resolution), as 9:16 with bars and with crop, as 1:1, and as GIF Low and High: open each in another program; the GIF loops and has no sound; the file name and folder are used; Cancel in the middle leaves no file; the message opens Explorer on the file.
+
+### B7
+- "Open in Snipmunk Studio" stays disabled ("Coming soon").
+
+## Session 7-B3: fixes A1–A5, A7, A8 and the first part of the model change (B1, B3 package)
+
+Gates are green (cargo fmt, clippy -D warnings, cargo test, tsc, eslint, vitest). As before, only `__synthetic__`, generated tones and the generated camera were used; nothing real was captured.
+
+### A1 Export "Original"
+- Cause: the size estimate for an MP4 reused the GIF size plan (a GIF is limited to 720 px), so the dialog showed 1720×720 and a size estimate four times too small. The MP4 estimate is now worked out from the recording (size, trim, bitrate × length + 128 kbit/s of sound) and the resolution list only offers sizes not larger than the recording.
+- [ ] Export your 3440×1440 recording as Original: the file is 3440×1440; the list offers 1080p, 720p, 480p; the estimate is within about 20% of the real size.
+
+### A2 Export speed (NOT FULLY DONE)
+- Reproduced with a generated 61 s 3440×1440 30 fps recording (with webcam, both sound tracks, 2× cursor and halo): 1.07× real time, 47 MB (not 4× slower: your PC is slower than this one, or its content is harder). Stage timings (release build, 61 s): waiting for pictures 37.4 s, webcam drawing 15.6 s, effects 2.5 s, flip 14.4 s (encoder thread), encoder 18.6 s, sound 0.3 s. The decoder is the limit: about 35 pictures a second at this size, whether the graphics card or the processor decodes (the pictures are read back from the card as NV12). After the changes (GPU decoding when available, NV12 conversion with two pixels per chroma pair, flip buffer reused, encoder thread): 51 s (1.19×).
+- A real GPU path (decode, scale and colour-convert on the card and hand the surface to the encoder) needs an encoder that takes textures; the capture library's encoder only takes memory buffers, so it needs its own Media Foundation sink writer. Not done.
+- [ ] Export a 61 s 3440×1440 recording on your PC and note the time; if it is still slow, send the `SNIPMUNK_PROFILE=1` output (set the variable before starting Snipmunk).
+
+### A3 Trimmed exports
+- The reader seeks to one second before the trim start (the pictures before it are dropped); a 2 s part at 36 s of a 40 s recording took 1.3 s against 12 s for the whole video; the first picture is the one of the trim start. An MP4 estimate reads nothing.
+- [ ] Trim the last 5 s of a long recording and export: it starts at once and the file starts at the trim start.
+
+### A4 Export dialog
+- Elapsed time and time left next to the progress bar; when it is done the dialog shows "Export finished", the file name and size and the buttons "Show in File Explorer", "Open" and "Close" (Esc closes).
+- [ ] Run an export and check the time and the three buttons; "Open" starts your video player.
+
+### A5 Timeline
+- The playhead is draggable (the picture follows), a click jumps, ← / → step one picture (Shift: one second) when the player has the focus, Space plays and pauses. The trim handles only show in trim mode (✂ button); the kept part stays highlighted as a band; trim stays non-destructive and saved.
+- [ ] Drag the playhead, click the timeline, press ← → and Shift+← →, turn ✂ on and off.
+
+### A6 Live webcam bubble during recording: NOT DONE
+- Needs a camera preview session before and during the recording and a window that is left out of the capture; not built.
+
+### A7 Edit webcam
+- A button next to the timeline shows handles on the webcam bubble: drag it, resize from a corner (it snaps to S, M or L); the effects panel follows.
+
+### A8 Quick menu pickers
+- Microphone, sound output and webcam can be chosen in the recording options menu (same lists as in Settings → Recording).
+- [ ] **[REAL AUDIO / CAMERA]** Choose each device in the quick menu and record.
+
+### B1 Screenshots are one list
+- No group tabs, no move-to-group, no "This group / All groups"; one list, newest first by default, custom order by dragging, "Delete all…" with a question. Old data with several screenshot groups is merged into one list sorted by capture time when the session loads (unit-tested). Automatic saving writes straight into the chosen folder (no group subfolders). The group engine (data model, `GroupTabs`, colours, emoji, move, reorder, naming) is still in the code, unused by the screenshot list, for Documents.
+- [ ] Start with an old session that has several screenshot groups: one list with everything in time order; capture, copy, annotate, search and OCR work; "Delete all…" asks and deletes.
+
+### B2 Current recording in the temp folder, project tabs: NOT DONE
+- The recording groups, list and "Save recordings to" are still there (the recorder writes to `<Videos>\Snipmunk\<Group>`); the temp folder model, the tab strip, the save/discard/quit questions and the low-disk handling for the temp drive are the next session's work.
+
+### B3 Project files (.snpr)
+- Done: the package module `src-tauri/src/package.rs` and four commands (`project_save`, `project_info`, `project_set_effects`, `project_save_as`).
+- Design: one ZIP file, every entry stored (no compression), `manifest.json` first (`format` = "snipmunk.recording", `version`, `appVersion`; documents will use another `format`), then `screen.mp4`, `system.wav`, `mic.wav`, `cursor.jsonl`, `cursors/*.png`, `webcam.mp4`, `recording.json`, `thumbnail.png`. ZIP64, so entries may be larger than 4 GB. Opening reads only the central directory (kilobytes): the media is read in place by offset (the entries' offset and length are returned by `project_info`), nothing is extracted; the player's `snipmunk-img` range requests can be pointed at those offsets (not wired yet).
+- Costs: creating a project copies the media once (disk and time of the copy, no re-encoding; written to `<file>.part<pid>` next to the target and renamed, so there is never a half-written project). A small change (effects, trim) appends `meta/recording.json.<n>` and a new central directory: a few kilobytes however large the project is. "Save as" copies the media into a compact new file.
+- Crash safety: before an append the old tail of the file (the central directory) is copied to `<file>.tail`; if the program dies during the save the next open puts it back and the project is as it was. Tested by cutting an append off.
+- Not done: the dialogs and tabs (Save as project…, Save, Open, Recent projects), the journal of unsaved edits, serving the player from the package, the file association.
+- [ ] (next session) Save a project, open it from Explorer, change effects, save, reopen.
+
+### B4 Settings cleanup, B5 docs
+- Roadmap rewritten (above). The Settings cleanup of B4 belongs to the recording model change and is not done.
+
+### What you must test with real hardware
+- Export times and sizes of your real 3440×1440 and 1080p recordings (A1, A2, A3).
+- Choosing the microphone, speakers and webcam in the quick menu and recording with them (A8).
+- Everything of the earlier sessions that is still unchecked: real cursor/click effects, real camera sync, real sound.

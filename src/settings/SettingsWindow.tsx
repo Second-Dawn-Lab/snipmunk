@@ -3,7 +3,9 @@ import { Icon } from "@seconddawn/ui";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { WindowControls } from "../components/WindowControls";
 import { useT } from "../i18n";
-import { AboutPage, CapturePage, CopyPage, GeneralPage, OcrPage, SessionsPage } from "./pages";
+import { ipc } from "../ipc";
+import { AboutPage, CopyPage, GeneralPage, OcrPage, ScreenshotsPage, SessionsPage } from "./pages";
+import { RecordingPage } from "./RecordingPage";
 import type { Settings } from "./defaults";
 import { searchSettings, TABS, type SettingEntry, type Tab } from "./model";
 import { settingsStore } from "./store";
@@ -20,6 +22,18 @@ export function SettingsWindow() {
   const [query, setQuery] = useState("");
   const [jump, setJump] = useState<string | null>(null);
   const page = useRef<HTMLElement>(null);
+
+  // "More recording settings…" opens this window on the Recording page.
+  useEffect(() => {
+    const take = () =>
+      void ipc
+        .takeSettingsTab()
+        .then((x) => x && TABS.some((y) => y.id === x) && setTab(x as Tab))
+        .catch(() => undefined);
+    take();
+    const p = ipc.onSettingsTab(take);
+    return () => void p.then((fn) => fn());
+  }, []);
 
   const results = useMemo(() => searchSettings(query, t, locale), [query, t, locale]);
   const searching = query.trim().length > 0;
@@ -116,7 +130,8 @@ export function SettingsWindow() {
         <main className="settings__page" ref={page}>
           <h2>{title ? t(title.label) : ""}</h2>
           {tab === "general" && <GeneralPage settings={settings} set={set} />}
-          {tab === "capture" && <CapturePage settings={settings} set={set} />}
+          {tab === "screenshots" && <ScreenshotsPage settings={settings} set={set} />}
+          {tab === "recording" && <RecordingPage settings={settings} set={set} />}
           {tab === "sessions" && <SessionsPage settings={settings} set={set} />}
           {tab === "copy" && <CopyPage settings={settings} set={set} />}
           {tab === "ocr" && <OcrPage settings={settings} set={set} />}

@@ -206,6 +206,45 @@ impl Session {
         id
     }
 
+    /// Screenshots are one list without groups: every screenshot group is merged into the first one (all captures sorted by the time
+    /// they were taken, oldest first). The group engine stays in the data model (the documents mode reuses it); the screenshot
+    /// list simply never has more than one group. Returns whether anything changed.
+    pub fn merge_image_groups(&mut self) -> bool {
+        let image: Vec<usize> = self
+            .groups
+            .iter()
+            .enumerate()
+            .filter(|(_, g)| !g.is_recording())
+            .map(|(i, _)| i)
+            .collect();
+        if image.len() < 2 {
+            return false;
+        }
+        let first = image[0];
+        let mut all: Vec<Capture> = Vec::new();
+        for &i in &image {
+            all.extend(std::mem::take(&mut self.groups[i].captures));
+        }
+        all.sort_by_key(|c| c.created_at);
+        self.groups[first].captures = all;
+        let keep: std::collections::HashSet<usize> = std::iter::once(first)
+            .chain(
+                self.groups
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, g)| g.is_recording())
+                    .map(|(i, _)| i),
+            )
+            .collect();
+        let mut i = 0;
+        self.groups.retain(|_| {
+            let k = keep.contains(&i);
+            i += 1;
+            k
+        });
+        true
+    }
+
     /// Recordings that sit in a screenshot group (sessions of the first recorder versions) move into the first recording group,
     /// which is made when there is none. Returns whether anything changed.
     fn migrate_videos(&mut self, lang: &str) -> bool {
@@ -376,7 +415,7 @@ impl SessionStore {
             .into_iter()
             .max_by_key(|s| s.updated_at)
             .unwrap_or_else(|| Session::new(lang));
-        let migrated = session.migrate_videos(lang);
+        let migrated = session.migrate_videos(lang) | session.merge_image_groups();
         let rec_root = root.with_file_name("recordings");
         let store = Self {
             root,
@@ -767,6 +806,40 @@ impl SessionStore {
     }
 
     /// The folder of a recording.
+    /// What "Show in File Explorer" shows, worked out now from the current state (never from a path remembered by the page): for a
+    /// recording its video (or, when that is gone, its folder); for a screenshot the file it was saved to automatically.
+    /// `None` when there is nothing to show.
+    pub fn explorer_path(&self, capture_id: &str) -> Option<PathBuf> {
+        let (g, c) = self.session.find_capture(capture_id)?;
+        let cap = &self.session.groups[g].captures[c];
+        if cap.kind.as_deref() == Some("video") {
+            let dir = self.recording_dir(capture_id)?;
+            let video = cap
+                .video_file
+                .as_deref()
+                .and_then(|f| Path::new(f).file_name())
+                .map(|n| dir.join(n))
+                .unwrap_or_else(|| dir.join("screen.mp4"));
+            if video.is_file() {
+                return Some(video);
+            }
+            return dir.is_dir().then_some(dir);
+        }
+        let saved = PathBuf::from(cap.saved_path.as_deref()?);
+        saved.is_file().then_some(saved)
+    }
+
+    /// The name of the rendered video of a recording: its name, made safe for a file name, + ".mp4" ("Recording 2026-11-20 13-47.mp4").
+    pub fn recording_file_name(&self, capture_id: &str) -> String {
+        let name = self
+            .session
+            .find_capture(capture_id)
+            .map(|(g, c)| self.session.groups[g].captures[c].name.clone())
+            .unwrap_or_default();
+        let safe = crate::recstore::safe_name(&name);
+        format!("{}.mp4", if safe.is_empty() { "Recording" } else { &safe })
+    }
+
     pub fn recording_dir(&self, capture_id: &str) -> Option<PathBuf> {
         let (g, c) = self.session.find_capture(capture_id)?;
         let cap = &self.session.groups[g].captures[c];
@@ -1536,7 +1609,8 @@ mod tests {
         let (dir, mut store) = store();
         let g = store.session().groups[0].id.clone();
         let c = add(&mut store, &g, "first");
-        store.create_group(Some("Docs".into())).unwrap();
+        // (a second group of screenshots would be merged at the next start: screenshots are one list)
+        store.create_group_of(Some("Docs".into()), true).unwrap();
         let before = store.session().clone();
         drop(store);
 
@@ -2605,6 +2679,80 @@ mod recording_storage_tests {
         s.delete_group(&g2, None).unwrap();
         assert!(!fb.exists());
         assert!(s.session().find_capture(&b).is_none());
+    }
+
+    #[test]
+    fn several_screenshot_groups_become_one_list_sorted_by_time_and_recordings_are_left_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut s, rec_group) = store(dir.path());
+        let png = {
+            let mut b = Vec::new();
+            image::RgbaImage::new(2, 2)
+                .write_to(&mut io::Cursor::new(&mut b), image::ImageFormat::Png)
+                .unwrap();
+            b
+        };
+        let g1 = s
+            .session()
+            .groups
+            .iter()
+            .find(|g| !g.is_recording())
+            .unwrap()
+            .id
+            .clone();
+        let g2 = s.create_group_of(Some("Other".into()), false).unwrap();
+        let a = s
+            .add_capture(&g2, Some("b second".into()), &png, None, 2, 2, None)
+            .unwrap();
+        let b = s
+            .add_capture(&g1, Some("a first".into()), &png, None, 2, 2, None)
+            .unwrap();
+        // Make the group 2 capture older.
+        for gr in s.session.groups.iter_mut() {
+            for c in gr.captures.iter_mut() {
+                c.created_at = if c.id == a.id { 100 } else { 200 };
+            }
+        }
+        let (rec, _) = recording(&mut s, &rec_group, "R");
+        assert!(s.session.merge_image_groups());
+        let images: Vec<&Group> = s
+            .session()
+            .groups
+            .iter()
+            .filter(|g| !g.is_recording())
+            .collect();
+        assert_eq!(images.len(), 1);
+        let ids: Vec<&str> = images[0].captures.iter().map(|c| c.id.as_str()).collect();
+        assert_eq!(ids, [a.id.as_str(), b.id.as_str()], "oldest first");
+        assert!(s.session().find_capture(&rec).is_some(), "recordings stay");
+        assert!(!s.session.merge_image_groups(), "nothing left to merge");
+    }
+
+    #[test]
+    fn show_in_explorer_finds_the_real_path_after_renames_moves_and_a_new_recordings_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut s, g) = store(dir.path());
+        let (a, _) = recording(&mut s, &g, "Recording 2026-11-20 13-47");
+        let at = |s: &SessionStore| s.explorer_path(&a).unwrap();
+        assert_eq!(
+            at(&s).file_name().unwrap(),
+            "screen.mp4",
+            "the video is shown"
+        );
+        s.rename_group(&g, "Renamed").unwrap();
+        assert!(at(&s).is_file() && at(&s).to_string_lossy().contains("Renamed"));
+        let g2 = s.create_group_of(Some("Other".into()), true).unwrap();
+        s.move_captures(std::slice::from_ref(&a), &g2, None)
+            .unwrap();
+        assert!(at(&s).is_file() && at(&s).to_string_lossy().contains("Other"));
+        // The folder setting changed and the recording was moved after the offer.
+        s.set_recordings_root(dir.path().join("Elsewhere"));
+        assert!(s.relocate_capture(&a));
+        assert!(at(&s).is_file() && at(&s).to_string_lossy().contains("Elsewhere"));
+        // Deleted in Explorer: nothing to show.
+        let video = at(&s);
+        std::fs::remove_dir_all(video.parent().unwrap()).unwrap();
+        assert!(s.explorer_path(&a).is_none());
     }
 
     #[test]

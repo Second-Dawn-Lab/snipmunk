@@ -20,7 +20,7 @@ export function BottomBar(props: {
   const none = props.selectedCount === 0;
   // Nothing selected: Copy and Save take the capture shown in the preview. Select all makes them take everything.
   const label = none ? t("bottom.copy") : t("bottom.copyN", { count: props.selectedCount });
-  const empty = (none && !props.hasCapture) || !!props.recording;
+  const empty = none && !props.hasCapture;
   return (
     <footer className="bottombar">
       <span className="bottombar__count" aria-live="polite">
@@ -39,9 +39,9 @@ export function BottomBar(props: {
         ]}
       />
       )}
-      <button type="button" className="dw-btn" disabled={empty || props.busy} title={t("bottom.saveTip")} onClick={props.onSave}>
+      <button type="button" className="dw-btn" disabled={empty || props.busy} title={props.recording ? t("export.tip") : t("bottom.saveTip")} onClick={props.onSave}>
         <AppIcon name="save" size={16} />
-        {t("bottom.save")}
+        {props.recording ? t("export.button") : t("bottom.save")}
       </button>
       <button type="button" className="dw-btn dw-btn--primary" disabled={empty || props.busy} title={t("bottom.copyTip")} onClick={props.onCopy}>
         <AppIcon name="copy" size={16} />

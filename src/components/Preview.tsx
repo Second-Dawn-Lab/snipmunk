@@ -3,7 +3,7 @@ import { type Capture, type Session } from "../ipc";
 import { formatSize } from "../sessionModel";
 import { AnnotationBar } from "./AnnotationBar";
 import { Editor } from "./Editor";
-import { RecPlayer } from "./RecPlayer";
+import { RecordingView } from "./RecordingView";
 import type { Settings } from "../settings/defaults";
 
 /** "fit" follows the size of the stage; a number is a zoom the user chose. */
@@ -54,7 +54,7 @@ export function Preview(props: {
 
       <div className="preview__stage">
         {capture?.kind === "video" ? (
-          <RecPlayer key={capture.id} session={props.session} capture={capture} />
+          <RecordingView key={capture.id} session={props.session} capture={capture} settings={props.settings} onError={props.onError} />
         ) : capture ? (
           <Editor
             key={capture.id}

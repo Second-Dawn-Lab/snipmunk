@@ -10,7 +10,6 @@ export interface Settings {
   alwaysOnTop: boolean;
   /** "" = not chosen yet. */
   exportFolder: string;
-  newSessionAction: "ask" | "autoExport" | "clear";
   clearOnExit: boolean;
   /** Kept sessions older than this many days are deleted at startup; 0 = keep forever. */
   retentionDays: number;
@@ -68,6 +67,25 @@ export interface Settings {
   recMic: boolean;
   /** The shortcut that starts and stops a recording, from any program. */
   recordHotkey: string;
+  /** Devices ("" = the Windows default; the id of a WASAPI endpoint) for the microphone and the sound of the computer. */
+  micDevice: string;
+  systemDevice: string;
+  /** The cursor and click effects of new recordings (each recording keeps its own, changeable in its effects panel). */
+  cursorShow: boolean;
+  cursorSize: "1" | "1.5" | "2";
+  cursorHalo: boolean;
+  cursorHaloColor: string;
+  clickEffect: "off" | "ripple" | "burst";
+  clickLeftColor: string;
+  clickRightColor: string;
+  clickSize: "small" | "medium" | "large";
+  /** The webcam: recorded with the screen, and how it is laid over the video. */
+  webcamOn: boolean;
+  webcamDevice: string;
+  webcamShape: "circle" | "rounded" | "rect";
+  webcamSize: "s" | "m" | "l";
+  webcamPosition: "top-left" | "top-right" | "bottom-left" | "bottom-right";
+  webcamBorder: boolean;
   /** Where recordings are kept ("" = the Windows Videos folder + Snipmunk). */
   recordingsDir: string;
   /** Save each screenshot automatically (to `autoSaveDir`, "" = the Pictures folder + Snipmunk). */
@@ -97,7 +115,6 @@ export const defaultSettings: Settings = {
   captureHotkey: "Ctrl+Alt+PrintScreen",
   alwaysOnTop: false,
   exportFolder: "",
-  newSessionAction: "ask",
   clearOnExit: false,
   retentionDays: 30,
   defaultCopyMode: "separate",
@@ -138,6 +155,22 @@ export const defaultSettings: Settings = {
   recSystemSound: true,
   recMic: false,
   recordHotkey: "Ctrl+Alt+R",
+  micDevice: "",
+  systemDevice: "",
+  cursorShow: true,
+  cursorSize: "1",
+  cursorHalo: false,
+  cursorHaloColor: "#FFD60A",
+  clickEffect: "ripple",
+  clickLeftColor: "#3B82F6",
+  clickRightColor: "#F97316",
+  clickSize: "medium",
+  webcamOn: false,
+  webcamDevice: "",
+  webcamShape: "circle",
+  webcamSize: "m",
+  webcamPosition: "bottom-right",
+  webcamBorder: true,
   recordingsDir: "",
   autoSaveScreenshots: false,
   autoSaveDir: "",

@@ -1,4 +1,4 @@
-import { Button, IconButton, Select } from "@seconddawn/ui";
+import { IconButton, Select } from "@seconddawn/ui";
 import { useState } from "react";
 import { useT } from "../i18n";
 import type { CaptureDelay, CaptureMode, Settings } from "../settings/defaults";
@@ -51,7 +51,6 @@ const isWindows = typeof navigator !== "undefined" && /Windows/i.test(navigator.
 export function TopBar(props: {
   settings: Settings;
   onPatch: (change: Partial<Settings>) => void;
-  onNewSession: () => void;
   onOpenSettings: () => void;
   /** Start a capture, optionally in this mode (picked from the mode menu). */
   onCapture: (mode?: CaptureMode) => void;
@@ -180,9 +179,6 @@ export function TopBar(props: {
           </button>
         </div>
 
-        <Button icon="plus" onClick={props.onNewSession}>
-          {t("header.newSession")}
-        </Button>
       </div>
 
       <div className="topbar__group topbar__group--end">
@@ -198,7 +194,7 @@ export function TopBar(props: {
           <span>{isWindows ? t("actions.editPaint") : t("actions.openEditor")}</span>
         </button>
         )}
-        <ActionButton icon="save" label={t("actions.save")} tip={soonTip ?? t("actions.saveTip")} disabled={offShare} onClick={share.onSave} />
+        <ActionButton icon="save" label={props.recording ? t("export.button") : t("actions.save")} tip={soonTip ?? (props.recording ? t("export.tip") : t("actions.saveTip"))} disabled={offShare} onClick={share.onSave} />
         <ActionButton icon="copy" label={t("actions.copy")} tip={soonTip ?? t("actions.copyTip")} disabled={offShare} onClick={share.onCopy} />
         <ActionButton
           icon="share"

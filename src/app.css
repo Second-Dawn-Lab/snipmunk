@@ -1704,3 +1704,57 @@ html[data-window="recbar"], html[data-window="recbar"] body, html[data-window="r
 /* M8: the progress of the rendering of a recording. */
 .renderbar { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-radius: 12px; background: var(--dw-surface, #fff); color: var(--dw-text, #111); border: 1px solid var(--dw-border-strong, rgba(128,128,128,.5)); box-shadow: 0 6px 24px rgba(0,0,0,.25); z-index: 50; }
 .renderbar progress { width: 160px; }
+.recplayer__btn--off { opacity: .65; }
+.recopts__more { margin-top: 6px; padding: 6px 4px; background: none; border: 0; color: var(--dw-accent, #2563eb); text-align: start; cursor: pointer; text-decoration: underline; font: inherit; }
+.fxcolor { width: 34px; height: 26px; padding: 0; border: 1px solid var(--dw-border-strong, rgba(128,128,128,.5)); border-radius: 6px; background: none; cursor: pointer; }
+.fxpair { display: inline-flex; align-items: center; gap: 10px; }
+
+/* Recording tab: the player and the effects panel side by side. */
+.recview { display: flex; gap: 12px; width: 100%; height: 100%; min-height: 0; }
+.recview > .recplayer { flex: 1; min-width: 0; }
+.fxpanel { width: 264px; flex: none; overflow: auto; padding: 12px; border-radius: 8px; background: var(--dw-surface, #1b1b1b); color: var(--dw-text, #fff); display: flex; flex-direction: column; gap: 10px; }
+.fxpanel__title { margin: 0; font-size: 14px; }
+.fxpanel__group { display: flex; flex-direction: column; gap: 8px; padding-bottom: 8px; border-bottom: 1px solid var(--dw-border, rgba(128,128,128,.3)); }
+.fxpanel__group h4 { margin: 0; font-size: 12px; opacity: .7; text-transform: uppercase; letter-spacing: .04em; }
+.fxrow { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; }
+.fxrow__label { flex: 1; min-width: 0; }
+@media (max-width: 900px) { .recview { flex-direction: column; } .fxpanel { width: auto; max-height: 40%; } }
+
+/* The timeline of the player: the kept part, the playhead and the two trim handles. */
+.recplayer__timeline { position: relative; flex: 1; min-width: 140px; height: 28px; cursor: pointer; touch-action: none; }
+.recplayer__rail { position: absolute; left: 0; right: 0; top: 12px; height: 4px; border-radius: 2px; background: rgba(128,128,128,.35); }
+.recplayer__kept { position: absolute; top: 12px; height: 4px; background: var(--dw-accent, #3b82f6); }
+.recplayer__head { position: absolute; top: 6px; width: 2px; height: 16px; margin-left: -1px; background: #fff; pointer-events: none; }
+.recplayer__handle { position: absolute; top: 3px; width: 12px; height: 22px; margin-left: -6px; padding: 0; border: 2px solid #fff; border-radius: 4px; background: var(--dw-accent, #3b82f6); cursor: ew-resize; touch-action: none; }
+.recplayer__handle:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.recplayer__cam { position: absolute; object-fit: cover; background: #000; cursor: move; touch-action: none; }
+.recplayer__cam--circle { border-radius: 50%; }
+.recplayer__cam--rounded { border-radius: 22%; }
+.recplayer__cam--rect { border-radius: 0; }
+.recplayer__cam--border { outline: 2px solid rgba(255,255,255,.95); outline-offset: -2px; }
+
+/* The export dialog. */
+.exportdlg { display: flex; flex-direction: column; gap: 12px; min-width: 380px; }
+.exportdlg__row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.exportdlg__group { display: flex; gap: 16px; border: 0; padding: 0; margin: 0; }
+.exportdlg__group legend { float: inline-start; margin-inline-end: 12px; padding: 0; }
+.exportdlg__radio { display: inline-flex; align-items: center; gap: 6px; }
+.exportdlg__fit { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.exportdlg__name { display: inline-flex; align-items: center; gap: 4px; }
+.exportdlg__info { margin: 0; font-variant-numeric: tabular-nums; }
+.exportdlg__note { margin: 0; opacity: .75; font-size: 13px; }
+.exportdlg__warn { margin: 0; padding: 8px 10px; border-radius: 6px; background: rgba(245, 158, 11, .18); border: 1px solid rgba(245, 158, 11, .6); }
+.exportdlg__progress { display: flex; align-items: center; gap: 10px; }
+.exportdlg__progress progress { flex: 1; }
+.exportpreview { display: grid; place-items: center; background: rgba(128,128,128,.15); border-radius: 6px; }
+.exportpreview__canvas { display: grid; place-items: center; background: #000; }
+.exportpreview__picture { background: linear-gradient(135deg, #3b82f6, #22c55e); }
+
+.recplayer { outline: none; }
+.recplayer__btn--on { background: var(--dw-accent, #3b82f6); color: #fff; border-color: transparent; }
+.recplayer__head { cursor: ew-resize; }
+
+.recplayer__camframe { position: absolute; border: 2px dashed #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.5); pointer-events: none; }
+.recplayer__camhandle { position: absolute; width: 12px; height: 12px; background: #fff; border: 2px solid var(--dw-accent, #3b82f6); border-radius: 3px; pointer-events: auto; touch-action: none; }
+.recplayer__camhandle--nw { left: -7px; top: -7px; cursor: nwse-resize; } .recplayer__camhandle--ne { right: -7px; top: -7px; cursor: nesw-resize; }
+.recplayer__camhandle--sw { left: -7px; bottom: -7px; cursor: nesw-resize; } .recplayer__camhandle--se { right: -7px; bottom: -7px; cursor: nwse-resize; }

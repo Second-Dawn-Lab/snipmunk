@@ -24,12 +24,15 @@ export function DeleteGroupDialog(props: {
   }, [group, props.groups]);
 
   const targets = group ? moveTargets(props.groups, group.id) : [];
-  const choice: DeleteChoice = mode === "move" && target ? { mode: "move", targetId: target } : { mode: "delete" };
+  // A group of recordings is only ever deleted for good, with its folders: the dialog says so and offers no move.
+  const recording = group?.kind === "recording";
+  const folder = group?.captures.find((c) => c.videoDir)?.videoDir?.replace(/[\\/][^\\/]*$/, "") ?? "";
+  const choice: DeleteChoice = !recording && mode === "move" && target ? { mode: "move", targetId: target } : { mode: "delete" };
 
   return (
     <Dialog
       open={group !== null}
-      title={t("groups.deleteTitle")}
+      title={recording ? t("groups.deleteRecTitle") : t("groups.deleteTitle")}
       onClose={props.onCancel}
       footer={
         <>
@@ -42,7 +45,8 @@ export function DeleteGroupDialog(props: {
         </>
       }
     >
-      {group && (
+      {group && recording && <p>{t("groups.deleteRecBody", { name: group.name, count: group.captures.length, folder })}</p>}
+      {group && !recording && (
         <div className="deletegroup">
           <p>{t("groups.deleteHas", { name: group.name, count: group.captures.length })}</p>
           <label className="deletegroup__option">

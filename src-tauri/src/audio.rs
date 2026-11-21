@@ -329,12 +329,15 @@ pub mod wasapi {
     use std::thread::JoinHandle;
     use std::time::Duration;
 
+    use windows::core::PCWSTR;
+    use windows::Win32::Devices::FunctionDiscovery::PKEY_Device_FriendlyName;
     use windows::Win32::Foundation::E_ACCESSDENIED;
     use windows::Win32::Media::Audio::{
-        eCapture, eConsole, eRender, IAudioCaptureClient, IAudioClient, IMMDeviceEnumerator,
-        MMDeviceEnumerator, AUDCLNT_BUFFERFLAGS_SILENT, AUDCLNT_SHAREMODE_SHARED,
-        AUDCLNT_STREAMFLAGS_LOOPBACK,
+        eCapture, eConsole, eRender, IAudioCaptureClient, IAudioClient, IMMDevice,
+        IMMDeviceEnumerator, MMDeviceEnumerator, AUDCLNT_BUFFERFLAGS_SILENT,
+        AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_LOOPBACK, DEVICE_STATE_ACTIVE,
     };
+    use windows::Win32::System::Com::STGM_READ;
     use windows::Win32::System::Com::{
         CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize, CLSCTX_ALL,
         COINIT_MULTITHREADED,
@@ -376,28 +379,106 @@ pub mod wasapi {
         }
     }
 
-    /// Open the default device of the kind: the format and the initialised client.
-    fn open(kind: Kind) -> Result<(u32, u16, IAudioClient), AudioError> {
+    /// An audio endpoint as the pickers show it.
+    #[derive(Debug, Clone, serde::Serialize, PartialEq)]
+    #[serde(rename_all = "camelCase")]
+    pub struct DeviceInfo {
+        pub id: String,
+        pub name: String,
+        /// The Windows default of its kind.
+        pub is_default: bool,
+    }
+
+    /// The names are read without opening the device (no microphone is ever started by listing).
+    unsafe fn describe(device: &IMMDevice) -> Option<(String, String)> {
+        unsafe {
+            let id_ptr = device.GetId().ok()?;
+            let id = id_ptr.to_string().ok();
+            CoTaskMemFree(Some(id_ptr.0 as *const _));
+            let store = device.OpenPropertyStore(STGM_READ).ok()?;
+            let value = store.GetValue(&PKEY_Device_FriendlyName).ok()?;
+            // A friendly name is a string property (VT_LPWSTR): its text.
+            let name = value.to_string();
+            Some((id?, name))
+        }
+    }
+
+    /// The active capture endpoints (microphones) and render endpoints (outputs whose sound can be recorded), with the default of each.
+    pub fn list_devices() -> (Vec<DeviceInfo>, Vec<DeviceInfo>) {
+        // SAFETY: COM is initialised for the call and released; the pointers come from the API and are freed as it requires.
+        unsafe {
+            let initialised = CoInitializeEx(None, COINIT_MULTITHREADED).is_ok();
+            let mut out = (Vec::new(), Vec::new());
+            if let Ok(enumerator) =
+                CoCreateInstance::<_, IMMDeviceEnumerator>(&MMDeviceEnumerator, None, CLSCTX_ALL)
+            {
+                for (flow, list) in [(eCapture, &mut out.0), (eRender, &mut out.1)] {
+                    let default_id = enumerator
+                        .GetDefaultAudioEndpoint(flow, eConsole)
+                        .ok()
+                        .and_then(|d| describe(&d))
+                        .map(|(id, _)| id);
+                    if let Ok(all) = enumerator.EnumAudioEndpoints(flow, DEVICE_STATE_ACTIVE) {
+                        for i in 0..all.GetCount().unwrap_or(0) {
+                            if let Some((id, name)) = all.Item(i).ok().and_then(|d| describe(&d)) {
+                                let is_default = Some(&id) == default_id.as_ref();
+                                list.push(DeviceInfo {
+                                    id,
+                                    name,
+                                    is_default,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+            if initialised {
+                CoUninitialize();
+            }
+            out
+        }
+    }
+
+    /// Open the device `id` of the kind (the Windows default when `id` is empty or the device is gone: then the flag in the result
+    /// says so): the format, the initialised client and whether the default was used instead of the chosen device.
+    fn open(kind: Kind, id: &str) -> Result<(u32, u16, IAudioClient, bool), AudioError> {
         // SAFETY: COM calls on this thread; every pointer comes from the API and is freed as it requires.
         unsafe {
             let enumerator: IMMDeviceEnumerator =
                 CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).map_err(map)?;
-            let device = enumerator
-                .GetDefaultAudioEndpoint(
-                    if kind == Kind::System {
-                        eRender
-                    } else {
-                        eCapture
-                    },
-                    eConsole,
-                )
-                .map_err(|e| {
-                    if e.code() == E_ACCESSDENIED {
-                        AudioError::Denied
-                    } else {
-                        AudioError::NoDevice
-                    }
-                })?;
+            let flow = if kind == Kind::System {
+                eRender
+            } else {
+                eCapture
+            };
+            let mut fell_back = false;
+            let chosen = if id.is_empty() {
+                None
+            } else {
+                let wide: Vec<u16> = id.encode_utf16().chain(Some(0)).collect();
+                let found = enumerator
+                    .GetDevice(PCWSTR(wide.as_ptr()))
+                    .ok()
+                    .filter(|d| {
+                        d.GetState()
+                            .map(|s| s == DEVICE_STATE_ACTIVE)
+                            .unwrap_or(false)
+                    });
+                fell_back = found.is_none();
+                found
+            };
+            let device = match chosen {
+                Some(d) => d,
+                None => enumerator
+                    .GetDefaultAudioEndpoint(flow, eConsole)
+                    .map_err(|e| {
+                        if e.code() == E_ACCESSDENIED {
+                            AudioError::Denied
+                        } else {
+                            AudioError::NoDevice
+                        }
+                    })?,
+            };
             let client: IAudioClient = device.Activate(CLSCTX_ALL, None).map_err(map)?;
             let fmt = client.GetMixFormat().map_err(map)?;
             let (rate, channels) = ((*fmt).nSamplesPerSec, (*fmt).nChannels);
@@ -409,7 +490,7 @@ pub mod wasapi {
             let init = client.Initialize(AUDCLNT_SHAREMODE_SHARED, flags, 1_000_000, 0, fmt, None);
             CoTaskMemFree(Some(fmt as *const _));
             init.map_err(map)?;
-            Ok((rate, channels, client))
+            Ok((rate, channels, client, fell_back))
         }
     }
 
@@ -417,13 +498,16 @@ pub mod wasapi {
     /// goes on only when the device opened). `t0` is the clock value of the start of the recording; `enabled` is the mute switch.
     pub fn start(
         kind: Kind,
+        device: &str,
         path: &Path,
         t0: i64,
         waiting: bool,
         enabled: Arc<AtomicBool>,
-    ) -> Result<(Capture, Arc<Mutex<TrackWriter>>), AudioError> {
+    ) -> Result<(Capture, Arc<Mutex<TrackWriter>>, bool), AudioError> {
         let stop = Arc::new(AtomicBool::new(false));
-        let (tx, rx) = std::sync::mpsc::channel::<Result<Arc<Mutex<TrackWriter>>, AudioError>>();
+        let (tx, rx) =
+            std::sync::mpsc::channel::<Result<(Arc<Mutex<TrackWriter>>, bool), AudioError>>();
+        let device = device.to_string();
         let stop2 = stop.clone();
         let path = path.to_path_buf();
         let thread = std::thread::spawn(move || {
@@ -431,7 +515,7 @@ pub mod wasapi {
             unsafe {
                 let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
             }
-            let opened = open(kind).and_then(|(rate, channels, client)| {
+            let opened = open(kind, &device).and_then(|(rate, channels, client, fell_back)| {
                 let mut writer = TrackWriter::create(&path, rate, channels, t0, enabled)
                     .map_err(|e| AudioError::Other(e.to_string()))?;
                 if waiting {
@@ -441,12 +525,12 @@ pub mod wasapi {
                 unsafe {
                     let capture: IAudioCaptureClient = client.GetService().map_err(map)?;
                     client.Start().map_err(map)?;
-                    Ok((client, capture, Arc::new(Mutex::new(writer))))
+                    Ok((client, capture, Arc::new(Mutex::new(writer)), fell_back))
                 }
             });
             let (client, capture, writer) = match opened {
-                Ok((client, capture, writer)) => {
-                    let _ = tx.send(Ok(writer.clone()));
+                Ok((client, capture, writer, fell_back)) => {
+                    let _ = tx.send(Ok((writer.clone(), fell_back)));
                     (client, capture, writer)
                 }
                 Err(e) => {
@@ -495,12 +579,13 @@ pub mod wasapi {
             }
         });
         match rx.recv_timeout(Duration::from_secs(5)) {
-            Ok(Ok(writer)) => Ok((
+            Ok(Ok((writer, fell_back))) => Ok((
                 Capture {
                     stop,
                     thread: Some(thread),
                 },
                 writer,
+                fell_back,
             )),
             Ok(Err(e)) => {
                 let _ = thread.join();
@@ -542,6 +627,9 @@ pub struct Audio {
     mic: Option<Track>,
     /// Why a track could not be made: "mic-denied" (Windows privacy), "mic-none", "system-none". Read once by the start.
     pub notice: Option<&'static str>,
+    /// The devices that were chosen in the settings ("" = the Windows default).
+    pub mic_device: String,
+    pub system_device: String,
 }
 
 #[cfg(windows)]
@@ -555,6 +643,8 @@ impl Audio {
             system: None,
             mic: None,
             notice: None,
+            mic_device: String::new(),
+            system_device: String::new(),
         }
     }
 
@@ -604,7 +694,7 @@ impl Audio {
         }
     }
 
-    fn make(&self, kind: Kind) -> Result<Track, AudioError> {
+    fn make(&mut self, kind: Kind) -> Result<Track, AudioError> {
         let path = track_path(&self.dir, kind);
         let enabled = Arc::new(AtomicBool::new(true));
         if self.synthetic {
@@ -645,8 +735,21 @@ impl Audio {
                 source: Source::Tone(stop, thread),
             });
         }
-        let (capture, writer) =
-            wasapi::start(kind, &path, self.t0, !self.started, enabled.clone())?;
+        let device = if kind == Kind::System {
+            &self.system_device
+        } else {
+            &self.mic_device
+        };
+        let (capture, writer, fell_back) =
+            wasapi::start(kind, device, &path, self.t0, !self.started, enabled.clone())?;
+        if fell_back {
+            // The chosen device is gone: the Windows default is used and the person is told.
+            self.notice = Some(if kind == Kind::System {
+                "system-fallback"
+            } else {
+                "mic-fallback"
+            });
+        }
         Ok(Track {
             writer,
             enabled,
@@ -813,5 +916,19 @@ mod tests {
         assert_eq!(wav_ms(&p), 0);
         assert_eq!(repair(&p, Some(1500)).unwrap(), 1500);
         assert_eq!(wav_ms(&p), 1500);
+    }
+}
+
+#[cfg(all(test, windows))]
+mod device_tests {
+    /// Only the enumeration: no device is opened and nothing is recorded.
+    #[test]
+    fn the_device_lists_can_be_read_and_name_a_default_when_there_is_a_device() {
+        let (mic, system) = super::wasapi::list_devices();
+        for list in [&mic, &system] {
+            assert!(list.iter().all(|d| !d.id.is_empty() && !d.name.is_empty()));
+            assert!(list.iter().filter(|d| d.is_default).count() <= 1);
+        }
+        eprintln!("{} microphones, {} outputs", mic.len(), system.len());
     }
 }
