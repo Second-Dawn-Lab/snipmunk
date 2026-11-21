@@ -463,12 +463,12 @@ pub fn capture_cancel(app: AppHandle) {
 /// The mode bar of an overlay changed the mode: remember it and tell the other overlays.
 #[tauri::command]
 pub fn capture_set_mode(app: AppHandle, mode: String) -> CmdResult<()> {
-    if !["rectangle", "window", "fullscreen", "freeform"].contains(&mode.as_str()) {
+    if !["rectangle", "window", "fullscreen", "freeform", "scrolling"].contains(&mode.as_str()) {
         return Err(CmdError::new("bad_request", "unknown capture mode"));
     }
     if app.state::<Capture>().recording.load(Ordering::SeqCst) {
-        // A recording has no freeform mode.
-        if mode == "freeform" {
+        // A recording has no freeform and no scrolling mode.
+        if mode == "freeform" || mode == "scrolling" {
             return Err(CmdError::new(
                 "bad_request",
                 "a recording has no freeform area",
@@ -555,6 +555,20 @@ pub fn recording_area(rects: &[Rect], index: usize, args: &FinishArgs) -> Option
     (area.w >= geometry::MIN_SELECTION && area.h >= geometry::MIN_SELECTION).then_some(area)
 }
 
+/// The area of a scrolling capture on the virtual desktop: the visible part of the chosen window or rectangle.
+fn recording_area_scrolling(rects: &[Rect], index: usize, args: &FinishArgs) -> Option<Rect> {
+    let monitor = *rects.get(index)?;
+    let [rx, ry, rw, rh] = args.rect;
+    let wanted = Rect::new(
+        monitor.x + rx,
+        monitor.y + ry,
+        rw.max(0) as u32,
+        rh.max(0) as u32,
+    );
+    let area = geometry::visible_part(wanted, rects)?;
+    (area.w >= geometry::MIN_SELECTION && area.h >= geometry::MIN_SELECTION).then_some(area)
+}
+
 /// The pixels of a finished selection, cut out of the frozen screenshots, and the title to name it by.
 pub struct Cut {
     pub frame: dawn_capture::Frame,
@@ -638,6 +652,34 @@ pub fn capture_finish(app: AppHandle, args: FinishArgs) -> CmdResult<()> {
             crate::recording::begin_area(&app, area, hwnd);
             app.state::<Capture>().busy.store(false, Ordering::SeqCst);
         });
+        return Ok(());
+    }
+    if args.mode == "scrolling" {
+        // Pictures are taken fresh after every scroll step; the frozen screenshots are not needed.
+        let area = recording_area_scrolling(&run.rects, index, &args);
+        let title = args
+            .window_title
+            .clone()
+            .filter(|t| !t.trim().is_empty())
+            .or_else(|| {
+                area.and_then(|a| {
+                    winlist::hit_test(&run.windows, a.center()).map(|w| w.title.clone())
+                })
+            });
+        let hwnd = args.window_hwnd.map(|h| h as isize).or_else(|| {
+            area.and_then(|a| winlist::hit_test(&run.windows, a.center()).map(|w| w.hwnd))
+        });
+        drop(run);
+        if let Some(area) = area {
+            // The overlays are gone before the first picture is taken.
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(150));
+                crate::scrollshot::begin(&app, area, hwnd, title);
+                app.state::<Capture>().busy.store(false, Ordering::SeqCst);
+            });
+        } else {
+            capture.busy.store(false, Ordering::SeqCst);
+        }
         return Ok(());
     }
     trace(&format!(

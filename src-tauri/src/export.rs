@@ -319,6 +319,15 @@ pub fn dib_bytes(img: &image::RgbaImage) -> Vec<u8> {
     out
 }
 
+/// A bitmap on the clipboard larger than this is left out (programs and Windows struggle with it): the picture goes as a PNG and
+/// as a file instead (a very tall scrolling screenshot).
+pub const MAX_CLIPBOARD_BITMAP: usize = 256 * 1024 * 1024;
+
+/// Is the bitmap of a picture of this size too large for the clipboard?
+pub fn bitmap_too_large(width: u32, height: u32) -> bool {
+    dib_stride(width) * height as usize > MAX_CLIPBOARD_BITMAP
+}
+
 /// Put the staged pictures on the clipboard: the file list (`files`, so they paste as files in Explorer, chats and mail), an
 /// HTML fragment (`html`, ready-made "HTML Format" text, for Word, Outlook and Google Docs), and the first picture as PNG and
 /// as a bitmap (for programs that take one image only).
@@ -328,7 +337,7 @@ pub fn export_clipboard(
     files: Vec<String>,
     html: Option<String>,
     image: Option<String>,
-) -> CmdResult<()> {
+) -> CmdResult<bool> {
     let paths = files
         .iter()
         .map(|f| staged(f))
@@ -338,12 +347,25 @@ pub fn export_clipboard(
         None => None,
     };
     let png = first.as_ref().map(fs::read).transpose()?;
+    let mut limited = false;
     let dib = match &png {
-        Some(bytes) => Some(dib_bytes(
-            &image::load_from_memory(bytes)
+        Some(bytes) => {
+            let (w, h) = image::ImageReader::new(std::io::Cursor::new(bytes))
+                .with_guessed_format()
                 .map_err(|e| CmdError::new("unsupported", e))?
-                .to_rgba8(),
-        )),
+                .into_dimensions()
+                .map_err(|e| CmdError::new("unsupported", e))?;
+            if bitmap_too_large(w, h) {
+                limited = true;
+                None
+            } else {
+                Some(dib_bytes(
+                    &image::load_from_memory(bytes)
+                        .map_err(|e| CmdError::new("unsupported", e))?
+                        .to_rgba8(),
+                ))
+            }
+        }
         None => None,
     };
     set_clipboard(
@@ -353,7 +375,8 @@ pub fn export_clipboard(
         png.as_deref(),
         dib.as_deref(),
     )
-    .map_err(|e| CmdError::new("clipboard", e))
+    .map_err(|e| CmdError::new("clipboard", e))?;
+    Ok(limited)
 }
 
 #[cfg(windows)]

@@ -1818,6 +1818,62 @@ html[data-window="recbar"], html[data-window="recbar"] body, html[data-window="r
 html[data-window="webcambubble"], html[data-window="webcambubble"] body, html[data-window="webcambubble"] #root { background: transparent !important; margin: 0; overflow: hidden; }
 .bubble { position: fixed; inset: 0; overflow: hidden; background: #000; cursor: move; }
 .bubble img { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; user-select: none; -webkit-user-drag: none; transform: scaleX(1); }
-.bubble__grip { position: absolute; inset-inline-end: 8%; bottom: 8%; width: 18px; height: 18px; border-radius: 50%; background: rgba(255,255,255,.9); border: 2px solid rgba(0,0,0,.55); cursor: nwse-resize; opacity: 0; transition: opacity .15s; touch-action: none; }
-.bubble:hover .bubble__grip { opacity: 1; }
+.bubble__grip { position: absolute; inset-inline-end: 6%; bottom: 6%; width: 32px; height: 32px; display: grid; place-items: center; cursor: nwse-resize; touch-action: none; z-index: 2; }
+.bubble__knob { width: 16px; height: 16px; border-radius: 50%; background: rgba(255,255,255,.95); border: 2px solid rgba(0,0,0,.6); opacity: .35; transition: opacity .12s, transform .12s; pointer-events: none; }
+.bubble:hover .bubble__knob, .bubble__grip:hover .bubble__knob { opacity: 1; transform: scale(1.25); }
 .bubble__ring { position: absolute; inset: 0; pointer-events: none; }
+
+/* The recording tabs: the current recording first, then the projects. */
+.recheader { flex-direction: row; }
+.rectabs { display: flex; align-items: stretch; gap: 2px; margin-bottom: 8px; border-bottom: 1px solid var(--dw-border, rgba(128,128,128,.35)); min-width: 0; }
+.rectabs__strip { display: flex; flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: none; gap: 2px; }
+.rectabs__strip::-webkit-scrollbar { display: none; }
+.rectabs__arrow { width: 22px; border: 0; background: none; color: inherit; cursor: pointer; opacity: .6; display: none; }
+.rectabs__arrow svg { stroke: currentColor; fill: none; stroke-width: 2; transform: rotate(90deg); }
+.rectabs__arrow--next svg { transform: rotate(-90deg); }
+[dir="rtl"] .rectabs__arrow svg { transform: rotate(-90deg); }
+[dir="rtl"] .rectabs__arrow--next svg { transform: rotate(90deg); }
+.rectabs--over .rectabs__arrow { display: block; }
+.rectab { display: inline-flex; align-items: center; gap: 6px; flex: 0 1 200px; min-width: 90px; padding: 0 4px 0 10px; height: 34px; border-radius: 8px 8px 0 0; border: 1px solid transparent; border-bottom: 0; background: none; color: inherit; font: inherit; font-size: 13px; cursor: pointer; }
+.rectab:hover { background: var(--dw-hover, rgba(128,128,128,.14)); }
+.rectab--active { background: var(--dw-surface, #fff); border-color: var(--dw-border, rgba(128,128,128,.35)); margin-bottom: -1px; font-weight: 600; }
+.rectab__main { display: inline-flex; align-items: center; gap: 6px; flex: 1; min-width: 0; height: 100%; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; text-align: start; }
+.rectab__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.rectab__note { font-size: 11px; opacity: .65; white-space: nowrap; }
+.rectab__dot--rec { width: 9px; height: 9px; border-radius: 50%; background: #d62828; flex: none; }
+.rectab__close { width: 20px; height: 20px; display: inline-grid; place-items: center; border: 0; border-radius: 5px; background: none; color: inherit; cursor: pointer; opacity: .6; flex: none; }
+.rectab__close:hover { opacity: 1; background: rgba(128,128,128,.25); }
+.rectab__close svg { stroke: currentColor; fill: none; stroke-width: 2; }
+
+/* The webcam sync slider of the effects panel. */
+.syncrow { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.syncrow input[type="range"] { flex: 1; min-width: 0; margin: 0; accent-color: var(--dw-brand); }
+.syncrow__value { min-width: 58px; text-align: end; font-variant-numeric: tabular-nums; }
+.syncrow__reset { border: 0; background: none; color: inherit; cursor: pointer; width: 22px; height: 22px; border-radius: 5px; }
+.syncrow__reset:disabled { opacity: .3; cursor: default; }
+.syncrow__reset:not(:disabled):hover { background: rgba(128,128,128,.25); }
+
+/* Split and cut: cut-out parts are hatched, split points are thin lines, the selected segment has an outline. */
+.recplayer__cut { position: absolute; top: 10px; height: 8px; border-radius: 2px; pointer-events: none; opacity: .95;
+  background: repeating-linear-gradient(135deg, rgba(240,70,70,.9) 0 3px, rgba(0,0,0,.35) 3px 6px); }
+.recplayer__split { position: absolute; top: 5px; width: 2px; height: 18px; margin-left: -1px; background: #fff; border-radius: 1px; pointer-events: none; box-shadow: 0 0 0 1px rgba(0,0,0,.4); }
+.recplayer__sel { position: absolute; top: 7px; height: 14px; border: 2px solid #fff; border-radius: 4px; pointer-events: none; box-sizing: border-box; }
+.recplayer__editmenu { position: relative; display: inline-flex; }
+.recplayer__menu { position: absolute; bottom: 40px; inset-inline-start: 0; z-index: 5; display: flex; flex-direction: column; min-width: 130px; padding: 4px; border-radius: 8px; background: var(--dw-surface, #222); border: 1px solid var(--dw-border-strong, rgba(128,128,128,.5)); box-shadow: 0 6px 20px rgba(0,0,0,.35); }
+.recplayer__menuitem { text-align: start; padding: 7px 10px; border: 0; border-radius: 6px; background: none; color: inherit; font: inherit; cursor: pointer; }
+.recplayer__menuitem:hover { background: rgba(128,128,128,.22); }
+.recplayer__menuitem--on { font-weight: 700; }
+.recplayer__splitbar { display: inline-flex; gap: 6px; align-items: center; }
+.recplayer__chip { height: 30px; padding: 0 10px; border: 1px solid var(--dw-border-strong, rgba(128,128,128,.5)); border-radius: 15px; background: transparent; color: inherit; font: inherit; font-size: 13px; cursor: pointer; }
+.recplayer__chip:disabled { opacity: .35; cursor: default; }
+.recplayer__chip:not(:disabled):hover { background: rgba(128,128,128,.22); }
+
+/* The pill of a scrolling screenshot. */
+html[data-window="scrollpill"], html[data-window="scrollpill"] body, html[data-window="scrollpill"] #root { background: transparent; overflow: hidden; }
+.scrollpill { display: flex; align-items: center; gap: 12px; margin: 4px; padding: 8px 10px; border-radius: 16px; background: #1f2023; color: #fff; box-shadow: 0 6px 24px rgba(0,0,0,.45); font-size: 13px; }
+.scrollpill__thumb { width: 60px; height: 76px; border-radius: 8px; background: #2d2f34; overflow: hidden; flex: none; display: grid; place-items: end center; }
+.scrollpill__thumb img { width: 100%; height: 100%; object-fit: cover; object-position: bottom; display: block; }
+.scrollpill__text { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.scrollpill__height { opacity: .75; font-variant-numeric: tabular-nums; }
+.scrollpill__stop { height: 32px; padding: 0 14px; border: 0; border-radius: 16px; background: #d62828; color: #fff; font: inherit; font-weight: 600; cursor: pointer; flex: none; }
+.scrollpill__stop:disabled { opacity: .4; cursor: default; }

@@ -42,14 +42,33 @@ pub struct Manifest {
 
 /// The newest layout this program reads and writes.
 pub const VERSION_MAJOR: u32 = 1;
-pub const VERSION_MINOR: u32 = 0;
+pub const VERSION_MINOR: u32 = 1;
 
-/// A manifest for a new package.
+/// The minor version a recording needs: 1 when its effects use the webcam sync or cuts (added in 1.1), else 0. A 1.0 reader plays
+/// such a file with the full video and the webcam where it was recorded, so the minor version is only raised when it is needed.
+pub fn minor_needed(recording_json: &[u8]) -> u32 {
+    let Ok(v) = serde_json::from_slice::<serde_json::Value>(recording_json) else {
+        return 0;
+    };
+    let cuts = v["effects"]["cuts"]
+        .as_array()
+        .is_some_and(|c| !c.is_empty());
+    let sync = v["effects"]["webcam"]["syncMs"]
+        .as_i64()
+        .is_some_and(|s| s != 0);
+    if cuts || sync {
+        VERSION_MINOR
+    } else {
+        0
+    }
+}
+
+/// A manifest for a new package (the lowest minor version: `create` and `append_meta` raise it when the content needs it).
 pub fn new_manifest(kind: &str, version: u32) -> Manifest {
     Manifest {
         format: kind.to_string(),
         version,
-        minor: VERSION_MINOR,
+        minor: 0,
         app_version: env!("CARGO_PKG_VERSION").to_string(),
         extra: serde_json::Map::new(),
     }
@@ -86,7 +105,13 @@ fn tail_path(path: &Path) -> PathBuf {
 /// Make a package at `path`: written to a file next to it and renamed, so there is never a half-written project. The entries are
 /// written in the order given, after the manifest.
 pub fn create(path: &Path, kind: &str, version: u32, sources: &[Source]) -> io::Result<()> {
-    create_streaming(path, &new_manifest(kind, version), sources)
+    let mut manifest = new_manifest(kind, version);
+    for s in sources {
+        if let (true, Data::Bytes(b)) = (s.name == "recording.json", &s.data) {
+            manifest.minor = manifest.minor.max(minor_needed(b));
+        }
+    }
+    create_streaming(path, &manifest, sources)
 }
 
 /// An opened package: its manifest and where every entry lies in the file.
@@ -121,8 +146,19 @@ pub fn repair(path: &Path) -> io::Result<bool> {
 pub fn open(path: &Path, kind: &str) -> io::Result<Package> {
     let _ = repair(path);
     let mut zip = ZipArchive::new(io::BufReader::new(File::open(path)?)).map_err(zerr)?;
+    // The manifest is the first entry; a newer one (a save raised the minor version) is the newest `meta/manifest.json.<n>`.
+    let newest = (0..zip.len())
+        .filter_map(|i| {
+            let n = zip.name_for_index(i)?;
+            n.strip_prefix("meta/manifest.json.")
+                .and_then(|v| v.parse::<u64>().ok())
+                .map(|v| (v, n.to_string()))
+        })
+        .max();
     let manifest: Manifest = {
-        let mut m = zip.by_name(MANIFEST).map_err(zerr)?;
+        let mut m = zip
+            .by_name(newest.as_ref().map_or(MANIFEST, |n| n.1.as_str()))
+            .map_err(zerr)?;
         let mut text = Vec::new();
         m.read_to_end(&mut text)?;
         serde_json::from_slice(&text).map_err(io::Error::other)?
@@ -201,6 +237,25 @@ pub fn read_range(path: &Path, offset: u64, len: u64) -> io::Result<Vec<u8>> {
 /// kilobytes (plus the new central directory) however large the project is. A cut-off save is undone by `repair`.
 pub fn append_meta(path: &Path, kind: &str, items: &[(String, Vec<u8>)]) -> io::Result<()> {
     let pkg = open(path, kind)?;
+    let mut items = items.to_vec();
+    // Effects that need a newer minor version raise it: a new manifest is saved the same way (the first entry stays as it was).
+    let needed = items
+        .iter()
+        .filter(|(n, _)| n == "recording.json")
+        .map(|(_, b)| minor_needed(b))
+        .max()
+        .unwrap_or(0);
+    if needed > pkg.manifest.minor {
+        let manifest = Manifest {
+            minor: needed,
+            app_version: env!("CARGO_PKG_VERSION").to_string(),
+            ..pkg.manifest.clone()
+        };
+        items.push((
+            "manifest.json".into(),
+            serde_json::to_vec_pretty(&manifest).map_err(io::Error::other)?,
+        ));
+    }
     let versions: Vec<(String, Vec<u8>)> = items
         .iter()
         .map(|(n, b)| (format!("meta/{n}.{}", pkg.next_version(n)), b.clone()))
@@ -253,6 +308,7 @@ pub fn compact(from: &Path, to: &Path, kind: &str) -> io::Result<()> {
                 .map(|(n, _)| n.to_string())
         })
         .collect();
+    metas.retain(|n| n != "manifest.json");
     metas.sort();
     metas.dedup();
     for n in names {
@@ -278,8 +334,10 @@ pub fn compact(from: &Path, to: &Path, kind: &str) -> io::Result<()> {
         });
     }
     // The manifest is carried over with every field in it (also those this version does not know); only the writer's version changes.
+    let needed = pkg.meta("recording.json").map_or(0, |b| minor_needed(&b));
     let manifest = Manifest {
         app_version: env!("CARGO_PKG_VERSION").to_string(),
+        minor: pkg.manifest.minor.max(needed),
         ..pkg.manifest.clone()
     };
     create_streaming(to, &manifest, &sources)
@@ -629,5 +687,55 @@ mod tests {
             "the project is as it was"
         );
         assert!(!tail_path(&path).exists());
+    }
+
+    #[test]
+    fn cuts_and_the_webcam_sync_raise_the_minor_version_when_they_are_saved() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = sample(dir.path());
+        assert_eq!(
+            open(&path, KIND_RECORDING).unwrap().manifest.minor,
+            0,
+            "plain: 1.0"
+        );
+        let with_cuts = br#"{"effects":{"cuts":[{"startMs":1000,"endMs":2000}]}}"#.to_vec();
+        append_meta(
+            &path,
+            KIND_RECORDING,
+            &[("recording.json".into(), with_cuts.clone())],
+        )
+        .unwrap();
+        let p = open(&path, KIND_RECORDING).unwrap();
+        assert_eq!(p.manifest.minor, 1, "the saved manifest says 1.1");
+        assert_eq!(p.meta("recording.json").unwrap(), with_cuts);
+        // Save as keeps it, and a project that only has a sync is 1.1 too.
+        let copy = dir.path().join("copy.snpr");
+        compact(&path, &copy, KIND_RECORDING).unwrap();
+        let c = open(&copy, KIND_RECORDING).unwrap();
+        assert_eq!(c.manifest.minor, 1);
+        assert!(
+            !c.entries.keys().any(|k| k.contains("manifest.json.")),
+            "no stale manifest versions in the copy"
+        );
+        assert_eq!(minor_needed(br#"{"effects":{"webcam":{"syncMs":-40}}}"#), 1);
+        assert_eq!(
+            minor_needed(br#"{"effects":{"webcam":{"syncMs":0},"cuts":[]}}"#),
+            0
+        );
+        // A new package made from a recording with cuts starts at 1.1.
+        let video = dir.path().join("v2.bin");
+        std::fs::write(&video, [1u8; 10]).unwrap();
+        let fresh = dir.path().join("fresh.snpr");
+        create(
+            &fresh,
+            KIND_RECORDING,
+            1,
+            &[Source {
+                name: "recording.json".into(),
+                data: Data::Bytes(with_cuts),
+            }],
+        )
+        .unwrap();
+        assert_eq!(open(&fresh, KIND_RECORDING).unwrap().manifest.minor, 1);
     }
 }

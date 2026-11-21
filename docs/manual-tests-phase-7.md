@@ -350,3 +350,39 @@ Gates are green (cargo fmt, clippy -D warnings, the full cargo test, tsc, eslint
 
 ### What you must test by hand
 - The bubble, the header and the flow questions with the real screen and camera (above); the installer registration; the effects of a real camera on CPU.
+
+
+## Session 7-B6: header, tabs, lip sync, split, scrolling screenshots, installer script
+
+Tested with `__synthetic__` frames, generated tones, the generated camera and (scrolling) a development-only test window made by the test instance itself (its pictures come from that window alone, never from the screen). Nothing read the real screen, microphone, camera or system sound.
+
+### A Header and live bubble
+- Header: File ▾ and the main button on the left; icon, name (✎), status chip and "size · duration" on the right (mirrored in right-to-left languages). File menu: Open project…, Save as…, Show in File Explorer, Close project, Discard recording… (current recording only), then the recent projects.
+- Live webcam bubble: the round handle (visible on hover, 16 px or more to grab) resizes it during the recording; the size at the end becomes the overlay size.
+- [ ] Check the header in light/dark and Arabic; resize the bubble while recording with the **[REAL CAMERA]**.
+
+### B Tabs
+- Under the header: the current recording first (no ×; Discard is in the File menu; a new recording asks "save first?" and replaces it), then one tab per open project (dot = unsaved edits, × asks Save / Don't save / Cancel, middle click closes, Ctrl+Tab / Ctrl+Shift+Tab, Ctrl+W, tooltip = path, tabs shrink then scroll with arrows). Opening a project that is already open only switches to it. Only the active tab loads the player and its media (the other tabs keep only their effects, playhead and journal), so memory stays flat; the render caches of a project are removed when its tab is closed. Quit lists every unsaved tab; after a crash the current recording and each project's journal come back as tabs. There is no "project has unsaved edits" question when you start a recording (the project keeps its tab).
+- [ ] Open three projects, edit two, switch, close with ×, middle click, Ctrl+Tab; start a recording with a project open; quit with two unsaved tabs; kill the app and start it again.
+
+### C Lip sync
+- Cause: the webcam's start was taken when the camera was *started* (a camera needs a moment to open, and it hands over frames 50–150 ms after taking them), the frames were dated by their arrival, and the camera was reopened at the countdown → recording hand-over. So the webcam was early or late against the microphone by the camera's start-up and delivery delay.
+- Fix: every webcam picture is dated by the camera's own sample time (mapped to the recording clock, which is the QPC time of the first screen picture; pauses are cut out the same way as for the sound), `webcamStartMs` is the recorded time of the first picture that is kept and is written to disk at once, and the webcam keeps pictures only after the screen clock has started.
+- Test `the_webcam_the_screen_and_the_sound_stay_in_step`: the generated camera flashes white and the generated tones beep at the same recorded times (the first 100 ms of every second); the camera is made 120 ms late like a real one; offsets are measured from the written files. **Webcam vs microphone: +27 ms after the fix** (one picture at 30 fps = 33 ms is the finest a camera can show), **+194 ms before** (arrival dating). Screen vs system sound: +29 ms (all within one picture).
+- "Webcam sync" slider (−500 … +500 ms, step 10, double click or ↺ resets) in the effects panel: `effects.webcam.syncMs`, used by the player, the export, Copy and Share.
+- [ ] **[REAL CAMERA + MICROPHONE]** Record yourself clapping with the webcam and the microphone on: the clap must be seen and heard together in the player and in the export; if a camera is still off, use the slider and tell me by how much.
+
+### D Split and delete parts
+- Scissors button → menu Trim / Split. In Split mode: "Split" (key S) at the playhead, click a segment to select it, Delete (or the button) cuts it out (hatched on the timeline), Delete on a hatched part brings it back; Ctrl+Z / Ctrl+Y (or the arrows) undo and redo. The kept length is shown. Stored as `effects.cuts` (format 1.1, see `docs/snpr-format.md`); the player skips cuts; export, Copy, Share and drag-out leave them out with a 15 ms sound fade. Tests: merging and time mapping, the faded sound, the manifest `minor`, and an export with two cuts is as long as what is left and the sound ends with the picture.
+- [ ] Cut a part in the middle of a talk, play it back and export it; check the join does not click.
+
+### E Scrolling screenshot
+- Mode "Scrolling" (mode menu, overlay mode bar key 5, default mode setting, tooltip): click a window; a pill (excluded from the picture) shows the height, a thumbnail and Stop (Esc stops too). Settings → Screenshots: maximum height (default 20 000 px) and "Scroll back to the top afterwards".
+- How: UI Automation `ScrollPattern` (a page per step) when the window has one; if a page leaves no overlap, the wheel (`WM_MOUSEWHEEL` posted to the window under the middle of the area, step size adjusted to about 60 % of the visible part); `WM_VSCROLL` page down when neither moves. After every step the area is grabbed until three grabs are equal. Own stitcher (`stitch.rs`): row hashes; the sticky header and footer are the rows that are equal in two pictures (kept once); the right-hand columns are not compared and the scrollbar columns that moved are cut off; the overlap is the shift that matches the most non-blank rows (a blank stretch uses the distance of the step before).
+- Tall results: PNG, thumbnails (limited by height), OCR in overlapping tiles, Copy leaves out the bitmap above 256 MB and copies the PNG and the file, with a message.
+- Tested on the test window (painted lines with a sticky header and footer and a moving scrollbar; and an Edit control for UI Automation): the UI Automation, wheel and scroll-bar ways all gave the exact page (7 323 px for 300 lines); the maximum height stopped at 3 150 px for a limit of 3 000; **the tallest tested is 33 723 px (1 400 lines, 124 steps)**. Unit tests: overlap, sticky bands, a blank stretch, a 40 000 px page, a scroll that went too far.
+- [ ] **[REAL WINDOWS]** Try a browser page (Edge/Chrome, a long article), Notepad, Explorer, a Settings page and an app with a sticky header: is the result one clean image, the header once, no doubled lines? Try Esc and Stop while it runs, and a window that cannot scroll (message).
+
+### F Installer script
+- `scripts\build-installer.bat`: checks pnpm and cargo, warns under 10 GB free on E:, builds on E: (`target-release`), `pnpm tauri build --bundles nsis`, prints the installer path and opens the folder. The first run downloads NSIS once into `%LOCALAPPDATA%\tauri`. It was not run here.
+- [ ] **[INSTALLER]** Run it, install, check the `.snpr` icon and the association (see 7-B5).

@@ -81,7 +81,10 @@ export function WebcamBubble() {
         className="bubble__ring"
         style={{ borderRadius: radius, boxShadow: settings.webcamBorder === "off" ? "none" : `inset 0 0 0 max(2px, ${BORDER_WIDTH[settings.webcamBorder] * 100}vmin) ${settings.webcamBorderColor}` }}
       />
-      <span className="bubble__grip" onPointerDown={resize} aria-hidden="true" />
+      {/* The resize handle: a 32 px hit area with a visible knob (always faint, clear on hover). */}
+      <span className="bubble__grip" onPointerDown={resize} title={t("fx.webcamResize")}>
+        <span className="bubble__knob" aria-hidden="true" />
+      </span>
     </div>
   );
 }

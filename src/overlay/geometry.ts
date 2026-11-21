@@ -20,8 +20,8 @@ export interface Size {
   h: number;
 }
 
-export type CaptureModeId = "rectangle" | "window" | "fullscreen" | "freeform";
-export const MODE_ORDER: CaptureModeId[] = ["rectangle", "window", "fullscreen", "freeform"];
+export type CaptureModeId = "rectangle" | "window" | "fullscreen" | "freeform" | "scrolling";
+export const MODE_ORDER: CaptureModeId[] = ["rectangle", "window", "fullscreen", "freeform", "scrolling"];
 
 /** A selection smaller than this (physical pixels, either side) is an accident. */
 export const MIN_SELECTION = 4;
@@ -100,9 +100,9 @@ export function clipToMonitor(box: Box, monitor: Size): Box | null {
   return x1 > x0 && y1 > y0 ? { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } : null;
 }
 
-/** Keys 1 to 4 choose a mode. */
+/** Keys 1 to 5 choose a mode. */
 export function modeForKey(key: string): CaptureModeId | null {
-  const i = ["1", "2", "3", "4"].indexOf(key);
+  const i = ["1", "2", "3", "4", "5"].indexOf(key);
   return i >= 0 ? MODE_ORDER[i] : null;
 }
 

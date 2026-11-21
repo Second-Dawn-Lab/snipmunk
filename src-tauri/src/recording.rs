@@ -318,19 +318,18 @@ pub async fn start_recording(
     if recorder.running.load(Ordering::SeqCst) {
         return Err(CmdError::new("busy", "a recording is already running"));
     }
-    // A new recording replaces the current one: it must be saved as a project first (or discarded), and unsaved edits of an open
-    // project must be saved. The page asks; nothing is deleted here.
+    // A new recording replaces the current one: it must be saved as a project first (or discarded). Open projects stay open in
+    // their own tabs, so their edits are not asked about. The page asks; nothing is deleted here.
     {
         let current = state.sessions.lock().unwrap().current_unsaved();
-        let project = crate::projects::UNSAVED.load(Ordering::SeqCst);
-        if current || project {
+        if current {
             let _ = app.emit(
                 "recording-save-first",
-                serde_json::json!({ "current": current, "project": project }),
+                serde_json::json!({ "current": true }),
             );
             return Err(CmdError::new(
                 "save-first",
-                "the current recording or project is not saved",
+                "the current recording is not saved",
             ));
         }
     }
@@ -1393,6 +1392,7 @@ pub(crate) mod win {
         h: u32,
         segment_len: std::time::Duration,
     ) -> Result<Handle, String> {
+        crate::audio::reset_clock();
         let audio = Arc::new(Mutex::new(crate::audio::Audio::new(dir, true)));
         // A generated cursor movement: the real cursor is not watched in a generated recording.
         let cursor = Arc::new(Mutex::new(
@@ -1421,7 +1421,13 @@ pub(crate) mod win {
                 let started = std::time::Instant::now();
                 let mut i = 0usize;
                 while !stop.load(Ordering::Relaxed) {
-                    let frame = super::test_pattern(w as usize, h as usize, i);
+                    let ts = (i as i64) * (10_000_000 / fps.max(1) as i64);
+                    // (a sync test: the picture is white in the first 100 ms of every second, when the tones sound)
+                    let frame = if crate::audio::sync_mark(ts) && i > 0 {
+                        vec![255u8; (w * h * 4) as usize]
+                    } else {
+                        super::test_pattern(w as usize, h as usize, i)
+                    };
                     if i == 0 {
                         // (the webcam starts with the first picture)
                         shared.first_done.store(true, Ordering::Relaxed);
@@ -1430,7 +1436,6 @@ pub(crate) mod win {
                             let _ = img.save(&shared.first_png);
                         }
                     }
-                    let ts = (i as i64) * (10_000_000 / fps.max(1) as i64);
                     let sent = shared
                         .segments
                         .lock()
@@ -1657,6 +1662,7 @@ pub(crate) mod win {
 
     impl Shared {
         fn first_picture(&self) {
+            // The clock of the recording: every track is counted from the first picture.
             self.audio
                 .lock()
                 .unwrap()
@@ -1701,16 +1707,6 @@ pub(crate) mod win {
     }
 
     impl Handle {
-        /// Where in the recording we are, in milliseconds, with the pauses cut out.
-        fn recorded_ms(&self) -> u64 {
-            let s = &self.shared;
-            let mut paused = s.paused_ms.load(Ordering::Relaxed);
-            if let Some(at) = *s.pause_at.lock().unwrap() {
-                paused += at.elapsed().as_millis() as u64;
-            }
-            s.last_ms.load(Ordering::Relaxed).saturating_sub(paused)
-        }
-
         /// Make the webcam match the switch: it is started the first time it is on and stopped when it is off (it records one stretch
         /// per recording). A notice for the page is returned when the camera could not be used: `webcam-denied`, `webcam-none`,
         /// or `webcam-fallback` (the chosen camera is gone, the first one is used).
@@ -1718,29 +1714,14 @@ pub(crate) mod win {
             let mut slot = self.webcam.lock().unwrap();
             if on && slot.running.is_none() && slot.done.is_none() {
                 let dir = self.shared.first_png.parent()?.to_path_buf();
-                let shared = self.shared.clone();
+                // The screen's first picture has set the clock of the recording (the webcam is counted from it).
                 let ready: Arc<dyn Fn() -> bool + Send + Sync> =
-                    Arc::new(move || shared.first_done.load(Ordering::Relaxed));
-                let start_ms = if self.shared.first_done.load(Ordering::Relaxed) {
-                    self.recorded_ms()
-                } else {
-                    0
-                };
+                    Arc::new(move || crate::audio::REC_T0.load(Ordering::SeqCst) != 0);
                 // The camera that only showed the bubble is let go; the recording opens it and keeps the bubble alive.
                 crate::bubble::stop_preview_camera();
-                match crate::webcam::Webcam::start(
-                    &dir,
-                    device,
-                    self.source == "synthetic",
-                    start_ms,
-                    ready,
-                ) {
+                match crate::webcam::Webcam::start(&dir, device, self.source == "synthetic", ready)
+                {
                     Ok(w) => {
-                        // Where it begins is on disk at once: a recording that is cut off is recovered with it.
-                        let _ = std::fs::write(
-                            dir.join("webcam.json"),
-                            format!("{{\"startMs\":{start_ms}}}"),
-                        );
                         if self.shared.pause_at.lock().unwrap().is_some() {
                             w.pause();
                         }
@@ -1753,7 +1734,7 @@ pub(crate) mod win {
             }
             if !on {
                 if let Some(w) = slot.running.take() {
-                    let start = w.start_ms;
+                    let start = w.start_ms.load(Ordering::SeqCst);
                     slot.done = Some((w.finish(), start));
                 }
             }
@@ -1791,7 +1772,7 @@ pub(crate) mod win {
             let webcam = {
                 let mut slot = self.webcam.lock().unwrap();
                 if let Some(w) = slot.running.take() {
-                    let start = w.start_ms;
+                    let start = w.start_ms.load(Ordering::SeqCst);
                     slot.done = Some((w.finish(), start));
                 }
                 slot.done.take()
@@ -1807,6 +1788,7 @@ pub(crate) mod win {
         }
 
         pub fn pause(&self) {
+            crate::audio::clock_pause(crate::audio::wasapi::now());
             *self.shared.pause_at.lock().unwrap() = Some(std::time::Instant::now());
             self.shared.segments.lock().unwrap().pause();
             if let Some(w) = self.webcam.lock().unwrap().running.as_ref() {
@@ -1819,6 +1801,7 @@ pub(crate) mod win {
         }
 
         pub fn resume(&self) {
+            crate::audio::clock_resume(crate::audio::wasapi::now());
             if let Some(at) = self.shared.pause_at.lock().unwrap().take() {
                 self.shared
                     .paused_ms
@@ -1905,6 +1888,7 @@ pub(crate) mod win {
     }
 
     pub fn start(dir: &Path, fps: u32, quality: &str, target: Target) -> Result<Handle, String> {
+        crate::audio::reset_clock();
         // The monitor and the crop (relative to the monitor) of an area; the size that is recorded.
         let mut monitor = None;
         let mut crop = None;
@@ -2648,7 +2632,6 @@ mod render_tests {
             dir.path(),
             crate::webcam::SYNTHETIC,
             true,
-            500,
             Arc::new(|| true),
         )
         .unwrap();
@@ -2668,10 +2651,14 @@ mod render_tests {
         let (cw, ch, frames) =
             crate::render::win::read_frames(&dir.path().join("webcam.mp4"), 1000).unwrap();
         assert_eq!((cw, ch), (640, 360));
-        let secs = frames.len() as f64 / 30.0;
+        // The pause is cut out: the camera took 3 s of pictures in two stretches. (Opening a segment's encoder takes up to a second
+        // on this PC, and a camera does not deliver what it missed, so the number of pictures is not the length: the length of
+        // the video track is, and it counts from the first to the last picture.)
+        let (len_ms, _) = track_lengths_ms(&dir.path().join("webcam.mp4"));
+        assert!(frames.len() >= 30, "{} pictures", frames.len());
         assert!(
-            (secs - 3.0).abs() < 0.5,
-            "{secs} s of webcam (the pause is cut out)"
+            (1500..=3600).contains(&len_ms),
+            "{len_ms} ms of webcam (the pause is cut out)"
         );
         // The recording knows the webcam; with it shown the export has a disc in the corner, without it not.
         let mut info: RecordingInfo =
@@ -2721,6 +2708,243 @@ mod render_tests {
             "the webcam disc covers the corner: {inside} pixels differ"
         );
         assert!(outside < 100, "and nothing else changed: {outside}");
+    }
+
+    /// The first sample of every sound burst of a 16 bit WAV file, in milliseconds of the track.
+    fn beep_onsets_ms(path: &Path) -> Vec<f64> {
+        let bytes = std::fs::read(path).unwrap();
+        let ch = u16::from_le_bytes([bytes[22], bytes[23]]) as usize;
+        let rate = u32::from_le_bytes([bytes[24], bytes[25], bytes[26], bytes[27]]) as f64;
+        let data = &bytes[44..];
+        let mut onsets = Vec::new();
+        let mut quiet = 0usize;
+        for (i, f) in data.chunks_exact(2 * ch).enumerate() {
+            let v = i16::from_le_bytes([f[0], f[1]]).unsigned_abs();
+            if v > 1500 {
+                if quiet > (rate * 0.3) as usize || onsets.is_empty() {
+                    onsets.push(i as f64 * 1000.0 / rate);
+                }
+                quiet = 0;
+            } else {
+                quiet += 1;
+            }
+        }
+        onsets
+    }
+
+    /// The first picture of every white flash, as a frame number.
+    #[allow(clippy::chunks_exact_to_as_chunks)]
+    fn flash_onsets(frames: &[Vec<u8>], fps: usize) -> Vec<usize> {
+        let mut onsets = Vec::new();
+        let mut last = None::<usize>;
+        for (i, f) in frames.iter().enumerate() {
+            let white = f
+                .chunks_exact(4)
+                .step_by(7)
+                .filter(|p| p[0] > 245 && p[1] > 245 && p[2] > 245)
+                .count();
+            if white * 10 > f.len() / 4 / 7 * 9 && last.is_none_or(|l| i > l + fps / 2) {
+                onsets.push(i);
+                last = Some(i);
+            }
+        }
+        onsets
+    }
+
+    /// One generated recording with the white flash and the beep at the same recorded times; returns (webcam - mic) and
+    /// (screen - system sound) offsets in milliseconds, one per mark.
+    fn sync_offsets(dir: &Path, camera_lag_ms: u64, arrival_stamps: bool) -> (Vec<f64>, Vec<f64>) {
+        use std::sync::atomic::Ordering::SeqCst;
+        let fps = 30usize;
+        crate::audio::SYNC_TEST.store(true, SeqCst);
+        crate::audio::CAM_LAG_MS.store(camera_lag_ms, SeqCst);
+        crate::audio::CAM_ARRIVAL_STAMPS.store(arrival_stamps, SeqCst);
+        let handle = win::start_synthetic(
+            dir,
+            fps as u32,
+            "standard",
+            320,
+            180,
+            Duration::from_secs(3),
+        )
+        .unwrap();
+        handle.apply_audio(true, true, &(String::new(), String::new()));
+        // The camera opens after the recording began, like a switch turned on in the middle.
+        std::thread::sleep(Duration::from_millis(400));
+        assert_eq!(handle.apply_webcam(true, crate::webcam::SYNTHETIC), None);
+        std::thread::sleep(Duration::from_millis(4700));
+        let stats = handle.stop().unwrap();
+        crate::audio::SYNC_TEST.store(false, SeqCst);
+        crate::audio::CAM_LAG_MS.store(0, SeqCst);
+        crate::audio::CAM_ARRIVAL_STAMPS.store(false, SeqCst);
+        let (cam_files, cam_start) = stats.webcam.clone().unwrap();
+        crate::mp4join::join(&crate::mp4join::segments_in(dir), &dir.join("screen.mp4")).unwrap();
+        let cam = join_webcam(dir, &cam_files).unwrap();
+        let mic = stats
+            .audio
+            .iter()
+            .find(|a| a.0 == crate::audio::Kind::Mic)
+            .unwrap()
+            .1
+            .clone();
+        let sys = stats
+            .audio
+            .iter()
+            .find(|a| a.0 == crate::audio::Kind::System)
+            .unwrap()
+            .1
+            .clone();
+        let (_, _, cam_frames) = crate::render::win::read_frames(&dir.join(cam), 1000).unwrap();
+        let (_, _, screen_frames) =
+            crate::render::win::read_frames(&dir.join("screen.mp4"), 1000).unwrap();
+        let near = |t: f64| (t / 1000.0).round() * 1000.0;
+        let cam_t: Vec<f64> = flash_onsets(&cam_frames, fps)
+            .iter()
+            .map(|&i| cam_start as f64 + i as f64 * 1000.0 / fps as f64)
+            .collect();
+        let mic_t = beep_onsets_ms(&mic);
+        let screen_t: Vec<f64> = flash_onsets(&screen_frames, fps)
+            .iter()
+            .map(|&i| i as f64 * 1000.0 / fps as f64)
+            .collect();
+        let sys_t = beep_onsets_ms(&sys);
+        eprintln!("cam start {cam_start} ms; webcam flashes {cam_t:?}; mic beeps {mic_t:?}; screen {screen_t:?}; system {sys_t:?}");
+        let pair = |a: &[f64], b: &[f64]| -> Vec<f64> {
+            a.iter()
+                .filter_map(|&x| b.iter().find(|&&y| near(x) == near(y)).map(|&y| x - y))
+                .collect()
+        };
+        (pair(&cam_t, &mic_t), pair(&screen_t, &sys_t))
+    }
+
+    #[test]
+    fn the_webcam_the_screen_and_the_sound_stay_in_step() {
+        let _encoder = super::encoder_lock();
+        let base = std::env::var("SNIPMUNK_TEST_DIR").unwrap_or_else(|_| ".".into());
+        // A camera that is 120 ms late (real cameras are 50 to 150 ms late), pictures dated by the camera's own time.
+        let dir = tempfile::tempdir_in(&base).unwrap();
+        let (cam, screen) = sync_offsets(dir.path(), 120, false);
+        eprintln!("SYNC after (camera time): webcam-mic {cam:?} ms, screen-system {screen:?} ms");
+        assert!(cam.len() >= 3, "{cam:?}");
+        assert!(screen.len() >= 3, "{screen:?}");
+        // One picture (33 ms) is the finest a 30 fps camera can show.
+        for d in cam.iter().chain(screen.iter()) {
+            assert!(
+                *d >= -34.0 && *d <= 34.0,
+                "offset {d} ms in {cam:?} / {screen:?}"
+            );
+        }
+        // The old way (pictures dated by their arrival) is behind by the delay of the camera.
+        let dir2 = tempfile::tempdir_in(&base).unwrap();
+        let (old, _) = sync_offsets(dir2.path(), 120, true);
+        eprintln!("SYNC before (arrival time): webcam-mic {old:?} ms");
+        assert!(old.iter().all(|d| *d > 80.0), "{old:?}");
+        let _ = &old;
+    }
+
+    /// The length of the video track and of the audio track of an MP4 file, in milliseconds.
+    fn track_lengths_ms(path: &Path) -> (u64, u64) {
+        let f = std::fs::File::open(path).unwrap();
+        let size = f.metadata().unwrap().len();
+        let r = mp4::Mp4Reader::read_header(std::io::BufReader::new(f), size).unwrap();
+        let (mut v, mut a) = (0, 0);
+        for t in r.tracks().values() {
+            let ms = t.duration().as_millis() as u64;
+            match t.track_type() {
+                Ok(mp4::TrackType::Video) => v = ms,
+                Ok(mp4::TrackType::Audio) => a = ms,
+                _ => {}
+            }
+        }
+        (v, a)
+    }
+
+    #[test]
+    fn an_export_with_two_cuts_is_as_long_as_what_is_left_and_the_sound_stays_with_the_picture() {
+        let _encoder = super::encoder_lock();
+        use crate::effects::{Cut, Effects};
+        let base = std::env::var("SNIPMUNK_TEST_DIR").unwrap_or_else(|_| ".".into());
+        let dir = tempfile::tempdir_in(base).unwrap();
+        generated(dir.path(), 640, 360, 30, 6);
+        let cancel = AtomicBool::new(false);
+        let whole = export(dir.path(), "whole.mp4", &cancel).unwrap();
+        let (wv, wa) = track_lengths_ms(&whole.file);
+        let fx = Effects {
+            cuts: vec![
+                Cut {
+                    start_ms: 3500,
+                    end_ms: 4000,
+                },
+                Cut {
+                    start_ms: 1000,
+                    end_ms: 2000,
+                },
+            ],
+            ..Default::default()
+        };
+        set_effects(dir.path(), |e| *e = fx.clone());
+        let cut = export(dir.path(), "cut.mp4", &cancel).unwrap();
+        // 6 s minus 1 s and 0.5 s.
+        assert!(
+            (cut.duration_ms as i64 - 4500).abs() <= 2,
+            "{}",
+            cut.duration_ms
+        );
+        let (cv, ca) = track_lengths_ms(&cut.file);
+        eprintln!("whole: video {wv} ms, audio {wa} ms; two cuts: video {cv} ms, audio {ca} ms, {} frames", cut.frames);
+        assert!(
+            (cv as i64 - (wv as i64 - 1500)).abs() <= 40,
+            "video {cv} ms (whole {wv})"
+        );
+        assert!(
+            (ca as i64 - (wa as i64 - 1500)).abs() <= 40,
+            "audio {ca} ms (whole {wa})"
+        );
+        assert!(
+            (cv as i64 - ca as i64).abs() <= 33,
+            "the sound ends with the picture: {cv} vs {ca}"
+        );
+        assert!(
+            cut.frames >= 130 && cut.frames <= 136,
+            "{} frames",
+            cut.frames
+        );
+        // The pictures after a cut follow on: the right one is shown where it should be (the test pattern moves with time).
+        let (_, _, whole_frames) = crate::render::win::read_frames(&whole.file, 1000).unwrap();
+        let (_, _, cut_frames) = crate::render::win::read_frames(&cut.file, 1000).unwrap();
+        let diff = |a: &[u8], b: &[u8]| {
+            a.iter()
+                .zip(b)
+                .step_by(97)
+                .map(|(x, y)| (*x as i64 - *y as i64).abs())
+                .sum::<i64>()
+        };
+        // Output picture 29 is the last before the first cut (source 29); output picture 30 is source 60 (2.0 s).
+        let closest = |pic: &Vec<u8>| {
+            (0..whole_frames.len())
+                .min_by_key(|&i| diff(pic, &whole_frames[i]))
+                .unwrap()
+        };
+        assert!(
+            (closest(&cut_frames[29]) as i64 - 29).abs() <= 1,
+            "before the cut"
+        );
+        assert!(
+            (closest(&cut_frames[31]) as i64 - 61).abs() <= 1,
+            "after the first cut: {}",
+            closest(&cut_frames[31])
+        );
+        assert!(
+            (closest(&cut_frames[100]) as i64 - 145).abs() <= 1,
+            "after both cuts: {}",
+            closest(&cut_frames[100])
+        );
+        // The estimate of the dialog knows the cuts.
+        let info: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(dir.path().join("recording.json")).unwrap())
+                .unwrap();
+        let est = crate::render::mp4_estimate(&info, &crate::effects::ExportSettings::default());
+        assert!((est.2 as i64 - 4500).abs() <= 2, "{}", est.2);
     }
 
     /// A real-sized export (set SNIPMUNK_RENDER_W/H and SNIPMUNK_PROFILE_SECS; run with --ignored --nocapture): every effect on,

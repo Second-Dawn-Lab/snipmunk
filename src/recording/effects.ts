@@ -1,4 +1,5 @@
 import type { Settings } from "../settings/defaults";
+import { normalizeCuts, type Cut } from "./cuts";
 
 /**
  * How a recording looks when it is played or exported: the cursor, the click effects, the webcam overlay and the trim. Stored in
@@ -18,17 +19,27 @@ export interface Effects {
     y: number;
     border: "off" | "thin" | "medium" | "thick";
     borderColor: string;
+    /** Lip sync, -500..500 ms: the webcam is shown this much later (positive) or earlier (negative) than it was recorded. */
+    syncMs: number;
   };
   /** The part that is played and exported, in milliseconds (`endMs` null = to the end). */
   trim: { startMs: number; endMs: number | null };
+  /** Parts that are cut out (screen time; sorted and merged). A 1.1 addition: a 1.0 reader plays the whole video. */
+  cuts: Cut[];
+}
+
+/** Where the webcam begins on the recording's clock, in seconds: when its first picture was taken, plus the lip sync setting. */
+export function webcamOffset(startMs: number | undefined, e: Effects): number {
+  return ((startMs ?? 0) + e.webcam.syncMs) / 1000;
 }
 
 export function effectsFromSettings(s: Settings): Effects {
   return {
     cursor: { show: s.cursorShow, size: s.cursorSize, halo: s.cursorHalo, haloColor: s.cursorHaloColor },
     click: { kind: s.clickEffect, left: s.clickLeftColor, right: s.clickRightColor, size: s.clickSize },
-    webcam: { show: true, shape: s.webcamShape, size: s.webcamSize, position: s.webcamPosition, x: 0.85, y: 0.85, border: s.webcamBorder, borderColor: s.webcamBorderColor },
+    webcam: { show: true, shape: s.webcamShape, size: s.webcamSize, position: s.webcamPosition, x: 0.85, y: 0.85, border: s.webcamBorder, borderColor: s.webcamBorderColor, syncMs: 0 },
     trim: { startMs: 0, endMs: null },
+    cuts: [],
   };
 }
 
@@ -37,9 +48,18 @@ const pick = <T extends string>(v: unknown, allowed: readonly T[], d: T): T => (
 const color = (v: unknown, d: string): string => (typeof v === "string" && HEX.test(v) ? v : d);
 const frac = (v: unknown, d: number): number => (typeof v === "number" && Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : d);
 
+function readCuts(raw: unknown): Cut[] {
+  if (!Array.isArray(raw)) return [];
+  const list = raw
+    .filter((c): c is Record<string, unknown> => !!c && typeof c === "object")
+    .map((c) => ({ startMs: Number(c.startMs), endMs: Number(c.endMs) }))
+    .filter((c) => Number.isFinite(c.startMs) && Number.isFinite(c.endMs));
+  return normalizeCuts(list);
+}
+
 /** The effects as stored (maybe missing, maybe from another version): every field valid, the rest from `base`. */
 export function readEffects(raw: unknown, base: Effects): Effects {
-  const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, Record<string, unknown> | undefined>;
+  const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, Record<string, unknown> | undefined> & { cuts?: unknown };
   const c = r.cursor ?? {};
   const k = r.click ?? {};
   const w = r.webcam ?? {};
@@ -69,8 +89,10 @@ export function readEffects(raw: unknown, base: Effects): Effects {
       // (older files have a boolean)
       border: w.border === true ? "thin" : w.border === false ? "off" : pick(w.border, ["off", "thin", "medium", "thick"], base.webcam.border),
       borderColor: color(w.borderColor, base.webcam.borderColor),
+      syncMs: typeof w.syncMs === "number" && Number.isFinite(w.syncMs) ? Math.min(500, Math.max(-500, Math.round(w.syncMs))) : 0,
     },
     trim: { startMs, endMs },
+    cuts: readCuts(r.cuts),
   };
 }
 

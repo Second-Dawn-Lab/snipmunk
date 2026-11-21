@@ -10,7 +10,8 @@
     "countdown",
     "recframe",
     "recbar",
-    "webcambubble"
+    "webcambubble",
+    "scrollpill"
   ],
   "permissions": [
     "core:default",

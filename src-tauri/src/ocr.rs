@@ -292,8 +292,70 @@ mod win {
     }
 }
 
-/// Recognize a picture in the requested languages (see `choose_languages`); the best result wins.
+/// Rows of a tall picture read one after the other: each tile is at most `tile` rows, neighbours overlap by `overlap` rows, and
+/// every tile owns the rows between the middle of its overlaps (a line is kept by the tile that owns its middle).
+/// Returns (first row, end row, owned from, owned to) of every tile.
+pub fn tile_bands(height: u32, tile: u32, overlap: u32) -> Vec<(u32, u32, u32, u32)> {
+    if height <= tile {
+        return vec![(0, height, 0, height)];
+    }
+    let step = tile - overlap;
+    let mut out = Vec::new();
+    let mut y0 = 0;
+    loop {
+        let y1 = (y0 + tile).min(height);
+        let last = y1 >= height;
+        let own0 = if y0 == 0 { 0 } else { y0 + overlap / 2 };
+        let own1 = if last { height } else { y1 - overlap / 2 };
+        out.push((y0, y1, own0, own1));
+        if last {
+            break;
+        }
+        y0 += step;
+    }
+    out
+}
+
+/// Recognize a picture in the requested languages (see `choose_languages`); the best result wins. A picture taller than the
+/// engine reads at once (a scrolling screenshot) is read in overlapping tiles and the lines are put together.
 pub fn recognize(
+    rgba: &[u8],
+    width: u32,
+    height: u32,
+    setting: &str,
+    key: String,
+) -> Result<OcrResult, String> {
+    let max = win::max_dimension();
+    if height <= max || width > max {
+        return recognize_one(rgba, width, height, setting, key);
+    }
+    let started = Instant::now();
+    // Tiles well below the limit: the engine enlarges small text, and that needs room.
+    let tile = (max / 2).clamp(1000, 4000).min(max);
+    let mut lines: Vec<OcrLine> = Vec::new();
+    let mut language = String::new();
+    for (y0, y1, own0, own1) in tile_bands(height, tile, 160.min(tile / 4)) {
+        let part = &rgba[(y0 as usize * width as usize * 4)..(y1 as usize * width as usize * 4)];
+        let r = recognize_one(part, width, y1 - y0, setting, key.clone())?;
+        if language.is_empty() {
+            language = r.language.clone();
+        }
+        for mut line in r.lines {
+            for w in &mut line.words {
+                w.y += y0 as f32;
+            }
+            let top = line.words.iter().map(|w| w.y).fold(f32::MAX, f32::min);
+            let bottom = line.words.iter().map(|w| w.y + w.h).fold(0.0, f32::max);
+            let middle = (top + bottom) / 2.0;
+            if middle >= own0 as f32 && middle < own1 as f32 {
+                lines.push(line);
+            }
+        }
+    }
+    Ok(finish(key, language, width, height, lines, started))
+}
+
+fn recognize_one(
     rgba: &[u8],
     width: u32,
     height: u32,
@@ -808,5 +870,25 @@ mod tests {
             Ok(r) => assert_eq!((r.width, r.height), (w, h)),
             Err(e) => assert!(e.contains("language") || e.contains("installed"), "{e}"),
         }
+    }
+
+    #[test]
+    fn a_tall_picture_is_read_in_overlapping_tiles_that_own_every_row_once() {
+        let bands = tile_bands(10_000, 4000, 160);
+        assert_eq!(bands.first().unwrap().0, 0);
+        assert_eq!(bands.last().unwrap().1, 10_000);
+        // The owned rows follow each other without a gap or a double, and lie inside the tile.
+        let mut next = 0;
+        for (y0, y1, o0, o1) in &bands {
+            assert_eq!(*o0, next);
+            assert!(o0 >= y0 && o1 <= y1 && o1 > o0);
+            next = *o1;
+        }
+        assert_eq!(next, 10_000);
+        assert_eq!(tile_bands(500, 4000, 160), vec![(0, 500, 0, 500)]);
+        // 40 000 rows: tiles of at most 4000.
+        assert!(tile_bands(40_000, 4000, 160)
+            .iter()
+            .all(|b| b.1 - b.0 <= 4000));
     }
 }

@@ -15,6 +15,12 @@ const paths = {
   ),
   fullscreen: <path d="M4 9V5a1 1 0 0 1 1-1h4M15 4h4a1 1 0 0 1 1 1v4M20 15v4a1 1 0 0 1-1 1h-4M9 20H5a1 1 0 0 1-1-1v-4" />,
   freeform: <path d="M5 14c-2-4 2-9 8-9s8 4 5 7-6 1-6 4 3 3 1 5" strokeDasharray="3 2.5" />,
+  scrolling: (
+    <>
+      <rect x="5" y="3" width="11" height="18" rx="2" />
+      <path d="M19 8v8M17.5 14.5 19 16l1.5-1.5M17.5 9.5 19 8l1.5 1.5M8 8h5M8 12h5M8 16h3" />
+    </>
+  ),
   camera: (
     <>
       <path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z" />

@@ -223,7 +223,7 @@ mod win {
         thread: Option<JoinHandle<()>>,
         segments: Arc<Mutex<Segments>>,
         /// Where in the recording (milliseconds, pauses cut out) the webcam video begins.
-        pub start_ms: u64,
+        pub start_ms: Arc<std::sync::atomic::AtomicU64>,
         /// The camera that was asked for was not there: the first one is used (the page tells the person).
         pub fell_back: bool,
     }
@@ -320,15 +320,17 @@ mod win {
     impl Webcam {
         /// Start recording into `webcam-000.mp4`, ... in `dir`. `device` is a camera id ("" = the first one; `__synthetic__` = the
         /// generated test pattern). Frames are dropped until `ready()` says the screen's first picture has arrived (so the webcam
-        /// begins with the screen). `start_ms` is where in the recording the webcam begins. The error is a notice for the page:
+        /// begins with the screen). Where in the recording the webcam begins is worked out from the time of its first real picture
+        /// (`start_ms()`), never from when it was started: opening a camera takes a while. The error is a notice for the page:
         /// `webcam-denied` (Windows' privacy setting) or `webcam-none`.
         pub fn start(
             dir: &Path,
             device: &str,
             synthetic: bool,
-            start_ms: u64,
             ready: Arc<dyn Fn() -> bool + Send + Sync>,
         ) -> Result<Self, &'static str> {
+            let start_ms = Arc::new(std::sync::atomic::AtomicU64::new(0));
+            let start_for_thread = start_ms.clone();
             let stop = Arc::new(AtomicBool::new(false));
             let use_synthetic = synthetic || device == SYNTHETIC;
             let fps = 30u32;
@@ -371,7 +373,14 @@ mod win {
                 ));
                 let _ = tx.send(Ok((w, h, fell_back, seg.clone())));
                 super::RECORDING.store(true, Ordering::SeqCst);
-                run(Some(&seg), camera, (w, h, fps), &ready, &stop2);
+                // The first picture that is kept: its recorded time is where the webcam begins (and goes to disk at once).
+                let json = dir2.join("webcam.json");
+                let first = move |ts: i64| {
+                    let ms = (crate::audio::recorded_ticks_at(ts) / 10_000) as u64;
+                    start_for_thread.store(ms, Ordering::SeqCst);
+                    let _ = std::fs::write(&json, format!("{{\"startMs\":{ms}}}"));
+                };
+                run(Some(&seg), camera, (w, h, fps), &ready, &stop2, &first);
                 super::RECORDING.store(false, Ordering::SeqCst);
                 super::clear_preview();
                 finish();
@@ -447,7 +456,7 @@ mod win {
             };
             let _ = tx.send(Ok(()));
             let never: Arc<dyn Fn() -> bool + Send + Sync> = Arc::new(|| false);
-            run(None, camera, (w, h, 30), &never, &stop2);
+            run(None, camera, (w, h, 30), &never, &stop2, &|_| {});
             super::clear_preview();
             unsafe {
                 let _ = MFShutdown();
@@ -479,6 +488,7 @@ mod win {
         (w, h, fps): (u32, u32, u32),
         ready: &Arc<dyn Fn() -> bool + Send + Sync>,
         stop: &AtomicBool,
+        first: &dyn Fn(i64),
     ) {
         let last_preview = std::cell::Cell::new(std::time::Instant::now() - Duration::from_secs(1));
         let preview = |top_down: &[u8], wi: usize, hi: usize| {
@@ -492,29 +502,53 @@ mod win {
         match camera {
             None => {
                 let step = TICKS / fps as i64;
+                let wall0 = now();
                 let mut i = 0usize;
                 while !stop.load(Ordering::SeqCst) {
+                    // A camera does not deliver what it missed (the encoder opening takes a moment): behind schedule, pictures are skipped.
+                    let due = ((now()
+                        - wall0
+                        - crate::audio::CAM_LAG_MS.load(Ordering::Relaxed) as i64 * 10_000)
+                        / step)
+                        .max(0) as usize;
+                    if due > i + 1 {
+                        i = due;
+                    }
+                    // The picture is "taken" at `capture` and handed over `lag` later, like a camera does.
+                    let capture = wall0 + i as i64 * step;
+                    let lag = crate::audio::CAM_LAG_MS.load(Ordering::Relaxed) as i64 * 10_000;
+                    while now() < capture + lag && !stop.load(Ordering::SeqCst) {
+                        std::thread::sleep(Duration::from_millis(2));
+                    }
+                    i += 1;
                     // A generated picture is only made when it is used: for the file every time, for the bubble about 15 times a second.
                     if seg.is_none() && last_preview.get().elapsed() < Duration::from_millis(66) {
-                        std::thread::sleep(Duration::from_millis(10));
                         continue;
                     }
-                    let top_down = pattern(wi, hi, i);
+                    let t0 = crate::audio::REC_T0.load(Ordering::SeqCst);
+                    let flash = t0 != 0 && crate::audio::sync_mark(capture - t0);
+                    let top_down = if flash {
+                        vec![255u8; wi * hi * 4]
+                    } else {
+                        pattern(wi, hi, i)
+                    };
                     preview(&top_down, wi, hi);
                     // Pictures are only kept for the recording once the screen's first picture has arrived.
                     if seg.is_some() && !ready() {
-                        std::thread::sleep(Duration::from_millis(5));
                         continue;
                     }
-                    let b = *begin.get_or_insert_with(now);
+                    let ts = if crate::audio::CAM_ARRIVAL_STAMPS.load(Ordering::Relaxed) {
+                        now()
+                    } else {
+                        capture
+                    };
+                    let b = *begin.get_or_insert_with(|| {
+                        first(ts);
+                        ts
+                    });
                     if let Some(seg) = seg {
                         let frame = crate::recording::flip_rows(&top_down, wi, hi);
-                        let _ = seg.lock().unwrap().send_buffer(&frame, now() - b);
-                    }
-                    i += 1;
-                    let next = b + i as i64 * step;
-                    while now() < next && !stop.load(Ordering::SeqCst) {
-                        std::thread::sleep(Duration::from_millis(2));
+                        let _ = seg.lock().unwrap().send_buffer(&frame, ts - b);
                     }
                 }
             }
@@ -523,6 +557,7 @@ mod win {
                 let mut top_down = vec![0u8; full_row * cam.h as usize];
                 while !stop.load(Ordering::SeqCst) {
                     let mut flags = 0u32;
+                    let mut stamp = 0i64;
                     let mut sample: Option<IMFSample> = None;
                     // SAFETY: valid out pointers; the buffer is locked only while it is copied.
                     let ok = unsafe {
@@ -531,7 +566,7 @@ mod win {
                             0,
                             None,
                             Some(&mut flags),
-                            None,
+                            Some(&mut stamp),
                             Some(&mut sample),
                         );
                         if read.is_err() {
@@ -579,9 +614,23 @@ mod win {
                     if !ready() {
                         continue;
                     }
-                    let b = *begin.get_or_insert_with(now);
+                    // The camera's own time of the picture (when it was taken, not when it arrived: a camera is 50 to 150 ms late). Camera
+                    // sample times are on the system clock (QPC); a time that is far from now is not trusted.
+                    let arrived = now();
+                    let ts = if stamp > 0
+                        && (stamp - arrived).abs() < 5 * TICKS
+                        && !crate::audio::CAM_ARRIVAL_STAMPS.load(Ordering::Relaxed)
+                    {
+                        stamp
+                    } else {
+                        arrived
+                    };
+                    let b = *begin.get_or_insert_with(|| {
+                        first(ts);
+                        ts
+                    });
                     let frame = crate::recording::flip_rows(&even, wi, hi);
-                    let _ = seg.lock().unwrap().send_buffer(&frame, now() - b);
+                    let _ = seg.lock().unwrap().send_buffer(&frame, ts - b);
                 }
             }
         }

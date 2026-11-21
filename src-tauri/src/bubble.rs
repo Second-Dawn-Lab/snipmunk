@@ -305,8 +305,23 @@ pub async fn bubble_resize(app: AppHandle, width: f64) -> crate::error::CmdResul
 /// The newest camera picture as a JPEG for the `snipmunk-cam` address.
 pub fn serve_cam<R: tauri::Runtime>(
     _ctx: tauri::UriSchemeContext<'_, R>,
-    _request: tauri::http::Request<Vec<u8>>,
+    request: tauri::http::Request<Vec<u8>>,
 ) -> tauri::http::Response<Vec<u8>> {
+    // The scrolling screenshot's pill shows its thumbnail from here too (a PNG).
+    if request.uri().path().ends_with("scroll") {
+        return match crate::scrollshot::thumb_png() {
+            Some(bytes) => tauri::http::Response::builder()
+                .header("Content-Type", "image/png")
+                .header("Access-Control-Allow-Origin", "*")
+                .header("Cache-Control", "no-store")
+                .body(bytes)
+                .unwrap_or_default(),
+            None => tauri::http::Response::builder()
+                .status(404)
+                .body(Vec::new())
+                .unwrap_or_default(),
+        };
+    }
     match crate::webcam::preview_jpeg() {
         Some(bytes) => tauri::http::Response::builder()
             .header("Content-Type", "image/jpeg")

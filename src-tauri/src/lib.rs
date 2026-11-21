@@ -27,9 +27,11 @@ mod projects;
 mod recording;
 mod recstore;
 mod render;
+mod scrollshot;
 mod sessions;
 mod settings;
 mod startup;
+mod stitch;
 mod thumbs;
 mod titlebar;
 mod tray;
@@ -117,7 +119,6 @@ pub fn run() {
             projects::project_recent,
             projects::project_recent_remove,
             projects::project_journal,
-            projects::set_unsaved,
             bubble::bubble_resize,
             projects::cancel_quit,
             projects::restart_app,
@@ -166,6 +167,9 @@ pub fn run() {
             ocr::copy_table,
             ocr::open_os_settings,
             gallery::debug_seed_session,
+            scrollshot::scroll_stop,
+            scrollshot::dev_scroll_window,
+            scrollshot::dev_scroll_capture,
             titlebar::set_maximize_rect,
             capture::start_capture,
             capture::capture_overlay_info,

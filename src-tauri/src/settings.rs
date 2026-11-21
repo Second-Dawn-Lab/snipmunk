@@ -29,7 +29,7 @@ pub struct Settings {
     pub default_copy_mode: String,
     /// How the capture list looks: "list" | "medium" | "large"
     pub gallery_view: String,
-    /// The chosen capture mode: "rectangle" | "window" | "fullscreen" | "freeform"
+    /// The chosen capture mode: "rectangle" | "window" | "fullscreen" | "freeform" | "scrolling"
     pub capture_mode: String,
     /// Seconds to wait before a capture: 0, 3, 5 or 10.
     pub capture_delay: u32,
@@ -37,6 +37,10 @@ pub struct Settings {
     pub after_capture: String,
     /// Put every new capture on the clipboard.
     pub auto_copy_to_clipboard: bool,
+    /// The scrolling screenshot stops at this height (pixels).
+    pub scroll_max_height: u32,
+    /// The scrolling screenshot scrolls the window back to the top when it is done.
+    pub scroll_back: bool,
     /// Show the magnifier loupe while selecting.
     pub show_magnifier: bool,
     // The last colors and sizes picked in the annotation tool popovers (used by the tools from Phase 5).
@@ -148,6 +152,8 @@ impl Default for Settings {
             capture_delay: 0,
             after_capture: "front".into(),
             auto_copy_to_clipboard: true,
+            scroll_max_height: 20_000,
+            scroll_back: true,
             show_magnifier: true,
             last_pen_color: "#E53935".into(),
             last_pen_size: 4,
@@ -267,7 +273,7 @@ impl Settings {
         );
         one_of(
             &mut self.capture_mode,
-            &["rectangle", "window", "fullscreen", "freeform"],
+            &["rectangle", "window", "fullscreen", "freeform", "scrolling"],
             &d.capture_mode,
         );
         one_of(
@@ -275,6 +281,7 @@ impl Settings {
             &["front", "background"],
             &d.after_capture,
         );
+        self.scroll_max_height = self.scroll_max_height.clamp(1000, 32_000);
         if ![0, 3, 5, 10].contains(&self.capture_delay) {
             self.capture_delay = d.capture_delay;
         }

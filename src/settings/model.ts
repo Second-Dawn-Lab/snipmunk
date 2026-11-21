@@ -34,6 +34,8 @@ export const INDEX: SettingEntry[] = [
   { id: "captureMode", tab: "screenshots", title: "settings.captureMode", desc: "settings.captureModeDesc" },
   { id: "captureDelay", tab: "screenshots", title: "settings.captureDelay", desc: "settings.captureDelayDesc" },
   { id: "afterCapture", tab: "screenshots", title: "settings.afterCapture", desc: "settings.afterCaptureDesc" },
+  { id: "scrollMax", tab: "screenshots", title: "settings.scrollMax", desc: "settings.scrollMaxDesc" },
+  { id: "scrollBack", tab: "screenshots", title: "settings.scrollBack", desc: "settings.scrollBackDesc" },
   { id: "autoCopy", tab: "screenshots", title: "settings.autoCopy", desc: "settings.autoCopyDesc" },
   { id: "autoSave", tab: "screenshots", title: "settings.autoSave", desc: "settings.autoSaveDesc" },
   { id: "autoSaveNaming", tab: "screenshots", title: "settings.autoSaveNaming", desc: "settings.autoSaveNaming" },

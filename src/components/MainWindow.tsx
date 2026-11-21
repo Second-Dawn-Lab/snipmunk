@@ -905,6 +905,7 @@ export function MainWindow() {
         )}
         <div className="panel panel--right">
           {recMode && rec.header}
+          {recMode && rec.tabsBar}
           {recMode && !capture && rec.empty(() => rec.startRecording(settings.recMode))}
           {(!recMode || capture) && <Preview
             session={session}

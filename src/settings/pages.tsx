@@ -257,7 +257,7 @@ export function ScreenshotsPage({ settings, set }: PageProps) {
             label={t("settings.captureMode")}
             value={settings.captureMode}
             onChange={(captureMode) => set({ captureMode: captureMode as CaptureMode })}
-            options={(["rectangle", "window", "fullscreen", "freeform"] as const).map((m) => ({
+            options={(["rectangle", "window", "fullscreen", "freeform", "scrolling"] as const).map((m) => ({
               value: m,
               label: t(`mode.${m}`),
             }))}
@@ -284,6 +284,17 @@ export function ScreenshotsPage({ settings, set }: PageProps) {
               { value: "background", label: t("settings.afterBackground") },
             ]}
           />
+        </Setting>
+        <Setting id="scrollMax" title={t("settings.scrollMax")} description={t("settings.scrollMaxDesc")}>
+          <Select
+            label={t("settings.scrollMax")}
+            value={String(settings.scrollMaxHeight)}
+            onChange={(v) => set({ scrollMaxHeight: Number(v) })}
+            options={[5000, 10000, 20000, 32000].map((h) => ({ value: String(h), label: t("scroll.px", { height: h }) }))}
+          />
+        </Setting>
+        <Setting id="scrollBack" title={t("settings.scrollBack")} description={t("settings.scrollBackDesc")}>
+          <Switch label={t("settings.scrollBack")} checked={settings.scrollBack} onChange={(scrollBack) => set({ scrollBack })} />
         </Setting>
         <Setting id="autoCopy" title={t("settings.autoCopy")} description={t("settings.autoCopyDesc")}>
           <Switch

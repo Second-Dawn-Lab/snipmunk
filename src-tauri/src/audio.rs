@@ -318,6 +318,69 @@ pub enum AudioError {
     Other(String),
 }
 
+// ---- the clock of the running recording ---------------------------------------------------------------------------------------
+
+/// The clock value (100 ns, the QPC clock of `wasapi::now`) of the first picture of the recording that runs; 0 before it. Every track
+/// is counted from it: screen, sound, cursor and webcam. Generated sources read it to flash and beep at known recorded times.
+pub static REC_T0: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+
+/// Generated sources (tests only): the generated camera flashes white and the generated tones beep for 100 ms at the start of every
+/// recorded second, so the sync of the tracks can be measured.
+pub static SYNC_TEST: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// How late the generated camera delivers its pictures, in milliseconds (a real camera is 50 to 150 ms late); tests only.
+pub static CAM_LAG_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Time the webcam pictures by their arrival instead of the camera's own time (the old behaviour; tests measure it).
+pub static CAM_ARRIVAL_STAMPS: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// The pauses of the running recording as (start, end) clock values; an open pause has `i64::MAX` as its end.
+static PAUSES: std::sync::Mutex<Vec<(i64, i64)>> = std::sync::Mutex::new(Vec::new());
+
+/// A new recording starts: its clock is not known yet and it has no pauses.
+pub fn reset_clock() {
+    REC_T0.store(0, std::sync::atomic::Ordering::SeqCst);
+    PAUSES.lock().unwrap_or_else(|e| e.into_inner()).clear();
+}
+
+pub fn clock_pause(now: i64) {
+    PAUSES
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .push((now, i64::MAX));
+}
+
+pub fn clock_resume(now: i64) {
+    if let Some(p) = PAUSES.lock().unwrap_or_else(|e| e.into_inner()).last_mut() {
+        if p.1 == i64::MAX {
+            p.1 = now;
+        }
+    }
+}
+
+/// The recorded time (100 ns, pauses cut out) of a clock value `ts`; 0 before the first picture.
+pub fn recorded_ticks_at(ts: i64) -> i64 {
+    let t0 = REC_T0.load(std::sync::atomic::Ordering::SeqCst);
+    if t0 == 0 || ts <= t0 {
+        return 0;
+    }
+    let paused: i64 = PAUSES
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .iter()
+        .map(|&(a, b)| (b.min(ts) - a.max(t0)).max(0))
+        .sum();
+    ts - t0 - paused
+}
+
+/// Does the generated source make a mark (a flash, a beep) at this recorded time? The first 100 ms of every second.
+pub fn sync_mark(recorded_ticks: i64) -> bool {
+    SYNC_TEST.load(std::sync::atomic::Ordering::Relaxed)
+        && recorded_ticks >= 0
+        && recorded_ticks.rem_euclid(TICKS) < TICKS / 10
+}
+
 #[cfg(windows)]
 pub mod wasapi {
     //! The Windows devices. Nothing here runs in the tests (it would record the real sound of the computer): the logic that matters
@@ -650,6 +713,7 @@ impl Audio {
 
     /// The first picture arrived: the clock of the recording starts now, for the tracks that exist and the ones to come.
     pub fn start_clock(&mut self, now: i64) {
+        REC_T0.store(now, std::sync::atomic::Ordering::SeqCst);
         self.t0 = now;
         self.started = true;
         for t in self.system.iter().chain(self.mic.iter()) {
@@ -717,7 +781,15 @@ impl Audio {
                     let mut v = Vec::with_capacity(960);
                     for i in 0..480u64 {
                         let t = (frame + i) as f64 / 48_000.0;
-                        let x = (t * hz * std::f64::consts::TAU).sin() as f32 * 0.3;
+                        // In a sync test the tone only sounds in the first 100 ms of every second (the camera flashes then).
+                        let gate = if SYNC_TEST.load(Ordering::Relaxed) {
+                            let at = t0 + ((frame + i) as i64) * TICKS / 48_000;
+                            (REC_T0.load(Ordering::SeqCst) != 0 && sync_mark(recorded_ticks_at(at)))
+                                as u8 as f32
+                        } else {
+                            1.0
+                        };
+                        let x = (t * hz * std::f64::consts::TAU).sin() as f32 * 0.3 * gate;
                         v.push(x);
                         v.push(x);
                     }

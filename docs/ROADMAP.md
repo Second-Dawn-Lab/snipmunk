@@ -1,6 +1,6 @@
 # Snipmunk roadmap
 
-Status: Phases 1 to 6 are done. Phase 7 (recording, effects, export, projects) is done; the product now has three modes: Screenshots (one clipboard list), Recording (current recording + project files) and Documents (next phase).
+Status: Phases 1 to 7 are done (Phase 7 ✅ with session 7-B6). The product has three modes: Screenshots (one clipboard list), Recording (current recording + project tabs) and Documents (next phase, 7.5). Next: Phase 7.5 Documents, then Phase 8.
 
 ## Phase 1: Repo setup ✅
 Project folder, README, license, `.gitignore`, roadmap and icon placeholder.
@@ -92,9 +92,16 @@ Done in the recorder sessions (details in `docs/manual-tests-phase-7.md`):
 - Session 7-B3 so far: export fixes (Original is the full size, resolution list limited to the recording, size estimate from the real bitrate, trimmed exports seek instead of decoding from the start), export dialog with elapsed/left time and a finished view, player timeline with scrubbing / frame step / trim mode, edit-webcam handles, device pickers in the quick menu, **screenshots are one list without groups** (old groups are merged by capture time; the group engine stays in the code for Documents), "Delete all…", and the **package format of project files** (`src-tauri/src/package.rs`: one stored ZIP with a manifest, append-only small saves, atomic creation, crash repair) with commands to save, inspect, change the effects of and "Save as" a `.snpr`.
 - Session 7-B4: the **recording model change** is done: the recording mode shows the current recording (in `%TEMP%\Snipmunk\current`) or one opened `.snpr` project; Save as project, Open (Ctrl+O), Save (Ctrl+S), Save as, Close, Recent projects, the questions before a new recording and before Quit, a journal of unsaved project edits, low-disk warning, the file association, and the player reading a project straight from the file by offset. Small fixes (Save count, list header, playhead, webcam border colour and thickness) are in too.
 - Session 7-B5: the recording flow is fixed (a new recording closes an open project and is what you see afterwards; Discard recording; one Quit/restart path), the project header is one compact bar (rename, status chip, File menu, one main button), the **live webcam bubble** is done (excluded from capture, draggable and resizable from the countdown on; its place becomes the overlay), the `.snpr` icon with a video badge is registered by the installer hook, and the format is written down in `docs/snpr-format.md` (unknown data is kept on save; a newer major version is refused).
+- Session 7-B6 (the last of Phase 7): the header (File menu left, status right) and **tabs** (current recording first, projects after it; unsaved dot, Ctrl+Tab, Ctrl+W, only the active tab loads media); **lip sync** fixed (webcam pictures dated by the camera's own time, the webcam begins at its first real picture; a test measures webcam, screen and sound offsets) with a "Webcam sync" slider (`effects.webcam.syncMs`); **Split and delete parts** (`effects.cuts`, undo/redo; format 1.1) honoured by the player, export, Copy and Share; the **scrolling screenshot** (UI Automation, wheel and scroll-bar fallbacks, one tall image, up to 32 000 px); `scripts\build-installer.bat`.
 - **Carried to Phase 8**: a GPU export path (the decoder is the limit at 3440x1440); the installer registration of `.snpr` is untested until an installer is built.
 
 ## Phase 7.5: Documents mode (Tango-style guides)
+Order of work:
+- **7.5-A Step recorder**: "Start guide" captures a step on every click (screenshot + click marker); a hotkey adds a manual step.
+- **7.5-B Step editor**: vertical editor with title, description and screenshot per step; reorder, delete, merge; the annotation tools on step screenshots.
+- **7.5-C Templates and export**: templates (basic; built-in ones with colour schemes; own templates), export to PDF, Word, Markdown and HTML, and the `.snpd` project file on the package format of `.snpr`.
+
+Details:
 - "Start guide" captures a step on every click (screenshot + click marker); a hotkey adds a manual step.
 - Automatic step text from the clicked element's name ("Click 'Save'") through UI Automation, in the UI language; typing steps ("Type '…'"), password fields always hidden.
 - Screenshot per step as window, screen or zoom around the click.
@@ -107,7 +114,8 @@ Done in the recorder sessions (details in `docs/manual-tests-phase-7.md`):
 - **Video editor = a separate Second Dawn app** (after Documents): it opens `.snpr` (see `docs/snpr-format.md`) and normal video files and has the editing features (auto-zoom on clicks, cursor smoothing, multi-clip timeline); the shared rendering (effects, export) may move to a dawn-core crate. Snipmunk keeps a quick review only: play, trim, effects, export, copy, share, project files.
 
 ## Phase 8: Polish and the first release (v0.1.0)
-- Memory reduction (about 700 MB now, goal under 300 MB), GPU export path everywhere, avoid reading text twice (OCR).
+- Memory reduction (about 700 MB now, goal **under 300 MB**): **one shared WebView2 environment** for all windows, and the **hidden windows (overlay, floating bar, bubble) created only when needed** instead of pre-created; GPU export path everywhere; avoid reading text twice (OCR).
+- **Updater**: the update check is registered; add the page's restart button that calls `restart_app` (the unsaved-changes dialog runs first).
 - Node 24 for GitHub Actions in all repositories.
 - Installer with file associations, updater key, code signing (SignPath).
 - README and screenshots, a full manual test pass.

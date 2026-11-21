@@ -46,6 +46,8 @@ pub struct WebcamFx {
     pub border: String,
     /// "#RRGGBB"
     pub border_color: String,
+    /// Lip sync: how many milliseconds later (positive) or earlier (negative) the webcam is shown than it was recorded, -500..500.
+    pub sync_ms: i32,
 }
 
 /// A border setting from a file: a word, or the boolean of earlier versions.
@@ -71,6 +73,71 @@ pub struct Trim {
     pub end_ms: Option<u64>,
 }
 
+/// A part of the recording that is cut out (screen time, milliseconds; `start_ms` is in, `end_ms` is out).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Cut {
+    pub start_ms: u64,
+    pub end_ms: u64,
+}
+
+/// The cuts as they are kept: sorted, overlapping and touching ones merged, empty ones dropped, everything within `0..=limit_ms`.
+pub fn normalize_cuts(cuts: &[Cut], limit_ms: u64) -> Vec<Cut> {
+    let mut v: Vec<Cut> = cuts
+        .iter()
+        .map(|c| Cut {
+            start_ms: c.start_ms.min(limit_ms),
+            end_ms: c.end_ms.min(limit_ms),
+        })
+        .filter(|c| c.end_ms > c.start_ms)
+        .collect();
+    v.sort_by_key(|c| (c.start_ms, c.end_ms));
+    let mut out: Vec<Cut> = Vec::with_capacity(v.len());
+    for c in v {
+        match out.last_mut() {
+            Some(l) if c.start_ms <= l.end_ms => l.end_ms = l.end_ms.max(c.end_ms),
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
+/// The cuts that lie within the trim `start..end`, cut to it.
+pub fn cuts_in(cuts: &[Cut], start: u64, end: u64) -> Vec<Cut> {
+    cuts.iter()
+        .map(|c| Cut {
+            start_ms: c.start_ms.max(start),
+            end_ms: c.end_ms.min(end),
+        })
+        .filter(|c| c.end_ms > c.start_ms)
+        .collect()
+}
+
+/// The length that is kept of `start..end` once the (normalized) cuts are out, in milliseconds.
+pub fn kept_ms(start: u64, end: u64, cuts: &[Cut]) -> u64 {
+    let removed: u64 = cuts_in(cuts, start, end)
+        .iter()
+        .map(|c| c.end_ms - c.start_ms)
+        .sum();
+    end.saturating_sub(start).saturating_sub(removed)
+}
+
+/// Where a time of the recording is in the exported video (ms from its start): the time since `start` minus the cuts before it.
+/// `None` for a time inside a cut.
+#[cfg(test)]
+pub fn output_ms(t: u64, start: u64, cuts: &[Cut]) -> Option<u64> {
+    let mut removed = 0;
+    for c in cuts {
+        if t >= c.start_ms && t < c.end_ms {
+            return None;
+        }
+        if c.end_ms <= t {
+            removed += c.end_ms - c.start_ms.max(start).min(c.end_ms);
+        }
+    }
+    Some(t.saturating_sub(start).saturating_sub(removed))
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Effects {
@@ -78,6 +145,9 @@ pub struct Effects {
     pub click: ClickFx,
     pub webcam: WebcamFx,
     pub trim: Trim,
+    /// Parts that are cut out (a 1.1 addition; sorted and merged by `cleaned`).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub cuts: Vec<Cut>,
 }
 
 impl Default for CursorFx {
@@ -113,6 +183,7 @@ impl Default for WebcamFx {
             y: 0.85,
             border: "thin".into(),
             border_color: "#FFFFFF".into(),
+            sync_ms: 0,
         }
     }
 }
@@ -142,8 +213,10 @@ impl Effects {
                 y: 0.85,
                 border: s.webcam_border.clone(),
                 border_color: s.webcam_border_color.clone(),
+                sync_ms: 0,
             },
             trim: Trim::default(),
+            cuts: Vec::new(),
         }
     }
 
@@ -197,6 +270,8 @@ impl Effects {
             &d.webcam.border,
         );
         colour(&mut self.webcam.border_color, &d.webcam.border_color);
+        self.webcam.sync_ms = self.webcam.sync_ms.clamp(-500, 500);
+        self.cuts = normalize_cuts(&self.cuts, u64::MAX);
         self.webcam.x = self.webcam.x.clamp(0.0, 1.0);
         self.webcam.y = self.webcam.y.clamp(0.0, 1.0);
         if let Some(end) = self.trim.end_ms {
@@ -547,5 +622,74 @@ mod store_tests {
         assert_eq!(back["effects"]["cursor"]["halo"], true);
         assert_eq!(back["effects"]["trim"]["endMs"], 2500);
         assert!(!dir.path().join("recording.json.tmp").exists());
+    }
+
+    #[test]
+    fn the_webcam_sync_is_kept_within_half_a_second_and_moves_the_webcam() {
+        let mut fx = Effects::default();
+        fx.webcam.sync_ms = 9000;
+        assert_eq!(fx.clone().cleaned().webcam.sync_ms, 500);
+        fx.webcam.sync_ms = -9000;
+        assert_eq!(fx.clone().cleaned().webcam.sync_ms, -500);
+        let mut info = crate::recording::RecordingInfo {
+            webcam_start_ms: 1000,
+            ..Default::default()
+        };
+        assert_eq!(crate::render::webcam_offset_ms(&info), 1000);
+        fx.webcam.sync_ms = -120;
+        info.effects = Some(fx);
+        assert_eq!(crate::render::webcam_offset_ms(&info), 880);
+        // An older file has no sync.
+        let old: WebcamFx = serde_json::from_str(r##"{"show":true}"##).unwrap();
+        assert_eq!(old.sync_ms, 0);
+    }
+
+    #[test]
+    fn cuts_are_sorted_merged_and_clamped_and_times_move_up_over_them() {
+        let c = |a, b| Cut {
+            start_ms: a,
+            end_ms: b,
+        };
+        let n = normalize_cuts(
+            &[
+                c(5000, 6000),
+                c(1000, 2000),
+                c(1500, 2500),
+                c(2500, 3000),
+                c(9000, 9000),
+                c(8000, 99000),
+            ],
+            10000,
+        );
+        assert_eq!(n, vec![c(1000, 3000), c(5000, 6000), c(8000, 10000)]);
+        // Kept: 10 s minus 2 s, 1 s and 2 s.
+        assert_eq!(kept_ms(0, 10000, &n), 5000);
+        // With a trim of 2 s..9 s only the parts inside it count: 1 s + 1 s + 1 s are out of 7 s.
+        assert_eq!(kept_ms(2000, 9000, &n), 4000);
+        assert_eq!(
+            cuts_in(&n, 2000, 9000),
+            vec![c(2000, 3000), c(5000, 6000), c(8000, 9000)]
+        );
+        assert_eq!(output_ms(500, 0, &n), Some(500));
+        assert_eq!(output_ms(1000, 0, &n), None);
+        assert_eq!(output_ms(3000, 0, &n), Some(1000));
+        assert_eq!(output_ms(6000, 0, &n), Some(3000));
+        assert_eq!(output_ms(7999, 0, &n), Some(4999));
+        // After a trim start inside a cut the cut only counts from the start.
+        assert_eq!(output_ms(3500, 2000, &n), Some(500));
+        assert_eq!(output_ms(5000, 2000, &n), None);
+        assert_eq!(output_ms(6000, 2000, &n), Some(2000));
+        // Stored files without cuts have none, and cleaned() merges what a file holds.
+        let none: Effects = serde_json::from_str("{}").unwrap();
+        assert!(none.cuts.is_empty());
+        let fx = Effects {
+            cuts: vec![c(10, 20), c(15, 40)],
+            ..Default::default()
+        }
+        .cleaned();
+        assert_eq!(fx.cuts, vec![c(10, 40)]);
+        assert!(!serde_json::to_string(&Effects::default())
+            .unwrap()
+            .contains("cuts"));
     }
 }

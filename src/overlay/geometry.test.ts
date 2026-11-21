@@ -119,8 +119,8 @@ describe("windows", () => {
 
 describe("modes and keys", () => {
   it("keys 1 to 4 pick rectangle, window, full screen and freeform", () => {
-    expect(["1", "2", "3", "4"].map(modeForKey)).toEqual(["rectangle", "window", "fullscreen", "freeform"]);
-    expect(modeForKey("5")).toBeNull();
+    expect(["1", "2", "3", "4", "5"].map(modeForKey)).toEqual(["rectangle", "window", "fullscreen", "freeform", "scrolling"]);
+    expect(modeForKey("6")).toBeNull();
     expect(modeForKey("a")).toBeNull();
   });
 

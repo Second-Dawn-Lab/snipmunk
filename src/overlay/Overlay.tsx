@@ -31,6 +31,7 @@ const MODE_ICONS: Record<CaptureModeId, AppIconName> = {
   window: "window",
   fullscreen: "fullscreen",
   freeform: "freeform",
+  scrolling: "scrolling",
 };
 
 /** The frozen screenshot of one monitor, dimmed, with the selection on top. One of these runs on every monitor. */
@@ -118,7 +119,7 @@ export function Overlay() {
   const physical = pointer ? toPhysical(pointer, ratio) : null;
 
   const hovered =
-    mode === "window" && physical && info
+    (mode === "window" || mode === "scrolling") && physical && info
       ? hitTestWindow(info.windows, toDesktop(physical, monitorOrigin))
       : null;
   const hoveredBox: Box | null = hovered ? clipToMonitor(windowToLocal(hovered, monitorOrigin), image) : null;
@@ -137,7 +138,7 @@ export function Overlay() {
 
   /** The rectangle that is highlighted: the area that would be captured now. */
   const selection: Box | null =
-    mode === "rectangle" ? dragged : mode === "window" ? hoveredBox : mode === "fullscreen" ? (inside ? monitorBox : null) : lassoBox;
+    mode === "rectangle" ? dragged : mode === "window" || mode === "scrolling" ? hoveredBox : mode === "fullscreen" ? (inside ? monitorBox : null) : lassoBox;
 
   // --- finishing ----------------------------------------------------------------
   const done = () => {
@@ -151,8 +152,8 @@ export function Overlay() {
     void ipc.captureCancel();
   };
 
-  /** The modes of this selection: a recording has no freeform area. */
-  const modes = info?.purpose === "recording" ? MODE_ORDER.filter((m) => m !== "freeform") : MODE_ORDER;
+  /** The modes of this selection: a recording has no freeform area and no scrolling. */
+  const modes = info?.purpose === "recording" ? MODE_ORDER.filter((m) => m !== "freeform" && m !== "scrolling") : MODE_ORDER;
   const finish = (rect: Box, extra: { points?: [number, number][]; windowTitle?: string; windowHwnd?: number } = {}) => {
     void ipc.captureFinish({
       label,
@@ -190,7 +191,7 @@ export function Overlay() {
         return;
       }
       const next = modeForKey(e.key);
-      if (next === "freeform" && info?.purpose === "recording") return;
+      if ((next === "freeform" || next === "scrolling") && info?.purpose === "recording") return;
       if (next) {
         e.preventDefault();
         chooseMode(next);
@@ -243,7 +244,7 @@ export function Overlay() {
       setDragFrom(null);
       setDragTo(null);
       if (box) finish(box);
-    } else if (mode === "window") {
+    } else if (mode === "window" || mode === "scrolling") {
       if (hovered) finish(windowToLocal(hovered, monitorOrigin), { windowTitle: hovered.title, windowHwnd: hovered.hwnd });
     } else if (mode === "fullscreen") {
       finish(monitorBox);
@@ -357,7 +358,7 @@ export function Overlay() {
               type="button"
               className="modebar__btn"
               aria-pressed={m === mode}
-              title={`${t(`mode.${m}`)} (${i + 1})`}
+              title={`${m === "scrolling" ? t("mode.scrollingTip") : t(`mode.${m}`)} (${i + 1})`}
               onClick={() => chooseMode(m)}
             >
               <AppIcon name={MODE_ICONS[m]} size={18} />

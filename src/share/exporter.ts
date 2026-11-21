@@ -9,7 +9,7 @@ import { exportNames, FORMAT_EXT, FORMAT_MIME, sanitizeName, dateTimeName } from
 import { canvasBlob, drawCapture, finalSize, renderCapture } from "./renderCapture";
 
 export type CopyOutcome =
-  | { status: "ok"; count: number; mode: CopyMode }
+  | { status: "ok"; count: number; mode: CopyMode; /** The picture was too large for a bitmap on the clipboard (PNG and file only). */ limited?: boolean }
   | { status: "tooLarge"; mode: "stack" | "grid"; width: number; height: number };
 
 function release(canvas: HTMLCanvasElement) {
@@ -35,12 +35,12 @@ export async function copyCaptures(session: Session, captures: readonly Capture[
     // The file list lets chats and Explorer take every picture; Outlook turns files into attachments, so without it
     // (Settings, Copy & paste) the pictures come in the body from the HTML.
     // The pictures and the files on the clipboard (chats, Word, Paint, Explorer).
-    await ipc.exportClipboard(
+    const limited = await ipc.exportClipboard(
       staged.map((s) => s.path),
       cfHtml(imagesHtml(staged)),
       staged[0].path,
     );
-    return { status: "ok", count: captures.length, mode: "separate" };
+    return { status: "ok", count: captures.length, mode: "separate", limited };
   }
   const canvas = document.createElement("canvas");
   canvas.width = plan.layout.width;
@@ -53,8 +53,8 @@ export async function copyCaptures(session: Session, captures: readonly Capture[
   const height = canvas.height;
   const path = await ipc.exportStage("copy", `${plan.mode === "stack" ? "Stack" : "Grid"}.png`, await canvasBlob(canvas, "image/png"));
   release(canvas);
-  await ipc.exportClipboard([path], cfHtml(imagesHtml([{ path, width, height, alt: plan.mode }])), path);
-  return { status: "ok", count: captures.length, mode: plan.mode };
+  const limited = await ipc.exportClipboard([path], cfHtml(imagesHtml([{ path, width, height, alt: plan.mode }])), path);
+  return { status: "ok", count: captures.length, mode: plan.mode, limited };
 }
 
 /** The pictures of a stack or grid layout, for tests and tooltips. */

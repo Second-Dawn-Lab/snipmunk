@@ -38,6 +38,7 @@ const MODES: { id: CaptureMode; icon: AppIconName }[] = [
   { id: "window", icon: "window" },
   { id: "fullscreen", icon: "fullscreen" },
   { id: "freeform", icon: "freeform" },
+  { id: "scrolling", icon: "scrolling" },
 ];
 const DELAYS: CaptureDelay[] = [0, 3, 5, 10];
 

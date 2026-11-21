@@ -45,8 +45,6 @@ struct Open {
 }
 
 static OPEN: Mutex<Option<HashMap<String, Open>>> = Mutex::new(None);
-/// There are unsaved edits in an open project (the page tells; Quit asks about them).
-pub static UNSAVED: AtomicBool = AtomicBool::new(false);
 
 fn with_open<R>(f: impl FnOnce(&mut HashMap<String, Open>) -> R) -> R {
     let mut g = OPEN.lock().unwrap_or_else(|e| e.into_inner());
@@ -311,7 +309,6 @@ pub fn project_rename(id: String, name: String) -> CmdResult<String> {
 #[tauri::command]
 pub fn project_close(id: String, discard: bool) {
     with_open(|m| m.remove(&id));
-    UNSAVED.store(false, Ordering::SeqCst);
     if discard || !cache_dir(&id).join("dirty").is_file() {
         let _ = std::fs::remove_dir_all(cache_dir(&id));
     }
@@ -336,7 +333,6 @@ pub async fn project_commit(id: String) -> CmdResult<()> {
                 }
             });
         }
-        UNSAVED.store(false, Ordering::SeqCst);
         Ok(())
     })
     .await
@@ -367,12 +363,6 @@ pub async fn project_save_copy(id: String, to: String) -> CmdResult<()> {
     .map_err(|e| CmdError::new("io", e.to_string()))
 }
 
-/// The page tells whether the open project has unsaved edits (Quit asks about them).
-#[tauri::command]
-pub fn set_unsaved(unsaved: bool) {
-    UNSAVED.store(unsaved, Ordering::SeqCst);
-}
-
 /// Projects whose unsaved edits survived a crash: (path) of every cache folder marked dirty.
 #[tauri::command]
 pub fn project_journal() -> Vec<String> {
@@ -399,7 +389,6 @@ pub fn mark_dirty(id: &str) {
         let _ = std::fs::write(dir.join("project.txt"), path.to_string_lossy().as_bytes());
     }
     let _ = std::fs::write(dir.join("dirty"), b"1");
-    UNSAVED.store(true, Ordering::SeqCst);
 }
 
 /// The current recording (the one in the temp folder), if there is one: its capture id.
@@ -444,6 +433,12 @@ pub fn take_pending_open() -> Option<String> {
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .take()
+}
+
+/// Does any open project have unsaved edits (a cache folder marked dirty)?
+pub fn any_dirty() -> bool {
+    let ids: Vec<String> = with_open(|m| m.keys().cloned().collect());
+    ids.iter().any(|id| cache_dir(id).join("dirty").is_file())
 }
 
 /// Quit, but ask first when something is not saved: the main window comes forward and the page shows one dialog listing it
@@ -499,7 +494,7 @@ pub fn restart_app(app: tauri::AppHandle) {
 
 /// Does Snipmunk hold anything that is not saved? (An unsaved current recording, unsaved edits of a project.) For Quit.
 pub fn has_unsaved(state: &crate::commands::AppState) -> bool {
-    UNSAVED.load(Ordering::SeqCst) || state.sessions.lock().unwrap().current_unsaved()
+    any_dirty() || state.sessions.lock().unwrap().current_unsaved()
 }
 
 #[cfg(test)]
@@ -591,6 +586,5 @@ mod tests {
             .contains("\"halo\": true"));
         project_close(id.clone(), true);
         assert!(!cache.exists());
-        UNSAVED.store(false, Ordering::SeqCst);
     }
 }

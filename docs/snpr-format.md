@@ -1,6 +1,6 @@
 # The `.snpr` format (Snipmunk recording project)
 
-Version **1.0** (`version` = 1, `minor` = 0). Written by Snipmunk 0.x; meant to be read and written by other Second Dawn programs (the
+Version **1.1** (`version` = 1, `minor` = 1; files without cuts and without a webcam sync are still written as 1.0, `minor` = 0). Written by Snipmunk 0.x; meant to be read and written by other Second Dawn programs (the
 future video editor). The code that writes and reads it is `src-tauri/src/package.rs`; the same container will be used for `.snpd`
 (documents) with another `format`.
 
@@ -25,7 +25,7 @@ The first entry. UTF-8 JSON object:
 |---|---|---|
 | `format` | string | `"snipmunk.recording"`. A reader of another kind refuses the file. |
 | `version` | integer | Major version of the layout (1). A reader that knows a lower major version **refuses** the file ("made by a newer version"). |
-| `minor` | integer, default 0 | Minor version. Only adds things; a reader of the same major version **opens** a newer minor version. |
+| `minor` | integer, default 0 | Minor version. Only adds things; a reader of the same major version **opens** a newer minor version. 1.1 (`minor` = 1) is written when `effects.cuts` is not empty or `effects.webcam.syncMs` is not 0. |
 | `appVersion` | string | The version of the program that wrote the file last (informational). |
 | anything else | any | Unknown fields: readers ignore them, **writers keep them** (see 5). |
 
@@ -76,8 +76,9 @@ UTF-8 JSON object. Unknown fields are kept. Fields (all optional for a reader, w
   "cursor": { "show": true, "size": "1", "halo": false, "haloColor": "#FFD60A" },
   "click":  { "kind": "ripple", "left": "#3B82F6", "right": "#F97316", "size": "medium" },
   "webcam": { "show": true, "shape": "circle", "size": "m", "position": "bottom-right",
-              "x": 0.85, "y": 0.85, "border": "thin", "borderColor": "#FFFFFF" },
-  "trim":   { "startMs": 0, "endMs": null }
+              "x": 0.85, "y": 0.85, "border": "thin", "borderColor": "#FFFFFF", "syncMs": 0 },
+  "trim":   { "startMs": 0, "endMs": null },
+  "cuts":   [ { "startMs": 4000, "endMs": 6500 } ]
 }
 ```
 
@@ -87,6 +88,12 @@ UTF-8 JSON object. Unknown fields are kept. Fields (all optional for a reader, w
   (`"top-left"` ... `"bottom-right"`, 2% margin) or `"free"` (then `x`, `y` is the centre as fractions of the picture, clamped inside).
   `border`: `"off"`, `"thin"`, `"medium"`, `"thick"` (2%, 4%, 7% of the bubble's shorter side, at least 2 px; older files have a boolean:
   true = thin). `borderColor`: `#RRGGBB`.
+- `webcam.syncMs` (**1.1**, integer -500..500, default 0): lip sync; the webcam is shown this many ms later (positive) or earlier (negative)
+  than where `webcamStartMs` puts it. Applied when playing and exporting. A 1.0 reader ignores it (the webcam is where it was recorded).
+- `cuts` (**1.1**, default none): parts of the recording that are cut out, `[{startMs, endMs}]` in ms of the screen video (`startMs` in, `endMs`
+  out), sorted, merged when they touch or overlap, clamped to the video; the key is left out when there are none. Nothing is cut from the media:
+  playing skips them, and export, Copy, Share and drag-out leave them out (the sound is faded for 15 ms before and after a cut). Cuts apply
+  inside the trim; the exported length is the trim minus the cuts. A **1.0 reader plays the full video** (it does not know `cuts`).
 - `trim`: the kept part in ms of the screen video; `endMs` null = to the end. Nothing is cut from the media: the trim is applied when playing and exporting.
 
 ### 3.2 `cursor.jsonl`
@@ -113,6 +120,11 @@ Stale versions stay until the file is written anew ("Save as" copies the newest 
 stale ones).
 
 A **new file** is written next to its target (`<file>.part<pid>`), flushed, and renamed: there is never a half-written project.
+
+### The manifest of a saved project (1.1)
+The manifest is the first entry and is not rewritten in place. When a save needs a higher `minor` than the file's manifest has (the effects now
+hold cuts or a webcam sync), the save also appends the new manifest as `meta/manifest.json.<n>` (like any small item); a reader takes the newest
+version as the manifest, and a 1.0 reader (which only reads the first entry) still opens the file. "Save as" writes the newest manifest as the first entry.
 
 ### Crash safety of an append
 

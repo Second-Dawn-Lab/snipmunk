@@ -65,6 +65,7 @@ export function useShareActions(d: ShareDeps) {
         if (!session || captures.length === 0) return;
         const r = await copyCaptures(session, captures, mode);
         if (r.status === "tooLarge") setTooLarge({ captures, width: r.width, height: r.height });
+        else if (r.limited) deps.current.notify(t("copy.tallLimited"));
         else deps.current.notify(t("copy.done", { count: captures.length }));
       }),
     [job, t],

@@ -131,7 +131,7 @@ export interface OverlayInfo {
   index: number;
   count: number;
   focus: boolean;
-  mode: "rectangle" | "window" | "fullscreen" | "freeform";
+  mode: "rectangle" | "window" | "fullscreen" | "freeform" | "scrolling";
   /** "screenshot" or "recording" (a recording has no freeform area and its own countdown). */
   purpose?: "screenshot" | "recording";
   /** Seconds before a capture (0, 3, 5 or 10). */
@@ -320,6 +320,10 @@ export const ipc = {
   onCaptureAdded: (cb: (a: { captureId: string; groupId: string }) => void) =>
     on<{ captureId: string; groupId: string }>("capture-added", cb),
   onCaptureError: (cb: (message: string) => void) => on<string>("capture-error", cb),
+  /** The Stop button of the scrolling screenshot's pill. */
+  scrollStop: () => call<void>("scroll_stop"),
+  onScrollProgress: (cb: (p: { height: number; n: number }) => void) => on<{ height: number; n: number }>("scroll-progress", cb),
+  onScrollDone: (cb: (reason: string) => void) => on<string>("scroll-done", cb),
   overlayInfo: (label: string) => call<OverlayInfo | null>("capture_overlay_info", { label }),
   overlayReady: (label: string) => call<void>("capture_overlay_ready", { label }),
   onCaptureOpen: (cb: (run: number) => void) => on<number>("capture-open", cb),
@@ -356,7 +360,7 @@ export const ipc = {
   /** Stage one rendered picture; returns its path. `convert: "bmp"` turns a PNG into a BMP on white. */
   exportStage: (kind: ExportKind, name: string, data: Blob, convert?: "bmp") => stageFile(kind, name, data, convert),
   exportClipboard: (files: string[], html: string | null, image: string | null) =>
-    call<void>("export_clipboard", { files, html, image }),
+    call<boolean>("export_clipboard", { files, html, image }),
   clipboardFormats: () => call<string[]>("clipboard_formats"),
   exportSave: (files: string[], names: string[], folder: string) => call<string[]>("export_save", { files, names, folder }),
   exportZip: (files: string[], names: string[], folder: string, zipName: string) =>
@@ -378,7 +382,6 @@ export const ipc = {
   projectRecent: () => call<RecentProject[]>("project_recent"),
   projectRecentRemove: (path: string) => call<void>("project_recent_remove", { path }),
   projectJournal: () => call<string[]>("project_journal"),
-  setUnsaved: (unsaved: boolean) => call<void>("set_unsaved", { unsaved }),
   takePendingOpen: () => call<string | null>("take_pending_open"),
   pickProjectSave: (start: string | undefined, name: string) => call<string | null>("pick_project_save", { start: start ?? null, name }),
   pickProjectOpen: (start?: string) => call<string | null>("pick_project_open", { start: start ?? null }),

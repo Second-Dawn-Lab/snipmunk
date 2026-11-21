@@ -154,6 +154,12 @@ impl TrackReader {
     }
 }
 
+/// Where in the recording (ms) the webcam video begins: the time of its first picture plus the lip sync setting of the effects.
+pub fn webcam_offset_ms(info: &crate::recording::RecordingInfo) -> i64 {
+    let sync = info.effects.as_ref().map_or(0, |e| e.webcam.sync_ms as i64);
+    info.webcam_start_ms as i64 + sync
+}
+
 /// Mix the tracks: the next `n` frames as 16 bit interleaved stereo bytes.
 pub fn mix_next(tracks: &mut [TrackReader], n: usize) -> Vec<u8> {
     let mut sum = vec![(0.0f32, 0.0f32); n];
@@ -167,6 +173,60 @@ pub fn mix_next(tracks: &mut [TrackReader], n: usize) -> Vec<u8> {
     for (l, r) in sum {
         out.extend_from_slice(&((l.clamp(-1.0, 1.0) * 32767.0) as i16).to_le_bytes());
         out.extend_from_slice(&((r.clamp(-1.0, 1.0) * 32767.0) as i16).to_le_bytes());
+    }
+    out
+}
+
+/// How long the sound is faded out before a cut and in after it (so the join does not click), in milliseconds.
+pub const CUT_FADE_MS: u64 = 15;
+
+/// Like `mix_next`, but the parts in `cuts` (start, end in frames of the output rate, the time of the recording) are left out: `pos` is
+/// where the tracks are in the recording, and moves over the cuts. The sound is faded out for `CUT_FADE_MS` before a cut and in
+/// after it. Returns `n` frames of the kept sound.
+#[allow(clippy::chunks_exact_to_as_chunks)]
+pub fn mix_cut(
+    tracks: &mut [TrackReader],
+    pos: &mut u64,
+    n: usize,
+    cuts: &[(u64, u64)],
+) -> Vec<u8> {
+    let fade = (OUT_RATE as u64 * CUT_FADE_MS / 1000).max(1);
+    let mut out = Vec::with_capacity(n * 4);
+    let mut left = n;
+    while left > 0 {
+        // In a cut: the sound of the cut is read and dropped.
+        if let Some(&(_, end)) = cuts.iter().find(|c| *pos >= c.0 && *pos < c.1) {
+            while *pos < end {
+                let k = ((end - *pos) as usize).min(48_000);
+                let _ = mix_next(tracks, k);
+                *pos += k as u64;
+            }
+            continue;
+        }
+        let next_cut = cuts.iter().map(|c| c.0).filter(|&a| a > *pos).min();
+        let k = next_cut.map_or(left, |a| ((a - *pos) as usize).min(left));
+        let mut bytes = mix_next(tracks, k);
+        for (j, f) in bytes.chunks_exact_mut(4).enumerate() {
+            let p = *pos + j as u64;
+            let mut g = 1.0f32;
+            for c in cuts {
+                if p < c.0 && c.0 - p <= fade {
+                    g = g.min((c.0 - p) as f32 / fade as f32);
+                }
+                if p >= c.1 && p - c.1 < fade {
+                    g = g.min((p - c.1 + 1) as f32 / fade as f32);
+                }
+            }
+            if g < 1.0 {
+                for ch in f.chunks_exact_mut(2) {
+                    let v = i16::from_le_bytes([ch[0], ch[1]]) as f32 * g;
+                    ch.copy_from_slice(&(v as i16).to_le_bytes());
+                }
+            }
+        }
+        out.extend_from_slice(&bytes);
+        *pos += k as u64;
+        left -= k;
     }
     out
 }
@@ -1032,8 +1092,24 @@ pub mod win {
             .end_ms
             .map_or(total_ms, |e| e.min(total_ms))
             .max(start_ms + 1);
+        // The parts that are cut out, inside the trim; the exported video is as long as what is left.
+        let cuts = crate::effects::cuts_in(
+            &crate::effects::normalize_cuts(&fx.cuts, total_ms),
+            start_ms,
+            end_ms,
+        );
         let span_ms = end_ms - start_ms;
+        let kept_ms = crate::effects::kept_ms(start_ms, end_ms, &cuts);
         let start_ticks = start_ms as i64 * 10_000;
+        let cut_samples: Vec<(u64, u64)> = cuts
+            .iter()
+            .map(|c| {
+                (
+                    c.start_ms * OUT_RATE as u64 / 1000,
+                    c.end_ms * OUT_RATE as u64 / 1000,
+                )
+            })
+            .collect();
 
         // The sound (MP4 only): both tracks, the part before the trim start skipped.
         let mut tracks = Vec::new();
@@ -1085,7 +1161,7 @@ pub mod win {
             });
             let cam_decoder = webcam_path.as_ref().map(|p| {
                 let cam_seek =
-                    (start_ticks - info.webcam_start_ms as i64 * 10_000 - 10_000_000).max(0);
+                    (start_ticks - super::webcam_offset_ms(&info) * 10_000 - 10_000_000).max(0);
                 scope.spawn(move || decode(p, &wtx, stop_ref, cam_seek))
             });
             let outcome = (|| -> Result<Exported, String> {
@@ -1152,6 +1228,8 @@ pub mod win {
                     .map_err(|e| e.to_string())?;
                     let (tx, picture_rx) = std::sync::mpsc::sync_channel::<(Vec<u8>, i64)>(3);
                     let mut sound = std::mem::take(&mut tracks);
+                    let mut sound_pos = start_ms * OUT_RATE as u64 / 1000;
+                    let cut_samples = cut_samples.clone();
                     let (part2, out2) = (part.clone(), req.out.clone());
                     let (pw, ph) = (plan.w as usize, plan.h as usize);
                     let job = scope.spawn(move || -> Result<(), String> {
@@ -1179,7 +1257,8 @@ pub mod win {
                                     (rel.max(0) as u128 * OUT_RATE as u128 / 10_000_000) as u64;
                                 while audio_fed < wanted {
                                     let n = ((wanted - audio_fed) as usize).min(4800);
-                                    let bytes = mix_next(&mut sound, n);
+                                    let bytes =
+                                        super::mix_cut(&mut sound, &mut sound_pos, n, &cut_samples);
                                     enc.send_audio_buffer(&bytes, 0)
                                         .map_err(|e| e.to_string())?;
                                     audio_fed += n as u64;
@@ -1234,6 +1313,15 @@ pub mod win {
                     if ms > end_ms {
                         break;
                     }
+                    // Cut out: not drawn, not written; the pictures after it follow on without a gap.
+                    if cuts.iter().any(|c| ms >= c.start_ms && ms < c.end_ms) {
+                        continue;
+                    }
+                    let removed_ticks: i64 = cuts
+                        .iter()
+                        .filter(|c| c.end_ms <= ms)
+                        .map(|c| (c.end_ms - c.start_ms) as i64 * 10_000)
+                        .sum();
                     // A GIF has fewer pictures than the video.
                     if gif {
                         if (ms as f64) < next_emit_ms {
@@ -1273,7 +1361,7 @@ pub mod win {
                     let t = std::time::Instant::now();
                     // The webcam goes on the final picture, so it keeps its size and place whatever the aspect ratio is.
                     if let Some(cam) = webcam.as_mut() {
-                        let rel = (ms as i64 - info.webcam_start_ms as i64) * 10_000;
+                        let rel = (ms as i64 - super::webcam_offset_ms(&info)) * 10_000;
                         if rel >= 0 {
                             let (cw, ch) = cam.size();
                             if let Some(pic) = cam.at(rel) {
@@ -1294,9 +1382,9 @@ pub mod win {
                     lap(3, &t);
                     match &mut output {
                         Output::Mp4 { tx, job } => {
-                            let sent = tx
-                                .as_ref()
-                                .is_some_and(|t| t.send((canvas, ts - start_ticks)).is_ok());
+                            let sent = tx.as_ref().is_some_and(|t| {
+                                t.send((canvas, ts - start_ticks - removed_ticks)).is_ok()
+                            });
                             if !sent {
                                 // The thread that writes the file stopped: its error says why.
                                 drop(tx.take());
@@ -1333,7 +1421,7 @@ pub mod win {
                     width: plan.w,
                     height: plan.h,
                     fps: out_fps,
-                    duration_ms: span_ms,
+                    duration_ms: kept_ms,
                     ..Exported::default()
                 };
                 match output {
@@ -1411,6 +1499,63 @@ mod tests {
         }
         w.finish(secs as i64 * TICKS).unwrap();
         path
+    }
+
+    #[test]
+    fn cut_sound_leaves_the_cuts_out_keeps_the_rest_in_place_and_fades_the_joins() {
+        let base = std::env::var("SNIPMUNK_TEST_DIR").unwrap_or_else(|_| ".".into());
+        let dir = tempfile::tempdir_in(base).unwrap();
+        let path = wav(dir.path(), "a.wav", 48_000, 2, 4, 1000.0);
+        let all = {
+            let mut t = vec![TrackReader::open(&path, 1.0).unwrap()];
+            mix_next(&mut t, 4 * 48_000)
+        };
+        // Cut 1.0 s..1.5 s and 2.5 s..3.0 s: 3 s are left.
+        let cuts = [(48_000u64, 72_000u64), (120_000, 144_000)];
+        let mut t = vec![TrackReader::open(&path, 1.0).unwrap()];
+        let mut pos = 0u64;
+        let out = mix_cut(&mut t, &mut pos, 3 * 48_000, &cuts);
+        assert_eq!(out.len(), 3 * 48_000 * 4);
+        assert_eq!(
+            pos,
+            4 * 48_000 - 24_000 + 24_000,
+            "the sound moved over both cuts to the end"
+        );
+        let sample = |b: &[u8], j: usize| i16::from_le_bytes([b[j * 4], b[j * 4 + 1]]);
+        let fade = (48_000 * CUT_FADE_MS / 1000) as usize;
+        let source = |j: usize| {
+            if j < 48_000 {
+                j
+            } else if j < 96_000 {
+                j + 24_000
+            } else {
+                j + 48_000
+            }
+        };
+        let mut faded = 0;
+        for j in 0..3 * 48_000 {
+            let p = source(j);
+            let near_cut = cuts.iter().any(|c| {
+                (p < c.0 as usize && c.0 as usize - p <= fade)
+                    || (p >= c.1 as usize && p - (c.1 as usize) < fade)
+            });
+            if near_cut {
+                faded += 1;
+                assert!(
+                    sample(&out, j).abs() <= sample(&all, p).abs(),
+                    "faded at {j}"
+                );
+            } else {
+                assert_eq!(
+                    sample(&out, j),
+                    sample(&all, p),
+                    "same sound at {j} (recording {p})"
+                );
+            }
+        }
+        assert_eq!(faded, 4 * fade);
+        // The very last sample before a cut and the first after it are (almost) silent: no click.
+        assert!(sample(&out, 48_000 - 1).abs() < 400 && sample(&out, 48_000).abs() < 400);
     }
 
     #[test]
@@ -1864,7 +2009,10 @@ pub fn mp4_estimate(
     let end = info["effects"]["trim"]["endMs"]
         .as_u64()
         .map_or(total, |e| e.min(total));
-    let ms = end.saturating_sub(start);
+    let cuts: Vec<crate::effects::Cut> =
+        serde_json::from_value(info["effects"]["cuts"].clone()).unwrap_or_default();
+    let cuts = crate::effects::normalize_cuts(&cuts, total);
+    let ms = crate::effects::kept_ms(start, end.max(start), &cuts);
     let plan =
         crate::compose::plan_output(sw, sh, settings.aspect, settings.fit, settings.short_side());
     let sound = info["systemFile"].is_string() || info["micFile"].is_string();

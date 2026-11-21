@@ -4,7 +4,8 @@ import { recordingUrl, type Capture, type Session } from "../ipc";
 import { clicksOf, cursorAt } from "../recording/cursorTrack";
 import type { CursorFile } from "../recording/cursorFile";
 import { activeClicks, clickMax, drawBurst, drawHalo, drawRipple, haloRadius } from "../recording/drawFx";
-import { BORDER_WIDTH, CURSOR_SCALE, WEBCAM_WIDTH, trimRange, type Effects } from "../recording/effects";
+import { BORDER_WIDTH, CURSOR_SCALE, WEBCAM_WIDTH, trimRange, webcamOffset, type Effects } from "../recording/effects";
+import { EditHistory, addSplit, cutEndAt, editedTime, keptMs, segmentAt, segments, toggleSegment, type Cut, type EditState } from "../recording/cuts";
 import { clampTrim, formatTime } from "../recording/timeline";
 import { AppIcon } from "./AppIcons";
 
@@ -17,6 +18,12 @@ export interface RecInfo {
   webcamStartMs?: number;
   fps?: number;
 }
+
+/** Where each tab left its playhead (seconds), so switching tabs comes back to the same picture. */
+const playheads = new Map<string, number>();
+
+/** The splits and the undo history of each recording (the cuts themselves are in the effects), so a tab comes back as it was left. */
+const edits = new Map<string, { splits: number[]; history: EditHistory }>();
 
 /** Keep an audio track in step with the video; a drift of more than this many seconds is corrected. */
 const DRIFT = 0.15;
@@ -67,7 +74,19 @@ export function RecPlayer(props: {
   const [box, setBox] = useState<Box>({ vx: 0, vy: 0, vw: 1, vh: 1 });
   // The trim while a handle is dragged (seconds); saved when it is let go.
   // The trim handles are only there in trim mode; the kept part stays visible as a band.
-  const [trimMode, setTrimMode] = useState(false);
+  const [mode, setMode] = useState<"none" | "trim" | "split">("none");
+  const trimMode = mode === "trim";
+  const splitMode = mode === "split";
+  const [menuOpen, setMenuOpen] = useState(false);
+  // Split points and undo/redo, kept per recording.
+  const editKey = `${session.id}:${capture.id}`;
+  if (!edits.has(editKey)) edits.set(editKey, { splits: [], history: new EditHistory() });
+  const edit = edits.get(editKey)!;
+  const [, bump] = useState(0);
+  const cuts: Cut[] = effects.cuts;
+  const cutsRef = useRef(cuts);
+  cutsRef.current = cuts;
+  const [selected, setSelected] = useState<{ startMs: number; endMs: number } | null>(null);
   // "Edit webcam": handles on the webcam bubble to resize it directly on the video.
   const [editCam, setEditCam] = useState(false);
   const [dragTrim, setDragTrim] = useState<{ start: number; end: number } | null>(null);
@@ -93,7 +112,7 @@ export function RecPlayer(props: {
   }, [session.id, capture.id, capture.durationMs]);
 
   const media = useCallback(() => [sys.current, mic.current].filter((a): a is HTMLAudioElement => a !== null), []);
-  const camOffset = (info?.webcamStartMs ?? 0) / 1000;
+  const camOffset = webcamOffset(info?.webcamStartMs, effects);
 
   /** Where the video lies in the stage. */
   const measure = useCallback((): Box | null => {
@@ -186,6 +205,14 @@ export function RecPlayer(props: {
           setPlaying(false);
           draw();
           return;
+        }
+        // A part that is cut out is jumped over (the sound and the webcam follow at once).
+        const skipTo = cutEndAt(v.currentTime * 1000 + 15, cutsRef.current);
+        if (skipTo !== null) {
+          const to = Math.min(skipTo / 1000, trimRef.current.end);
+          v.currentTime = to;
+          for (const a of media()) a.currentTime = to;
+          syncCam();
         }
         setTime(v.currentTime);
         for (const a of media()) if (Math.abs(a.currentTime - v.currentTime) > DRIFT) a.currentTime = v.currentTime;
@@ -289,12 +316,72 @@ export function RecPlayer(props: {
     else void wrap.current?.requestFullscreen().catch(() => undefined);
   };
 
+  // --- split, delete, restore, undo, redo ----------------------------------------------------------------------------------
+  const state = (): EditState => ({ cuts: [...cutsRef.current], splits: [...edit.splits] });
+  const apply = (next: EditState) => {
+    edit.splits = next.splits;
+    bump((n) => n + 1);
+    onEffects({ ...fx.current, cuts: next.cuts });
+  };
+  const doSplit = () => {
+    const v = video.current;
+    if (!v) return;
+    const at = Math.round(v.currentTime * 1000);
+    const next = addSplit(edit.splits, at, Math.round(trimRef.current.start * 1000), Math.round(trimRef.current.end * 1000));
+    if (next === edit.splits) return;
+    edit.history.push(state());
+    apply({ cuts: cutsRef.current, splits: next });
+  };
+  const segmentList = () => segments(Math.round(trimRef.current.start * 1000), Math.round(trimRef.current.end * 1000), edit.splits, cutsRef.current);
+  const doDelete = () => {
+    if (!selected) return;
+    const seg = segmentList().find((x) => x.startMs === selected.startMs) ?? segmentAt(segmentList(), selected.startMs);
+    if (!seg) return;
+    edit.history.push(state());
+    apply({ cuts: toggleSegment(cutsRef.current, seg), splits: edit.splits });
+    setSelected(null);
+  };
+  const doUndo = () => {
+    const prev = edit.history.undo(state());
+    if (prev) apply(prev);
+    setSelected(null);
+  };
+  const doRedo = () => {
+    const next = edit.history.redo(state());
+    if (next) apply(next);
+    setSelected(null);
+  };
+  const editRef = useRef({ doSplit, doDelete, doUndo, doRedo, splitMode });
+  editRef.current = { doSplit, doDelete, doUndo, doRedo, splitMode };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target && (["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName) || target.isContentEditable)) return;
+      const key = e.key.toLowerCase();
+      const ctrl = e.ctrlKey || e.metaKey;
+      if (ctrl && key === "z" && !e.shiftKey) editRef.current.doUndo();
+      else if (ctrl && (key === "y" || (key === "z" && e.shiftKey))) editRef.current.doRedo();
+      else if (!ctrl && !e.altKey && key === "s" && editRef.current.splitMode) editRef.current.doSplit();
+      else if (!ctrl && (e.key === "Delete" || e.key === "Backspace") && editRef.current.splitMode) editRef.current.doDelete();
+      else return;
+      // The key is ours: nothing else (Delete would ask to delete the capture) sees it.
+      e.preventDefault();
+      e.stopImmediatePropagation();
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, []);
+
   // --- the timeline: playhead and the two trim handles ---------------------------------------------------------------------
   /** Scrubbing: the playhead follows the pointer while it is held down on the timeline (the picture follows). */
   const scrub = (e: React.PointerEvent) => {
     const el = e.currentTarget as HTMLElement;
     el.setPointerCapture(e.pointerId);
     seek(secondsAt(e.clientX));
+    if (editRef.current.splitMode) {
+      const seg = segmentAt(segmentList(), Math.round(secondsAt(e.clientX) * 1000));
+      setSelected(seg ? { startMs: seg.startMs, endMs: seg.endMs } : null);
+    }
     const move = (ev: PointerEvent) => seek(secondsAt(ev.clientX));
     const up = () => {
       el.removeEventListener("pointermove", move);
@@ -465,11 +552,14 @@ export function RecPlayer(props: {
             const b = measure();
             if (b) setBox(b);
             // The preview starts at the trim start.
-            e.currentTarget.currentTime = trimRef.current.start;
-            setTime(trimRef.current.start);
+            const resume = playheads.get(capture.id);
+            const at = resume !== undefined && resume >= trimRef.current.start && resume <= trimRef.current.end ? resume : trimRef.current.start;
+            e.currentTarget.currentTime = at;
+            setTime(at);
             draw();
           }}
           onSeeked={() => draw()}
+          onTimeUpdate={(e) => playheads.set(capture.id, e.currentTarget.currentTime)}
           onPlay={() => setPlaying(true)}
           onPause={() => setPlaying(false)}
           onEnded={() => {
@@ -525,11 +615,20 @@ export function RecPlayer(props: {
           <AppIcon name={playing ? "pause" : "play"} size={18} />
         </button>
         <span className="recplayer__time" dir="ltr">
-          {formatTime(Math.max(0, time - trim.start))}
+          {formatTime(editedTime(time * 1000, trim.start * 1000, cuts) / 1000)}
         </span>
         <div className="recplayer__timeline" ref={track} dir="ltr" onPointerDown={scrub}>
           <div className="recplayer__rail" />
           <div className="recplayer__kept" style={{ left: pct(trim.start), width: `calc(${pct(trim.end)} - ${pct(trim.start)})` }} />
+          {cuts.map((c) => (
+            <div key={`${c.startMs}`} className="recplayer__cut" style={{ left: pct(c.startMs / 1000), width: `calc(${pct(c.endMs / 1000)} - ${pct(c.startMs / 1000)})` }} />
+          ))}
+          {edit.splits.map((x) => (
+            <div key={x} className="recplayer__split" style={{ left: pct(x / 1000) }} />
+          ))}
+          {splitMode && selected && (
+            <div className="recplayer__sel" style={{ left: pct(selected.startMs / 1000), width: `calc(${pct(selected.endMs / 1000)} - ${pct(selected.startMs / 1000)})` }} />
+          )}
           <div className="recplayer__head" style={{ left: pct(Math.min(Math.max(time, trim.start), trim.end)) }} />
           {trimMode && (
           <button
@@ -574,18 +673,58 @@ export function RecPlayer(props: {
             <AppIcon name="webcam" size={16} />
           </button>
         )}
-        <button
-          type="button"
-          className={`recplayer__btn${trimMode ? " recplayer__btn--on" : ""}`}
-          aria-pressed={trimMode}
-          title={t("rec.trimMode")}
-          aria-label={t("rec.trimMode")}
-          onClick={() => setTrimMode((m) => !m)}
-        >
-          <AppIcon name="scissors" size={16} />
-        </button>
+        <span className="recplayer__editmenu">
+          <button
+            type="button"
+            className={`recplayer__btn${mode !== "none" ? " recplayer__btn--on" : ""}`}
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            title={t("rec.editMenu")}
+            aria-label={t("rec.editMenu")}
+            onClick={() => setMenuOpen((m) => !m)}
+          >
+            <AppIcon name="scissors" size={16} />
+          </button>
+          {menuOpen && (
+            <div className="recplayer__menu" role="menu" onMouseLeave={() => setMenuOpen(false)}>
+              {(["trim", "split"] as const).map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={mode === m}
+                  className={`recplayer__menuitem${mode === m ? " recplayer__menuitem--on" : ""}`}
+                  title={m === "trim" ? t("rec.trimMode") : t("rec.splitHere")}
+                  onClick={() => {
+                    setMode((cur) => (cur === m ? "none" : m));
+                    setSelected(null);
+                    setMenuOpen(false);
+                  }}
+                >
+                  {m === "trim" ? t("rec.modeTrim") : t("rec.modeSplit")}
+                </button>
+              ))}
+            </div>
+          )}
+        </span>
+        {splitMode && (
+          <span className="recplayer__splitbar">
+            <button type="button" className="recplayer__chip" title={`${t("rec.splitHere")} (S)`} onClick={doSplit}>
+              {t("rec.modeSplit")}
+            </button>
+            <button type="button" className="recplayer__chip" disabled={!selected} title={`${selected && segmentAt(segmentList(), selected.startMs)?.cut ? t("rec.restoreSegment") : t("rec.deleteSegment")} (Delete)`} onClick={doDelete}>
+              {selected && segmentAt(segmentList(), selected.startMs)?.cut ? t("rec.restoreSegment") : t("rec.deleteSegment")}
+            </button>
+            <button type="button" className="recplayer__chip" disabled={!edit.history.canUndo} title={`${t("rec.undo")} (Ctrl+Z)`} aria-label={t("rec.undo")} onClick={doUndo}>
+              ↶
+            </button>
+            <button type="button" className="recplayer__chip" disabled={!edit.history.canRedo} title={`${t("rec.redo")} (Ctrl+Y)`} aria-label={t("rec.redo")} onClick={doRedo}>
+              ↷
+            </button>
+          </span>
+        )}
         <span className="recplayer__time" dir="ltr" title={t("rec.trimmedLength")}>
-          {formatTime(trim.end - trim.start)}
+          {formatTime(keptMs(trim.start * 1000, trim.end * 1000, cuts) / 1000)}
         </span>
         {(["system", "mic"] as const).map((k) => {
           const file = k === "system" ? info?.systemFile : info?.micFile;
