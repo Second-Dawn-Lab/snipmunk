@@ -731,6 +731,7 @@ impl SessionStore {
     }
 
     /// Recordings of an earlier version (in their session folder) move into the recordings folder, once. Returns how many.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn migrate_recordings(&mut self) -> usize {
         let dir = self.session_dir();
         let mut done: Vec<(String, String)> = Vec::new();
@@ -848,6 +849,53 @@ impl SessionStore {
             (None, Some(f)) => Path::new(f).parent().map(|p| self.session_dir().join(p)),
             _ => None,
         }
+    }
+
+    /// The capture of the current recording: the newest recording whose folder is in the current-recording folder (recordings of
+    /// earlier layouts elsewhere are not shown).
+    pub fn current_recording_id(&self) -> Option<String> {
+        self.session
+            .groups
+            .iter()
+            .flat_map(|g| g.captures.iter())
+            .filter(|c| {
+                c.kind.as_deref() == Some("video")
+                    && c.video_dir
+                        .as_deref()
+                        .is_some_and(|d| Path::new(d).starts_with(&self.rec_root))
+            })
+            .max_by_key(|c| c.created_at)
+            .map(|c| c.id.clone())
+    }
+
+    /// Has the current recording not been saved as a project?
+    pub fn current_unsaved(&self) -> bool {
+        self.current_recording_id().is_some_and(|id| {
+            self.session
+                .find_capture(&id)
+                .is_some_and(|(g, c)| self.session.groups[g].captures[c].saved_path.is_none())
+        })
+    }
+
+    /// Delete the recordings of the current-recording folder except `keep` (a new recording replaces the old one).
+    pub fn drop_current_except(&mut self, keep: Option<&str>) -> StoreResult<()> {
+        let ids: Vec<String> = self
+            .session
+            .groups
+            .iter()
+            .flat_map(|g| g.captures.iter())
+            .filter(|c| {
+                Some(c.id.as_str()) != keep
+                    && c.video_dir
+                        .as_deref()
+                        .is_some_and(|d| Path::new(d).starts_with(&self.rec_root))
+            })
+            .map(|c| c.id.clone())
+            .collect();
+        for id in ids {
+            self.delete_capture(&id)?;
+        }
+        Ok(())
     }
 
     /// A new folder for a recording that starts now, in the group `group_id`: `<recordings folder>\<group>\<name>` (not created).
@@ -2679,6 +2727,39 @@ mod recording_storage_tests {
         s.delete_group(&g2, None).unwrap();
         assert!(!fb.exists());
         assert!(s.session().find_capture(&b).is_none());
+    }
+
+    #[test]
+    fn the_current_recording_is_the_newest_one_in_the_temp_folder_and_a_new_one_replaces_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut s, g) = store(dir.path());
+        assert!(s.current_recording_id().is_none() && !s.current_unsaved());
+        let (a, fa) = recording(&mut s, &g, "First");
+        assert_eq!(s.current_recording_id(), Some(a.clone()));
+        assert!(s.current_unsaved(), "not saved as a project yet");
+        s.set_saved_path(&a, &dir.path().join("First.snpr"))
+            .unwrap();
+        assert!(!s.current_unsaved(), "saved as a project");
+        // A newer recording replaces the older one: its folder is deleted.
+        let (b, fb) = recording(&mut s, &g, "Second");
+        for gr in s.session.groups.iter_mut() {
+            for c in gr.captures.iter_mut() {
+                c.created_at = if c.id == b { 200 } else { 100 };
+            }
+        }
+        assert_eq!(s.current_recording_id(), Some(b.clone()));
+        s.drop_current_except(Some(&b)).unwrap();
+        assert!(!fa.exists() && fb.exists());
+        assert!(s.session().find_capture(&a).is_none());
+        // Recordings of an earlier layout (outside the temp folder) are never the current one and never deleted by this.
+        let other = tempfile::tempdir().unwrap();
+        s.set_recordings_root(other.path().join("elsewhere"));
+        assert!(s.current_recording_id().is_none());
+        s.drop_current_except(None).unwrap();
+        assert!(fb.exists(), "the old folder is left alone");
+        s.set_recordings_root(dir.path().join("Rec"));
+        s.drop_current_except(None).unwrap();
+        assert!(!fb.exists());
     }
 
     #[test]

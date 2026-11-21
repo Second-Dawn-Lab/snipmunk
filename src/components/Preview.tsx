@@ -25,6 +25,8 @@ export function Preview(props: {
   recording?: boolean;
   /** The gallery search: the words that match are marked in the picture. */
   searchQuery?: string;
+  /** A recording or a project was edited (effects, trim): the open project has unsaved changes. */
+  onEdited?: () => void;
   /** The zoom in effect, for the badge. */
   zoom: number;
 }) {
@@ -34,6 +36,7 @@ export function Preview(props: {
 
   return (
     <section className="preview" aria-label={capture?.name ?? t("preview.none")}>
+      {capture?.kind !== "video" && (
       <div className="preview__head">
         <div className="preview__title">
           <div className="preview__name" title={capture?.name}>
@@ -49,12 +52,13 @@ export function Preview(props: {
           </span>
         )}
       </div>
+      )}
 
       {capture?.kind !== "video" && !props.recording && <AnnotationBar settings={props.settings} onPatch={props.onPatch} />}
 
       <div className="preview__stage">
         {capture?.kind === "video" ? (
-          <RecordingView key={capture.id} session={props.session} capture={capture} settings={props.settings} onError={props.onError} />
+          <RecordingView key={capture.id} session={props.session} capture={capture} settings={props.settings} onError={props.onError} onEdited={props.onEdited} />
         ) : capture ? (
           <Editor
             key={capture.id}

@@ -167,7 +167,51 @@ export interface ToastInfo {
 /** The address of a file of a recording (screen.mp4, system.wav, mic.wav, cursor.jsonl, recording.json, cursors/<id>.png). */
 export function recordingUrl(session: Session, capture: Capture, name: string): string {
   if (!isTauri) return "";
+  // An open project (a .snpr file): its media is read from the file itself.
+  if (capture.id.startsWith("proj:")) return convertFileSrc(`${session.id}/proj/${capture.id.slice(5)}/${name}`, "snipmunk-img");
   return convertFileSrc(`${session.id}/rec/${capture.id}/${name}`, "snipmunk-img");
+}
+
+/** An opened project file. */
+export interface OpenProject {
+  id: string;
+  name: string;
+  path: string;
+  /** recording.json (with the unsaved edits when there are any). */
+  info: Record<string, unknown> & { durationMs?: number; width?: number; height?: number };
+  dirty: boolean;
+}
+
+export interface RecentProject {
+  path: string;
+  name: string;
+  openedAt: number;
+  durationMs: number;
+  exists: boolean;
+  thumbnail: string | null;
+}
+
+/** The card of a project as far as the player and the export need it (id "proj:<id>"). */
+export function projectCapture(p: OpenProject): Capture {
+  return {
+    id: `proj:${p.id}`,
+    name: p.name,
+    createdAt: 0,
+    file: "",
+    thumbnail: null,
+    thumbSize: 0,
+    thumbRev: 0,
+    width: Number(p.info.width) || 0,
+    height: Number(p.info.height) || 0,
+    sourceWindowTitle: null,
+    source: null,
+    annotations: null,
+    kind: "video",
+    durationMs: Number(p.info.durationMs) || 0,
+    videoFile: "screen.mp4",
+    videoDir: null,
+    savedPath: p.path,
+  } as unknown as Capture;
 }
 
 /** The address of a toast picture (the thumbnail file of the capture). */
@@ -208,7 +252,13 @@ export const ipc = {
   audioDevices: () => call<{ mic: AudioDevice[]; system: AudioDevice[] }>("audio_devices"),
   /** The cameras Windows has now (only the list is read; no camera is opened). */
   webcamDevices: () => call<AudioDevice[]>("webcam_devices"),
+  /** The live webcam bubble asks for a new width (CSS pixels); the window follows. */
+  bubbleResize: (width: number) => call<void>("bubble_resize", { width }),
   quitApp: () => call<void>("quit_app"),
+  /** The question of Quit was cancelled (a pending restart is forgotten). */
+  cancelQuit: () => call<void>("cancel_quit"),
+  /** Restart (for an update); asks about unsaved work first, like Quit. */
+  restartApp: () => call<void>("restart_app"),
   closeAction: (action: "background" | "quit", remember: boolean) =>
     call<void>("close_action", { action, remember }),
   onCloseRequested: (cb: () => void) => on<null>("close-requested", cb),
@@ -316,6 +366,25 @@ export const ipc = {
   shareSupported: () => call<boolean>("share_supported"),
   exportDrag: (files: string[], preview: string) => call<void>("export_drag", { files, preview }),
   openFolder: (path: string) => call<void>("open_folder", { path }),
+  // --- projects (.snpr) and the current recording ---
+  currentRecording: () => call<string | null>("current_recording"),
+  discardCurrentRecording: () => call<void>("discard_current_recording"),
+  projectSave: (captureId: string, path: string) => call<void>("project_save", { captureId, path }),
+  projectOpen: (path: string) => call<OpenProject>("project_open", { path }),
+  projectRename: (id: string, name: string) => call<string>("project_rename", { id, name }),
+  projectClose: (id: string, discard: boolean) => call<void>("project_close", { id, discard }),
+  projectCommit: (id: string) => call<void>("project_commit", { id }),
+  projectSaveCopy: (id: string, to: string) => call<void>("project_save_copy", { id, to }),
+  projectRecent: () => call<RecentProject[]>("project_recent"),
+  projectRecentRemove: (path: string) => call<void>("project_recent_remove", { path }),
+  projectJournal: () => call<string[]>("project_journal"),
+  setUnsaved: (unsaved: boolean) => call<void>("set_unsaved", { unsaved }),
+  takePendingOpen: () => call<string | null>("take_pending_open"),
+  pickProjectSave: (start: string | undefined, name: string) => call<string | null>("pick_project_save", { start: start ?? null, name }),
+  pickProjectOpen: (start?: string) => call<string | null>("pick_project_open", { start: start ?? null }),
+  onOpenProject: (cb: (path: string) => void) => on<string>("open-project", cb),
+  onQuitRequested: (cb: () => void) => on<null>("quit-requested", () => cb()),
+  onSaveFirst: (cb: (what: { current: boolean; project: boolean }) => void) => on<{ current: boolean; project: boolean }>("recording-save-first", cb),
   /** Open a file with the program Windows has for it. */
   openFile: (path: string) => call<void>("open_file", { path }),
   /** Show a recording (its video selected) or an automatically saved screenshot in Explorer; the path is resolved by the backend. */

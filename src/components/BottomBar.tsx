@@ -14,6 +14,8 @@ export function BottomBar(props: {
   onCopyMode: (mode: CopyMode) => void;
   onCopy: () => void;
   onSave: () => void;
+  /** The recording mode has Share here (the top bar has none). */
+  onShare?: () => void;
   busy: boolean;
 }) {
   const { t } = useT();
@@ -23,9 +25,11 @@ export function BottomBar(props: {
   const empty = none && !props.hasCapture;
   return (
     <footer className="bottombar">
-      <span className="bottombar__count" aria-live="polite">
-        {t("bottom.selected", { count: props.selectedCount })}
-      </span>
+      {!props.recording && (
+        <span className="bottombar__count" aria-live="polite">
+          {t("bottom.selected", { count: props.selectedCount })}
+        </span>
+      )}
       <span className="bottombar__spacer" />
       {!props.recording && (
       <Select
@@ -39,9 +43,15 @@ export function BottomBar(props: {
         ]}
       />
       )}
+      {props.recording && props.onShare && (
+        <button type="button" className="dw-btn" disabled={empty || props.busy} title={t("actions.shareTip")} onClick={props.onShare}>
+          <AppIcon name="share" size={16} />
+          {t("actions.share")}
+        </button>
+      )}
       <button type="button" className="dw-btn" disabled={empty || props.busy} title={props.recording ? t("export.tip") : t("bottom.saveTip")} onClick={props.onSave}>
         <AppIcon name="save" size={16} />
-        {props.recording ? t("export.button") : t("bottom.save")}
+        {props.recording ? t("export.button") : none ? t("bottom.save") : t("bottom.saveN", { count: props.selectedCount })}
       </button>
       <button type="button" className="dw-btn dw-btn--primary" disabled={empty || props.busy} title={t("bottom.copyTip")} onClick={props.onCopy}>
         <AppIcon name="copy" size={16} />

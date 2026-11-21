@@ -107,9 +107,11 @@ pub struct Settings {
     pub webcam_shape: String,
     pub webcam_size: String,
     pub webcam_position: String,
-    pub webcam_border: bool,
+    #[serde(deserialize_with = "crate::effects::border_from_any")]
+    pub webcam_border: String,
+    pub webcam_border_color: String,
     /// Where recordings are kept ("" = the Windows Videos folder + Snipmunk) and the automatic saving of screenshots.
-    pub recordings_dir: String,
+    pub projects_dir: String,
     pub auto_save_screenshots: bool,
     /// Where automatically saved screenshots go ("" = the Windows Pictures folder + Snipmunk).
     pub auto_save_dir: String,
@@ -193,8 +195,9 @@ impl Default for Settings {
             webcam_shape: "circle".into(),
             webcam_size: "m".into(),
             webcam_position: "bottom-right".into(),
-            webcam_border: true,
-            recordings_dir: String::new(),
+            webcam_border: "thin".into(),
+            webcam_border_color: "#FFFFFF".into(),
+            projects_dir: String::new(),
             auto_save_screenshots: false,
             auto_save_dir: String::new(),
             save_format: "png".into(),
@@ -347,6 +350,11 @@ impl Settings {
         );
         one_of(&mut self.webcam_size, &["s", "m", "l"], &d.webcam_size);
         one_of(
+            &mut self.webcam_border,
+            &["off", "thin", "medium", "thick"],
+            &d.webcam_border,
+        );
+        one_of(
             &mut self.webcam_position,
             &["top-left", "top-right", "bottom-left", "bottom-right"],
             &d.webcam_position,
@@ -355,6 +363,7 @@ impl Settings {
             (&mut self.cursor_halo_color, &d.cursor_halo_color),
             (&mut self.click_left_color, &d.click_left_color),
             (&mut self.click_right_color, &d.click_right_color),
+            (&mut self.webcam_border_color, &d.webcam_border_color),
         ] {
             if !is_hex_color(c) {
                 *c = dc.clone();
@@ -363,7 +372,7 @@ impl Settings {
         self.mic_device = self.mic_device.trim().chars().take(300).collect();
         self.system_device = self.system_device.trim().chars().take(300).collect();
         self.webcam_device = self.webcam_device.trim().chars().take(300).collect();
-        self.recordings_dir = self.recordings_dir.trim().chars().take(400).collect();
+        self.projects_dir = self.projects_dir.trim().chars().take(400).collect();
         self.auto_save_dir = self.auto_save_dir.trim().chars().take(400).collect();
         self.quick_redact_words = clean_words(std::mem::take(&mut self.quick_redact_words));
         one_of(

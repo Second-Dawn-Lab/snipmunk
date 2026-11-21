@@ -51,29 +51,9 @@ export function RecordingPage({ settings, set }: PageProps) {
   const [keyDialog, setKeyDialog] = useState(false);
   const [folders, setFolders] = useState({ recordings: "", pictures: "" });
   const devices = useDevices();
-  // After the recordings folder changed: the recordings that are in another folder can be moved (with progress).
-  const [toMove, setToMove] = useState(0);
-  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   useEffect(() => {
     void ipc.defaultFolders().then(setFolders).catch(() => undefined);
-    const p = ipc.onRecordingsMove(setProgress);
-    return () => void p.then((fn) => fn());
   }, []);
-  const changeRecordingsDir = (recordingsDir: string) => {
-    set({ recordingsDir });
-    // The backend applies the setting before this asks (set_settings has returned by then).
-    setTimeout(() => void ipc.recordingsInfo().then((i) => setToMove(i.toMove)).catch(() => undefined), 300);
-  };
-  const move = () => {
-    setProgress({ done: 0, total: toMove });
-    void ipc
-      .moveRecordings()
-      .catch(() => undefined)
-      .finally(() => {
-        setProgress(null);
-        setToMove(0);
-      });
-  };
 
   const fx = effectsFromSettings(settings);
   const row: FieldRow = ({ id, label, children }) => (
@@ -91,20 +71,9 @@ export function RecordingPage({ settings, set }: PageProps) {
           <Kbd keys={settings.recordHotkey} />
           <Button onClick={() => setKeyDialog(true)}>{t("settings.shortcutChange")}</Button>
         </Setting>
-        <Setting id="recordingsDir" title={t("settings.recordingsDir")} description={t("settings.recordingsDirDesc")}>
-          <FolderSetting label={t("settings.recordingsDir")} value={settings.recordingsDir} fallback={folders.recordings} onChange={changeRecordingsDir} />
+        <Setting id="projectsDir" title={t("settings.projectsDir")} description={t("settings.projectsDirDesc")}>
+          <FolderSetting label={t("settings.projectsDir")} value={settings.projectsDir} fallback={folders.recordings} onChange={(projectsDir) => set({ projectsDir })} />
         </Setting>
-        {toMove > 0 && (
-          <div className="foldersetting__move" role="status">
-            <span>{progress ? t("settings.recMoving", { done: progress.done, total: progress.total }) : t("settings.recMoveAsk", { count: toMove })}</span>
-            {!progress && (
-              <>
-                <Button onClick={move}>{t("settings.recMove")}</Button>
-                <Button onClick={() => setToMove(0)}>{t("settings.recLeave")}</Button>
-              </>
-            )}
-          </div>
-        )}
         <Setting id="micDevice" title={t("settings.micDevice")} description={t("settings.micDeviceDesc")}>
           <DeviceSelect label={t("settings.micDevice")} value={settings.micDevice} devices={devices.mic} onChange={(micDevice) => patch({ micDevice })} />
         </Setting>
@@ -159,7 +128,7 @@ export function RecordingPage({ settings, set }: PageProps) {
         <WebcamControls
           row={row}
           value={fx.webcam}
-          onChange={(w) => patch({ webcamShape: w.shape, webcamSize: w.size, webcamPosition: w.position === "free" ? "bottom-right" : w.position, webcamBorder: w.border })}
+          onChange={(w) => patch({ webcamShape: w.shape, webcamSize: w.size, webcamPosition: w.position === "free" ? "bottom-right" : w.position, webcamBorder: w.border, webcamBorderColor: w.borderColor })}
         />
       </Section>
       {keyDialog && (

@@ -41,7 +41,26 @@ pub struct WebcamFx {
     pub position: String,
     pub x: f32,
     pub y: f32,
-    pub border: bool,
+    /// "off" | "thin" | "medium" | "thick" (older files have a boolean: true is "thin")
+    #[serde(deserialize_with = "border_from_any")]
+    pub border: String,
+    /// "#RRGGBB"
+    pub border_color: String,
+}
+
+/// A border setting from a file: a word, or the boolean of earlier versions.
+pub fn border_from_any<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Any {
+        Flag(bool),
+        Word(String),
+    }
+    Ok(match Any::deserialize(d)? {
+        Any::Flag(true) => "thin".into(),
+        Any::Flag(false) => "off".into(),
+        Any::Word(w) => w,
+    })
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
@@ -92,7 +111,8 @@ impl Default for WebcamFx {
             position: "bottom-right".into(),
             x: 0.85,
             y: 0.85,
-            border: true,
+            border: "thin".into(),
+            border_color: "#FFFFFF".into(),
         }
     }
 }
@@ -120,7 +140,8 @@ impl Effects {
                 position: s.webcam_position.clone(),
                 x: 0.85,
                 y: 0.85,
-                border: s.webcam_border,
+                border: s.webcam_border.clone(),
+                border_color: s.webcam_border_color.clone(),
             },
             trim: Trim::default(),
         }
@@ -170,6 +191,12 @@ impl Effects {
             ],
             &d.webcam.position,
         );
+        one(
+            &mut self.webcam.border,
+            &["off", "thin", "medium", "thick"],
+            &d.webcam.border,
+        );
+        colour(&mut self.webcam.border_color, &d.webcam.border_color);
         self.webcam.x = self.webcam.x.clamp(0.0, 1.0);
         self.webcam.y = self.webcam.y.clamp(0.0, 1.0);
         if let Some(end) = self.trim.end_ms {
@@ -195,6 +222,17 @@ impl Effects {
             "large" => 0.08,
             _ => 0.05,
         }
+    }
+
+    /// The border of the webcam: its colour and its width as a fraction of the shorter side; `None` when there is none.
+    pub fn webcam_border(&self) -> Option<([u8; 3], f32)> {
+        let frac = match self.webcam.border.as_str() {
+            "thin" => 0.02,
+            "medium" => 0.04,
+            "thick" => 0.07,
+            _ => return None,
+        };
+        Some((crate::compose::parse_hex(&self.webcam.border_color), frac))
     }
 
     pub fn webcam_shape(&self) -> Shape {
@@ -445,6 +483,15 @@ pub fn set_effects(
     capture_id: String,
     effects: Effects,
 ) -> crate::error::CmdResult<Effects> {
+    // An open project keeps the edits in its cache folder (the journal) until they are saved into the project file.
+    if let Some(id) = crate::projects::as_project(&capture_id) {
+        let (dir, _) = crate::projects::project_dir(id)
+            .ok_or_else(|| crate::error::CmdError::new("not_found", "this project is not open"))?;
+        let stored = store_effects(&dir, effects)
+            .map_err(|e| crate::error::CmdError::new("io", e.to_string()))?;
+        crate::projects::mark_dirty(id);
+        return Ok(stored);
+    }
     let dir = state
         .sessions
         .lock()

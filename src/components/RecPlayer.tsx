@@ -4,7 +4,7 @@ import { recordingUrl, type Capture, type Session } from "../ipc";
 import { clicksOf, cursorAt } from "../recording/cursorTrack";
 import type { CursorFile } from "../recording/cursorFile";
 import { activeClicks, clickMax, drawBurst, drawHalo, drawRipple, haloRadius } from "../recording/drawFx";
-import { CURSOR_SCALE, WEBCAM_WIDTH, trimRange, type Effects } from "../recording/effects";
+import { BORDER_WIDTH, CURSOR_SCALE, WEBCAM_WIDTH, trimRange, type Effects } from "../recording/effects";
 import { clampTrim, formatTime } from "../recording/timeline";
 import { AppIcon } from "./AppIcons";
 
@@ -483,8 +483,17 @@ export function RecPlayer(props: {
         {info?.webcamFile && (
           <video
             ref={cam}
-            className={`recplayer__cam recplayer__cam--${effects.webcam.shape}${effects.webcam.border ? " recplayer__cam--border" : ""}`}
-            style={{ left: box.vx + camBox.x, top: box.vy + camBox.y, width: camBox.width, height: camBox.height, display: showCam ? "block" : "none" }}
+            className={`recplayer__cam recplayer__cam--${effects.webcam.shape}`}
+            style={{
+              left: box.vx + camBox.x,
+              top: box.vy + camBox.y,
+              width: camBox.width,
+              height: camBox.height,
+              display: showCam ? "block" : "none",
+              // The border lies on the inside of the edge, like the export's.
+              outline: effects.webcam.border === "off" ? "none" : `${Math.max(2, Math.min(camBox.width, camBox.height) * BORDER_WIDTH[effects.webcam.border])}px solid ${effects.webcam.borderColor}`,
+              outlineOffset: effects.webcam.border === "off" ? 0 : -Math.max(2, Math.min(camBox.width, camBox.height) * BORDER_WIDTH[effects.webcam.border]),
+            }}
             src={recordingUrl(session, capture, info.webcamFile)}
             crossOrigin="anonymous"
             muted
@@ -618,9 +627,6 @@ export function RecPlayer(props: {
         })}
         <button type="button" className="recplayer__btn" onClick={toggleFull} title={full ? t("rec.exitFullscreen") : t("rec.fullscreen")} aria-label={full ? t("rec.exitFullscreen") : t("rec.fullscreen")}>
           <AppIcon name="fullscreen" size={18} />
-        </button>
-        <button type="button" className="recplayer__studio" disabled title={t("soon.label")} aria-label={`${t("rec.studio")} (${t("soon.label")})`}>
-          {t("rec.studio")}
         </button>
       </div>
     </div>

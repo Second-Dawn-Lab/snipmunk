@@ -1758,3 +1758,66 @@ html[data-window="recbar"], html[data-window="recbar"] body, html[data-window="r
 .recplayer__camhandle { position: absolute; width: 12px; height: 12px; background: #fff; border: 2px solid var(--dw-accent, #3b82f6); border-radius: 3px; pointer-events: auto; touch-action: none; }
 .recplayer__camhandle--nw { left: -7px; top: -7px; cursor: nwse-resize; } .recplayer__camhandle--ne { right: -7px; top: -7px; cursor: nesw-resize; }
 .recplayer__camhandle--sw { left: -7px; bottom: -7px; cursor: nesw-resize; } .recplayer__camhandle--se { right: -7px; bottom: -7px; cursor: nwse-resize; }
+
+/* Header of the screenshot list: the four controls share a line when they fit. */
+.capturelist__bulk { gap: 2px 2px; }
+.capturelist__bulk .dw-select { flex: 0 1 auto; max-width: 124px; margin-inline-end: 0; }
+.capturelist__bulk .dw-btn { padding: 0 6px; white-space: nowrap; flex: none; }
+/* The playhead: taller than the bar, in the strongest text colour, with a wide grab area. */
+.recplayer__timeline { height: 40px; }
+.recplayer__rail { top: 18px; }
+.recplayer__kept { top: 18px; }
+.recplayer__head { top: 2px; width: 4px; height: 36px; margin-left: -2px; border-radius: 2px; background: var(--dw-text, #000); box-shadow: 0 0 0 1px var(--dw-surface, #fff); pointer-events: auto; }
+.recplayer__head::before { content: ""; position: absolute; inset: 0 -9px; }
+.recplayer__head::after { content: ""; position: absolute; left: 50%; top: -3px; width: 12px; height: 12px; margin-left: -6px; border-radius: 50%; background: var(--dw-text, #000); box-shadow: 0 0 0 2px var(--dw-surface, #fff); }
+.recplayer__timeline:hover .recplayer__head, .recplayer__timeline:active .recplayer__head { width: 6px; margin-left: -3px; background: var(--dw-accent, #3b82f6); }
+.recplayer__timeline:hover .recplayer__head::after, .recplayer__timeline:active .recplayer__head::after { background: var(--dw-accent, #3b82f6); transform: scale(1.2); }
+.recplayer__handle { top: 8px; }
+
+/* The recording mode: one recording or project at a time. */
+.panels--single { grid-template-columns: 1fr; }
+.panels--single > .panel--right { grid-column: 1 / -1; }
+.recheader { display: flex; align-items: center; gap: 8px; padding: 8px 4px 10px; flex-wrap: wrap; }
+.recheader__name { font-weight: 650; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recheader__state { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; padding: 2px 8px; border-radius: 10px; background: rgba(128,128,128,.18); }
+.recheader__state--warn { background: rgba(245, 158, 11, .22); }
+.recheader__dot { width: 9px; height: 9px; border-radius: 50%; background: var(--dw-accent, #e5484d); display: inline-block; }
+.recheader__spacer { flex: 1; }
+.recempty { margin: auto; max-width: 560px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 24px; }
+.recempty h2 { margin: 4px 0 0; }
+.recempty p { margin: 0; opacity: .8; }
+.recempty__buttons { display: flex; gap: 10px; margin-top: 6px; }
+.recempty__recent { width: 100%; margin-top: 14px; text-align: start; }
+.recempty__recent h3 { margin: 0 0 6px; font-size: 13px; opacity: .7; }
+.recempty__recent ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.recempty__card { display: flex; align-items: center; gap: 10px; width: 100%; padding: 6px; border-radius: 8px; border: 1px solid var(--dw-border, rgba(128,128,128,.35)); background: transparent; color: inherit; cursor: pointer; text-align: start; font: inherit; }
+.recempty__card:hover:not(:disabled) { background: var(--dw-hover, rgba(128,128,128,.15)); }
+.recempty__card img, .recempty__thumb { width: 72px; height: 44px; object-fit: cover; border-radius: 4px; background: rgba(128,128,128,.3); flex: none; }
+.recempty__text { display: flex; flex-direction: column; min-width: 0; }
+.recempty__text small { opacity: .7; }
+.recempty__missing .recempty__card { opacity: .5; cursor: default; }
+.recempty__remove { background: none; border: 0; color: var(--dw-accent, #2563eb); text-decoration: underline; cursor: pointer; font: inherit; font-size: 12px; padding: 2px 6px; }
+.floatbar__low { color: #b45309; font-weight: 600; font-size: 12px; max-width: 220px; line-height: 1.2; }
+
+/* The project header: one compact bar above the player. */
+.recheader { gap: 8px; padding: 6px 4px 10px; }
+.recheader__name { display: inline-flex; align-items: center; gap: 6px; max-width: 42%; padding: 3px 8px; border: 1px solid transparent; border-radius: 8px; background: none; color: inherit; font: inherit; font-weight: 650; cursor: text; }
+.recheader__name:hover, .recheader__name:focus-visible { border-color: var(--dw-border, rgba(128,128,128,.4)); }
+.recheader__name span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recheader__name svg { opacity: .55; flex: none; stroke: currentColor; fill: none; stroke-width: 1.8; }
+.recheader__input { min-width: 180px; padding: 3px 8px; border-radius: 8px; border: 1px solid var(--dw-accent, #3b82f6); background: var(--dw-surface, #fff); color: inherit; font: inherit; font-weight: 650; }
+.recheader__chip { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; padding: 2px 9px; border-radius: 999px; background: rgba(128,128,128,.16); }
+.recheader__chip--notSaved { background: rgba(245, 158, 11, .22); }
+.recheader__chip--edited { background: rgba(59, 130, 246, .2); }
+.recheader__size { font-size: 12px; opacity: .65; }
+.recheader__file { display: inline-flex; align-items: center; gap: 5px; height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--dw-border-strong, rgba(128,128,128,.5)); background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.recheader__file:hover { background: var(--dw-hover, rgba(128,128,128,.15)); }
+.menuitem__heading { padding: 6px 12px 2px; font-size: 11px; opacity: .6; text-transform: uppercase; letter-spacing: .04em; }
+
+/* The live webcam bubble window: transparent around a picture of the chosen shape. */
+html[data-window="webcambubble"], html[data-window="webcambubble"] body, html[data-window="webcambubble"] #root { background: transparent !important; margin: 0; overflow: hidden; }
+.bubble { position: fixed; inset: 0; overflow: hidden; background: #000; cursor: move; }
+.bubble img { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; user-select: none; -webkit-user-drag: none; transform: scaleX(1); }
+.bubble__grip { position: absolute; inset-inline-end: 8%; bottom: 8%; width: 18px; height: 18px; border-radius: 50%; background: rgba(255,255,255,.9); border: 2px solid rgba(0,0,0,.55); cursor: nwse-resize; opacity: 0; transition: opacity .15s; touch-action: none; }
+.bubble:hover .bubble__grip { opacity: 1; }
+.bubble__ring { position: absolute; inset: 0; pointer-events: none; }

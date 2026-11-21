@@ -318,7 +318,22 @@ pub async fn start_recording(
     if recorder.running.load(Ordering::SeqCst) {
         return Err(CmdError::new("busy", "a recording is already running"));
     }
-    let _ = &state;
+    // A new recording replaces the current one: it must be saved as a project first (or discarded), and unsaved edits of an open
+    // project must be saved. The page asks; nothing is deleted here.
+    {
+        let current = state.sessions.lock().unwrap().current_unsaved();
+        let project = crate::projects::UNSAVED.load(Ordering::SeqCst);
+        if current || project {
+            let _ = app.emit(
+                "recording-save-first",
+                serde_json::json!({ "current": current, "project": project }),
+            );
+            return Err(CmdError::new(
+                "save-first",
+                "the current recording or project is not saved",
+            ));
+        }
+    }
     if let Some(label) = window.filter(|_| cfg!(debug_assertions)) {
         // For tests: one of Snipmunk's own windows (captured as a window, nothing else on the desktop). There is deliberately no
         // test path for an area: it would capture the monitor behind the window.
@@ -477,6 +492,8 @@ fn prepare_screen(app: &AppHandle, area: Rect) {
         let _ = w.show();
     }
     show_bar(app, area);
+    // The live webcam bubble (when the webcam is on), from the countdown on.
+    crate::bubble::open(app, area);
 }
 
 /// Where the floating bar goes (its top left corner): centred on the recorded area, below it when that fits on the monitor, else
@@ -557,6 +574,7 @@ fn monitor_rect_at(_: i32, _: i32) -> Option<Rect> {
 
 /// Take the red frame away and let Snipmunk's windows be captured again.
 fn restore_screen(app: &AppHandle) {
+    crate::bubble::close(app);
     if let Some(w) = app.get_webview_window("recbar") {
         let _ = w.close();
     }
@@ -746,6 +764,9 @@ fn focus_window(_: Focus) {}
 /// Less free space than this and a recording does not start; less than half of it while recording and it is stopped and saved.
 pub const MIN_FREE_TO_START: u64 = 300 * 1024 * 1024;
 
+/// Below this much free space on the drive of the temp folder the person is warned (stopping follows at the critical level).
+pub const LOW_FREE_WARNING: u64 = 1536 * 1024 * 1024;
+
 /// Free bytes on the disk that holds `path` (None when it cannot be told).
 #[cfg(windows)]
 pub fn free_bytes(path: &Path) -> Option<u64> {
@@ -781,6 +802,7 @@ pub fn free_bytes(_path: &Path) -> Option<u64> {
 fn spawn_monitor(app: AppHandle) {
     std::thread::spawn(move || {
         let mut ticks = 0u32;
+        let mut warned = false;
         while is_recording(&app) {
             std::thread::sleep(std::time::Duration::from_millis(500));
             ticks += 1;
@@ -801,6 +823,11 @@ fn spawn_monitor(app: AppHandle) {
                 if let Some(free) = free_bytes(&dir) {
                     if free < MIN_FREE_TO_START / 2 {
                         reason = Some("disk-full");
+                    } else if free < LOW_FREE_WARNING && !warned {
+                        // A warning while there is still room: the floating bar and a toast show it.
+                        warned = true;
+                        let _ = app.emit("recording-notice", "disk-low");
+                        let _ = app.emit("recording-disk-low", free);
                     }
                 }
             }
@@ -1000,6 +1027,8 @@ fn finish(app: &AppHandle, state: &State<'_, AppState>, active: Active) -> CmdRe
         group_id,
         name,
     } = active;
+    // Where the live bubble is now becomes the webcam overlay of the recording (before the bubble is closed).
+    let bubble_place = crate::bubble::placement();
     restore_screen(app);
     let stats = handle.stop().map_err(|e| CmdError::new("capture", e))?;
     info.frames = stats.frames;
@@ -1039,6 +1068,12 @@ fn finish(app: &AppHandle, state: &State<'_, AppState>, active: Active) -> CmdRe
     if let Some((segments, start_ms)) = &stats.webcam {
         info.webcam_file = join_webcam(&dir, segments);
         info.webcam_start_ms = *start_ms;
+        if let (Some(p), Some(fx)) = (&bubble_place, info.effects.as_mut()) {
+            fx.webcam.position = p.position.clone();
+            fx.webcam.x = p.x;
+            fx.webcam.y = p.y;
+            fx.webcam.size = p.size.clone();
+        }
     }
     write_info(&dir, &info)?;
     let _ = &rel_dir;
@@ -1108,6 +1143,8 @@ fn register(
         store
             .set_recording(&capture.id, dir, info.duration_ms)
             .map_err(CmdError::from)?;
+        // A new recording replaces the current one: the old one goes from the temp folder.
+        let _ = store.drop_current_except(Some(&capture.id));
         // The group may have been renamed or the recording started in another group: the folder follows the card.
         let _ = &info.screen_file;
         (capture, group, store.session().clone())
@@ -1689,6 +1726,8 @@ pub(crate) mod win {
                 } else {
                     0
                 };
+                // The camera that only showed the bubble is let go; the recording opens it and keeps the bubble alive.
+                crate::bubble::stop_preview_camera();
                 match crate::webcam::Webcam::start(
                     &dir,
                     device,

@@ -9,7 +9,8 @@
     "toast",
     "countdown",
     "recframe",
-    "recbar"
+    "recbar",
+    "webcambubble"
   ],
   "permissions": [
     "core:default",

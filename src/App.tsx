@@ -3,6 +3,7 @@ import { useSettings } from "@seconddawn/settings";
 import { applyTheme } from "@seconddawn/ui";
 import { useEffect, useState } from "react";
 import { MainWindow } from "./components/MainWindow";
+import { WebcamBubble } from "./components/WebcamBubble";
 import { RecBar } from "./components/RecBar";
 import { Countdown } from "./overlay/Countdown";
 import { Overlay } from "./overlay/Overlay";
@@ -82,5 +83,6 @@ function Root({ label }: { label: string }) {
   if (label === "countdown") return <Countdown />;
   if (label === "recframe") return <div className="recframe" />;
   if (label === "recbar") return <RecBar />;
+  if (label === "webcambubble") return <WebcamBubble />;
   return <MainWindow />;
 }

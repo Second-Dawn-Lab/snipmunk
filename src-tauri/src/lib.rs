@@ -1,6 +1,7 @@
 //! Snipmunk backend: window and tray lifecycle, settings and the session store.
 
 mod audio;
+mod bubble;
 mod capture;
 mod commands;
 mod compose;
@@ -22,6 +23,7 @@ mod output;
 mod package;
 mod placement;
 mod popups;
+mod projects;
 mod recording;
 mod recstore;
 mod render;
@@ -43,8 +45,9 @@ use commands::AppState;
 pub fn run() {
     tauri::Builder::default()
         // Must be registered first: a second launch just brings the running window forward.
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            tray::show_main(app)
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            tray::show_main(app);
+            projects::handle_args(app, &args);
         }))
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
@@ -64,6 +67,7 @@ pub fn run() {
         .manage(hotkey::HotkeyManager::new())
         .manage(render::RenderJob::default())
         .register_uri_scheme_protocol("snipmunk-img", commands::serve_image)
+        .register_uri_scheme_protocol("snipmunk-cam", bubble::serve_cam)
         .register_uri_scheme_protocol("snipmunk-cap", capture::serve)
         .invoke_handler(tauri::generate_handler![
             commands::get_settings,
@@ -105,6 +109,21 @@ pub fn run() {
             commands::webcam_devices,
             effects::set_effects,
             package::project_save,
+            projects::project_open,
+            projects::project_close,
+            projects::project_rename,
+            projects::project_commit,
+            projects::project_save_copy,
+            projects::project_recent,
+            projects::project_recent_remove,
+            projects::project_journal,
+            projects::set_unsaved,
+            bubble::bubble_resize,
+            projects::cancel_quit,
+            projects::restart_app,
+            projects::take_pending_open,
+            projects::current_recording,
+            projects::discard_current_recording,
             package::project_info,
             package::project_set_effects,
             package::project_save_as,
@@ -129,6 +148,8 @@ pub fn run() {
             export::open_folder,
             export::show_in_explorer,
             export::open_file,
+            export::pick_project_save,
+            export::pick_project_open,
             export::session_images_folder,
             export::share_supported,
             export::pictures_folder,
@@ -159,6 +180,8 @@ pub fn run() {
         .setup(|app| {
             let settings = app.state::<AppState>().settings.lock().unwrap().clone();
             tray::build(app.handle(), &settings.language)?;
+            // A project file given on the command line (double-click in Explorer) is opened by the page once it is ready.
+            projects::handle_args(app.handle(), &std::env::args().collect::<Vec<_>>());
             if let Some(main) = app.get_webview_window("main") {
                 webview::disable_browser_accelerators(&main);
                 // The window is created hidden: put it back where it was before it is shown.
@@ -200,7 +223,7 @@ pub fn run() {
                         "background" => {
                             let _ = window.hide();
                         }
-                        "quit" => window.app_handle().exit(0),
+                        "quit" => crate::projects::request_quit(window.app_handle()),
                         // The frontend shows the dialog and answers with `close_action`.
                         _ => {
                             let _ = window.emit("close-requested", ());

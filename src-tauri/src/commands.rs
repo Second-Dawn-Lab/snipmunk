@@ -26,14 +26,11 @@ impl AppState {
             SessionStore::default_root(),
             crate::language::resolve(&settings.language),
         );
-        sessions.set_recordings_root(crate::recstore::resolve(
-            &settings.recordings_dir,
-            crate::recstore::default_recordings_dir,
-        ));
-        // Recordings of earlier versions move into the recordings folder (once); cards of recordings that were deleted in
-        // Explorer go; old sessions go according to the retention setting, but never their recordings.
+        // The current recording lives in the temp folder; recordings of earlier layouts stay where they are (not shown).
+        sessions.set_recordings_root(crate::projects::current_root());
+        // Cards of recordings whose folder is gone (deleted in Explorer, or temp cleaned up) go; old sessions go according to the
+        // retention setting, but never their recordings.
         sessions.absorb_all_recordings();
-        sessions.migrate_recordings();
         sessions.prune_missing_recordings();
         sessions.cleanup(settings.retention_days, now_ms());
         Self {
@@ -85,11 +82,12 @@ pub fn apply(app: &AppHandle, settings: &Settings) {
         let state = app.state::<AppState>();
         let mut store = state.sessions.lock().unwrap();
         store.set_language(crate::language::resolve(&settings.language));
-        // New recordings go to the folder of the setting; the existing ones stay until the user moves them.
-        store.set_recordings_root(crate::recstore::resolve(
-            &settings.recordings_dir,
-            crate::recstore::default_recordings_dir,
-        ));
+        store.set_recordings_root(crate::projects::current_root());
+    }
+    // The live webcam bubble follows the webcam switch (windows are made on a thread of their own).
+    {
+        let (app2, on) = (app.clone(), settings.webcam_on);
+        std::thread::spawn(move || crate::bubble::set_visible(&app2, on));
     }
     crate::hotkey::apply(app, &settings.capture_hotkey, &settings.record_hotkey);
 }
@@ -168,7 +166,7 @@ pub fn take_settings_tab() -> Option<String> {
 
 #[tauri::command]
 pub fn quit_app(app: AppHandle) {
-    app.exit(0);
+    crate::projects::leave(&app);
 }
 
 /// Answer to the "close window?" dialog: "background" or "quit".
@@ -192,7 +190,7 @@ pub fn close_action(
         let _ = app.emit("settings-changed", &updated);
     }
     if action == "quit" {
-        app.exit(0);
+        crate::projects::request_quit(&app);
     } else if let Some(w) = app.get_webview_window("main") {
         crate::placement::flush();
         let _ = w.hide();
@@ -390,11 +388,24 @@ pub fn serve_image<R: tauri::Runtime>(
     let path = percent_decode(request.uri().path().trim_matches('/'));
     // A recording (the player reads it in parts: the video element sends Range requests).
     if let Some((session, file)) = path.split_once('/') {
+        // A project (a .snpr file): the media is read from the file by offset, nothing is extracted.
+        if let Some(rest) = file.strip_prefix("proj/") {
+            if let Some((id, name)) = rest.split_once('/') {
+                let target = crate::projects::entry_range(id, name);
+                let range = request
+                    .headers()
+                    .get("range")
+                    .and_then(|v| v.to_str().ok())
+                    .map(str::to_string);
+                return serve_recording(target, name, range.as_deref());
+            }
+        }
         if file.starts_with("rec/") {
             let target = ctx
                 .app_handle()
                 .try_state::<AppState>()
-                .and_then(|state| state.sessions.lock().unwrap().recording_file(session, file));
+                .and_then(|state| state.sessions.lock().unwrap().recording_file(session, file))
+                .map(|p| (p, 0, None));
             let range = request
                 .headers()
                 .get("range")
@@ -446,7 +457,7 @@ pub fn parse_range(header: &str, len: u64) -> Option<(u64, u64)> {
 }
 
 fn serve_recording(
-    target: Option<std::path::PathBuf>,
+    target: Option<(std::path::PathBuf, u64, Option<u64>)>,
     file: &str,
     range: Option<&str>,
 ) -> tauri::http::Response<Vec<u8>> {
@@ -457,15 +468,17 @@ fn serve_recording(
             .body(Vec::new())
             .unwrap_or_default()
     };
-    let Some(path) = target else {
+    // The part of the file that is the entry: all of a plain file, or a stored entry of a project file.
+    let Some((path, base, window)) = target else {
         return not_found();
     };
     let Ok(mut f) = std::fs::File::open(&path) else {
         return not_found();
     };
-    let Ok(len) = f.metadata().map(|m| m.len()) else {
+    let Ok(file_len) = f.metadata().map(|m| m.len()) else {
         return not_found();
     };
+    let len = window.unwrap_or(file_len.saturating_sub(base));
     let kind = match file.rsplit('.').next() {
         Some("mp4") => "video/mp4",
         Some("m4a") => "audio/mp4",
@@ -481,7 +494,7 @@ fn serve_recording(
     match range.and_then(|r| parse_range(r, len)) {
         Some((start, end)) => {
             let mut bytes = vec![0u8; (end - start + 1) as usize];
-            if f.seek(SeekFrom::Start(start)).is_err() || f.read_exact(&mut bytes).is_err() {
+            if f.seek(SeekFrom::Start(base + start)).is_err() || f.read_exact(&mut bytes).is_err() {
                 return not_found();
             }
             builder
@@ -492,7 +505,9 @@ fn serve_recording(
         }
         None => {
             let mut bytes = Vec::with_capacity(len as usize);
-            if f.read_to_end(&mut bytes).is_err() {
+            if f.seek(SeekFrom::Start(base)).is_err()
+                || f.take(len).read_to_end(&mut bytes).is_err()
+            {
                 return not_found();
             }
             builder.status(200).body(bytes).unwrap_or_default()

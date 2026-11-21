@@ -220,7 +220,7 @@ pub fn draw_webcam(
     ch: usize,
     rect: (i32, i32, i32, i32),
     shape: Shape,
-    border: bool,
+    border: Option<([u8; 3], f32)>,
 ) {
     let (rx, ry, rw, rh) = rect;
     if rw <= 0 || rh <= 0 || cw == 0 || ch == 0 || cam.len() < cw * ch * 4 {
@@ -230,10 +230,10 @@ pub fn draw_webcam(
     let scale = (rw as f32 / cw as f32).max(rh as f32 / ch as f32);
     let (vw, vh) = (rw as f32 / scale, rh as f32 / scale);
     let (vx, vy) = ((cw as f32 - vw) / 2.0, (ch as f32 - vh) / 2.0);
-    let bw = if border {
-        (rw.min(rh) as f32 * 0.02).clamp(2.0, 6.0)
-    } else {
-        0.0
+    // The border: its colour and its width (a fraction of the shorter side, at least 2 pixels).
+    let (border_rgb, bw) = match border {
+        Some((rgb, frac)) => (rgb, (rw.min(rh) as f32 * frac).max(2.0)),
+        None => ([255, 255, 255], 0.0),
     };
     for oy in 0..rh {
         for ox in 0..rw {
@@ -250,7 +250,7 @@ pub fn draw_webcam(
                 // The border lies on the inside of the edge.
                 let inner = shape_depth(shape, fx, fy, rw as f32, rh as f32);
                 if inner < bw {
-                    blend_px(buf, w, h, rx + ox, ry + oy, [255, 255, 255], cover * 0.95);
+                    blend_px(buf, w, h, rx + ox, ry + oy, border_rgb, cover * 0.95);
                 }
             }
         }
@@ -532,7 +532,7 @@ mod tests {
             30,
             (10, 10, 60, 60),
             Shape::Circle,
-            false,
+            None,
         );
         assert_eq!(px(&circle, 80, 40, 40), [0, 200, 0]);
         assert_eq!(
@@ -550,7 +550,7 @@ mod tests {
             30,
             (10, 10, 60, 60),
             Shape::Rect,
-            false,
+            None,
         );
         assert_eq!(px(&square, 80, 11, 11), [0, 200, 0]);
         let mut bordered = black(80, 80);
@@ -563,9 +563,24 @@ mod tests {
             30,
             (10, 10, 60, 60),
             Shape::Rect,
-            true,
+            Some(([255, 0, 0], 0.05)),
         );
-        assert!(px(&bordered, 80, 11, 40)[0] > 235, "white border");
+        let edge = px(&bordered, 80, 11, 40);
+        assert!(edge[0] > 235 && edge[1] < 40, "red border {edge:?}");
+        // A thick border reaches further in than a thin one.
+        let mut thick = black(80, 80);
+        draw_webcam(
+            &mut thick,
+            80,
+            80,
+            &cam,
+            40,
+            30,
+            (10, 10, 60, 60),
+            Shape::Rect,
+            Some(([255, 255, 255], 0.15)),
+        );
+        assert!(px(&thick, 80, 17, 40)[0] > 235 && px(&bordered, 80, 17, 40)[0] < 40);
         assert_eq!(px(&bordered, 80, 40, 40), [0, 200, 0]);
         let mut rounded = black(80, 80);
         draw_webcam(
@@ -577,7 +592,7 @@ mod tests {
             30,
             (10, 10, 60, 60),
             Shape::Rounded,
-            false,
+            None,
         );
         assert_eq!(px(&rounded, 80, 10, 10), [0, 0, 0], "rounded corners");
         assert_eq!(px(&rounded, 80, 40, 12), [0, 200, 0]);

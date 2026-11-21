@@ -41,6 +41,7 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "resources": { "icons/snpr.ico": "snpr.ico" },
     "createUpdaterArtifacts": false,
     "shortDescription": "Snipmunk: a screenshot clipboard",
     "windows": {

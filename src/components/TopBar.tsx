@@ -194,7 +194,10 @@ export function TopBar(props: {
           <span>{isWindows ? t("actions.editPaint") : t("actions.openEditor")}</span>
         </button>
         )}
-        <ActionButton icon="save" label={props.recording ? t("export.button") : t("actions.save")} tip={soonTip ?? (props.recording ? t("export.tip") : t("actions.saveTip"))} disabled={offShare} onClick={share.onSave} />
+        {/* Recording mode: Export, Copy and Share are at the bottom right; Save, Copy, Share and Zoom here are for screenshots. */}
+        {!props.recording && (
+          <>
+        <ActionButton icon="save" label={t("actions.save")} tip={soonTip ?? t("actions.saveTip")} disabled={offShare} onClick={share.onSave} />
         <ActionButton icon="copy" label={t("actions.copy")} tip={soonTip ?? t("actions.copyTip")} disabled={offShare} onClick={share.onCopy} />
         <ActionButton
           icon="share"
@@ -203,7 +206,10 @@ export function TopBar(props: {
           disabled={offShare || !share.canShare}
           onClick={share.onShare}
         />
+          </>
+        )}
 
+        {!props.recording && (
         <Pop
           open={zoomOpen}
           onClose={() => setZoomOpen(false)}
@@ -227,6 +233,7 @@ export function TopBar(props: {
         >
           {zoomItems(() => setZoomOpen(false))}
         </Pop>
+        )}
 
         <Pop
           open={moreOpen}
@@ -244,11 +251,13 @@ export function TopBar(props: {
             />
           }
         >
-          <SubmenuItem label={t("menu.zoom")} icon="zoom">
-            {zoomItems(() => setMoreOpen(false))}
-          </SubmenuItem>
+          {!props.recording && (
+            <SubmenuItem label={t("menu.zoom")} icon="zoom">
+              {zoomItems(() => setMoreOpen(false))}
+            </SubmenuItem>
+          )}
           {!props.recording && <MenuItem label={t("menu.openFile")} icon="openfile" hint={key("Ctrl+O")} disabled={share.busy} onSelect={() => { setMoreOpen(false); share.onOpenFile(); }} />}
-          <MenuItem label={t("menu.openFolder")} icon="window" onSelect={() => { setMoreOpen(false); share.onOpenFolder(); }} />
+          {!props.recording && <MenuItem label={t("menu.openFolder")} icon="window" onSelect={() => { setMoreOpen(false); share.onOpenFolder(); }} />}
           {!props.recording && <MenuItem label={t("menu.print")} icon="print" hint={key("Ctrl+P")} disabled={off} onSelect={() => { setMoreOpen(false); share.onPrint(); }} />}
           <MenuItem
             label={t("menu.settings")}

@@ -41,7 +41,7 @@ export const INDEX: SettingEntry[] = [
   { id: "magnifier", tab: "screenshots", title: "settings.magnifier", desc: "settings.magnifierDesc" },
 
   { id: "recordHotkey", tab: "recording", title: "settings.recordHotkey", desc: "settings.recordHotkeyDesc" },
-  { id: "recordingsDir", tab: "recording", title: "settings.recordingsDir", desc: "settings.recordingsDirDesc" },
+  { id: "projectsDir", tab: "recording", title: "settings.projectsDir", desc: "settings.projectsDirDesc" },
   { id: "micDevice", tab: "recording", title: "settings.micDevice", desc: "settings.micDeviceDesc" },
   { id: "systemDevice", tab: "recording", title: "settings.systemDevice", desc: "settings.systemDeviceDesc" },
   { id: "recFps", tab: "recording", title: "rec.fps" },

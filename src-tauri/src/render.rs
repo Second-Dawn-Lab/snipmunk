@@ -1286,7 +1286,7 @@ pub mod win {
                                     ch as usize,
                                     fx.webcam_rect(plan.w, plan.h),
                                     fx.webcam_shape(),
-                                    fx.webcam.border,
+                                    fx.webcam_border(),
                                 );
                             }
                         }
@@ -1685,6 +1685,20 @@ fn recording_for(
     state: &crate::commands::AppState,
     capture_id: &str,
 ) -> crate::error::CmdResult<(PathBuf, String, String)> {
+    // An open project: its media is extracted into its cache folder (once) and the export works there.
+    if let Some(id) = crate::projects::as_project(capture_id) {
+        let dir = crate::projects::stage(id)
+            .map_err(|e| crate::error::CmdError::new("io", e.to_string()))?;
+        let (_, name) = crate::projects::project_dir(id)
+            .ok_or_else(|| crate::error::CmdError::new("not_found", "this project is not open"))?;
+        let info: serde_json::Value = std::fs::read(dir.join("recording.json"))
+            .ok()
+            .and_then(|b| serde_json::from_slice(&b).ok())
+            .unwrap_or_default();
+        let quality = info["quality"].as_str().unwrap_or("standard").to_string();
+        let safe = crate::recstore::safe_name(&name);
+        return Ok((dir, format!("{safe}.mp4"), quality));
+    }
     let store = state.sessions.lock().unwrap();
     let dir = store
         .recording_dir(capture_id)

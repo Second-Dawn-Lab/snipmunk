@@ -52,6 +52,7 @@ import { DeleteGroupDialog } from "./DeleteGroupDialog";
 import type { GalleryActions } from "./Gallery";
 import { GroupTabs } from "./GroupTabs";
 import { ExportDialog } from "./ExportDialog";
+import { useRecordingMode } from "./useRecordingMode";
 import { HotkeyNotice } from "./HotkeyNotice";
 import { MenuItem } from "./MenuItem";
 import { Preview, type ZoomMode } from "./Preview";
@@ -118,6 +119,8 @@ export function MainWindow() {
     },
     [pushToast],
   );
+  // The recording mode shows the current recording or one opened project (see useRecordingMode.tsx).
+  const rec = useRecordingMode({ rawSession, settings, recMode, setError, setNotice, errorText: messageOf });
   const [query, setQuery] = useState("");
   const [applied, setApplied] = useState("");
   const [scope, setScope] = useState<"group" | "all">("group");
@@ -193,7 +196,11 @@ export function MainWindow() {
   }, [ix]);
 
   const group = session ? groupOrFirst(session, groupId) : null;
-  const baseShown = useMemo(() => (group ? sortCaptures(group.captures, sort) : []), [group, sort]);
+  const recShown = rec.shown;
+  const baseShown = useMemo(
+    () => (recMode ? (recShown ? [recShown] : []) : group ? sortCaptures(group.captures, sort) : []),
+    [recMode, recShown, group, sort],
+  );
   const searching = applied.trim() !== "";
   // "This group": the list is the matching captures (in the group's order). "All groups": a separate list of results.
   const shown = useMemo(() => {
@@ -296,7 +303,7 @@ export function MainWindow() {
   useEffect(() => {
     const started = ipc.onStartRecording(() => {
       void patch({ captureKind: "video" });
-      void ipc.startRecording(settingsRef.current.recMode).catch((e) => setError(messageOf(e)));
+      rec.startRecording(settingsRef.current.recMode);
     });
     return () => {
       void started.then((fn) => fn());
@@ -324,6 +331,7 @@ export function MainWindow() {
         "disk-start": "rec.notice.diskStart",
         "disk-full": "rec.notice.diskFull",
         "mic-none": "rec.notice.micNone",
+        "disk-low": "rec.notice.diskLow",
         "mic-fallback": "rec.notice.micFallback",
         "webcam-none": "rec.notice.webcamNone",
         "webcam-denied": "rec.notice.webcamDenied",
@@ -773,7 +781,7 @@ export function MainWindow() {
         onCapture={(mode) => void ipc.startCapture(mode).catch((e) => setError(messageOf(e)))}
         zoom={zoom}
         recording={recMode}
-        onRecord={(area) => void ipc.startRecording(area).catch((e) => setError(messageOf(e)))}
+        onRecord={(area) => rec.startRecording(area)}
         share={{
           hasCapture: capture !== null,
           busy: share.busy,
@@ -793,7 +801,7 @@ export function MainWindow() {
       <Toasts toasts={toasts} onClose={closeToast} />
       <ExportDialog
         capture={exporting}
-        defaultFolder={exporting?.videoDir ? exporting.videoDir.replace(/[\\/][^\\/]*$/, "") : ""}
+        defaultFolder={exporting ? rec.folder() : ""}
         onClose={() => setExporting(null)}
         onError={(e) => setError(messageOf(e))}
       />
@@ -808,7 +816,8 @@ export function MainWindow() {
       )}
 
 
-      <main className="panels">
+      <main className={`panels${recMode ? " panels--single" : ""}`}>
+        {!recMode && (
         <div className={`panel panel--left panel--${galleryView}`}>
           {recMode && (
           <GroupTabs
@@ -893,8 +902,11 @@ export function MainWindow() {
           />
           )}
         </div>
+        )}
         <div className="panel panel--right">
-          <Preview
+          {recMode && rec.header}
+          {recMode && !capture && rec.empty(() => rec.startRecording(settings.recMode))}
+          {(!recMode || capture) && <Preview
             session={session}
             capture={capture}
             zoomMode={zoomMode}
@@ -906,8 +918,10 @@ export function MainWindow() {
             onPatch={(change) => void patch(change)}
             searchQuery={searching ? applied : ""}
             recording={recMode}
-          />
+            onEdited={rec.edited}
+          />}
         </div>
+        {recMode && rec.dialogs}
         {dropGroup && (
           <div className={`dropoverlay${dropGroup.color ? ` gc-${dropGroup.color}` : ""}`} aria-hidden="true">
             <div className="dropoverlay__msg">
@@ -926,6 +940,7 @@ export function MainWindow() {
         busy={share.busy}
         onCopy={() => (recMode ? selectionOrCurrent()[0] && recCopy(selectionOrCurrent()[0]) : void share.copy(selectionOrCurrent(), copyMode))}
         onSave={() => (recMode ? selectionOrCurrent()[0] && recSave(selectionOrCurrent()[0]) : share.save(selectionOrCurrent()))}
+        onShare={recMode ? () => capture && recShare(capture) : undefined}
       />
 
       <SaveDialog

@@ -178,7 +178,17 @@ export function WebcamControls(props: { value: Effects["webcam"]; onChange: (v: 
       {row({
         id: "webcamBorder",
         label: t("fx.webcamBorder"),
-        children: <Switch label={t("fx.webcamBorder")} checked={v.border} onChange={(border) => onChange({ ...v, border })} />,
+        children: (
+          <span className="fxpair">
+            <Select
+              label={t("fx.webcamBorder")}
+              value={v.border}
+              onChange={(border) => onChange({ ...v, border: border as Effects["webcam"]["border"] })}
+              options={(["off", "thin", "medium", "thick"] as const).map((b) => ({ value: b, label: t(`fx.border.${b}` as "fx.border.off") }))}
+            />
+            {v.border !== "off" && <ColorField label={t("fx.borderColor")} value={v.borderColor} onChange={(borderColor) => onChange({ ...v, borderColor })} />}
+          </span>
+        ),
       })}
     </>
   );

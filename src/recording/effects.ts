@@ -16,7 +16,8 @@ export interface Effects {
     position: "top-left" | "top-right" | "bottom-left" | "bottom-right" | "free";
     x: number;
     y: number;
-    border: boolean;
+    border: "off" | "thin" | "medium" | "thick";
+    borderColor: string;
   };
   /** The part that is played and exported, in milliseconds (`endMs` null = to the end). */
   trim: { startMs: number; endMs: number | null };
@@ -26,7 +27,7 @@ export function effectsFromSettings(s: Settings): Effects {
   return {
     cursor: { show: s.cursorShow, size: s.cursorSize, halo: s.cursorHalo, haloColor: s.cursorHaloColor },
     click: { kind: s.clickEffect, left: s.clickLeftColor, right: s.clickRightColor, size: s.clickSize },
-    webcam: { show: true, shape: s.webcamShape, size: s.webcamSize, position: s.webcamPosition, x: 0.85, y: 0.85, border: s.webcamBorder },
+    webcam: { show: true, shape: s.webcamShape, size: s.webcamSize, position: s.webcamPosition, x: 0.85, y: 0.85, border: s.webcamBorder, borderColor: s.webcamBorderColor },
     trim: { startMs: 0, endMs: null },
   };
 }
@@ -65,7 +66,9 @@ export function readEffects(raw: unknown, base: Effects): Effects {
       position: pick(w.position, ["top-left", "top-right", "bottom-left", "bottom-right", "free"], base.webcam.position),
       x: frac(w.x, base.webcam.x),
       y: frac(w.y, base.webcam.y),
-      border: typeof w.border === "boolean" ? w.border : base.webcam.border,
+      // (older files have a boolean)
+      border: w.border === true ? "thin" : w.border === false ? "off" : pick(w.border, ["off", "thin", "medium", "thick"], base.webcam.border),
+      borderColor: color(w.borderColor, base.webcam.borderColor),
     },
     trim: { startMs, endMs },
   };
@@ -91,6 +94,9 @@ export function webcamCentre(w: Effects["webcam"], width: number, aspect: number
     y: w.position.startsWith("top") ? top : 1 - top,
   };
 }
+
+/** The width of the webcam border as a fraction of the shorter side of the bubble. */
+export const BORDER_WIDTH = { off: 0, thin: 0.02, medium: 0.04, thick: 0.07 } as const;
 
 /** The width of the webcam picture as a fraction of the video width. */
 export const WEBCAM_WIDTH = { s: 0.14, m: 0.2, l: 0.28 } as const;

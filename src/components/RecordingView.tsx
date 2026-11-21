@@ -14,7 +14,7 @@ const SAVE_DELAY_MS = 300;
  * the cursor track), keeps the effects, and saves every change with the recording (so it is still there after a restart and is
  * used by the next export).
  */
-export function RecordingView(props: { session: Session; capture: Capture; settings: Settings; onError: (e: unknown) => void }) {
+export function RecordingView(props: { session: Session; capture: Capture; settings: Settings; onError: (e: unknown) => void; onEdited?: () => void }) {
   const { session, capture, onError } = props;
   const [info, setInfo] = useState<RecInfo | null>(null);
   const [cursor, setCursor] = useState<CursorFile | null>(null);
@@ -59,6 +59,7 @@ export function RecordingView(props: { session: Session; capture: Capture; setti
   const change = useCallback(
     (next: Effects) => {
       setEffects(next);
+      props.onEdited?.();
       pending.current = next;
       if (timer.current !== null) window.clearTimeout(timer.current);
       timer.current = window.setTimeout(flush, SAVE_DELAY_MS);

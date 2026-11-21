@@ -139,7 +139,7 @@ pub fn build(app: &AppHandle, lang: &str) -> tauri::Result<()> {
                 }
             }
             "settings" => open_settings_window(app),
-            "quit" => app.exit(0),
+            "quit" => crate::projects::request_quit(app),
             _ => {}
         })
         .on_tray_icon_event(|tray, event| {

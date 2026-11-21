@@ -1,6 +1,6 @@
 # Snipmunk roadmap
 
-Status: Phases 1 to 6 are done. Phase 7 (recording, effects, export, projects) is in its last session; the product now has three modes: Screenshots (one clipboard list), Recording (current recording + project files) and Documents (next phase).
+Status: Phases 1 to 6 are done. Phase 7 (recording, effects, export, projects) is done; the product now has three modes: Screenshots (one clipboard list), Recording (current recording + project files) and Documents (next phase).
 
 ## Phase 1: Repo setup ✅
 Project folder, README, license, `.gitignore`, roadmap and icon placeholder.
@@ -83,14 +83,16 @@ Everything that leaves the app uses the shared renderer (marks, crop, rotation, 
 - **6.1 fixes** (from the Phase 6 manual tests): Grid pastes in Word and Paint (24-bit padded clipboard bitmap), an option to leave the file list off the clipboard so Outlook gets the pictures inline, the Text tool makes one box per activation and goes back to Select, small and monospace text is read again enlarged and lines only one pass found are kept, card and IBAN detection tolerates O/l/S/B read for digits (checksums still decide), the Quick redact main button redacts at once, the text layer's right-click menu works, "Open folder" opens the real folder, the list view's check box and trash no longer overlap, every notice is a toast, a clear page when the dev server is gone, the caret goes where the user clicked, and `tauri-plugin-dialog` replaces `rfd`.
 - See `docs/manual-tests-phase-6.md`.
 
-## Phase 7: Screen recording, effects, export and projects (in progress; 7-B3 is the last session)
+## Phase 7: Screen recording, effects, export and projects ✅
 Done (Part A, fixes from the 6.1 retest): Copy ▾ with "Copy as files", "Redact only this" in the text layer's menu, the Save dialog's folder row, marks that lock like the Snipping Tool's, hold-to-shape for the pen and highlighter.
 
 Done in the recorder sessions (details in `docs/manual-tests-phase-7.md`):
 - Native recorder (Windows.Graphics.Capture without the cursor, Media Foundation H.264, crash-safe 10 s segments with lossless join and recovery, pause/resume), system sound (WASAPI loopback) and microphone as separate tracks, cursor track, webcam as its own video (generated camera tested), floating bar, Ctrl+Alt+R.
 - Player with cursor halo/size, click effects (ripple, burst), webcam overlay, trim, effects panel; export dialog (MP4 or GIF, quality, resolution, aspect ratio with bars or crop); Copy, drag and Share use the default export, named after the recording.
 - Session 7-B3 so far: export fixes (Original is the full size, resolution list limited to the recording, size estimate from the real bitrate, trimmed exports seek instead of decoding from the start), export dialog with elapsed/left time and a finished view, player timeline with scrubbing / frame step / trim mode, edit-webcam handles, device pickers in the quick menu, **screenshots are one list without groups** (old groups are merged by capture time; the group engine stays in the code for Documents), "Delete all…", and the **package format of project files** (`src-tauri/src/package.rs`: one stored ZIP with a manifest, append-only small saves, atomic creation, crash repair) with commands to save, inspect, change the effects of and "Save as" a `.snpr`.
-- **Not done yet (carry over)**: the recording model change in the UI (only the current recording in `%TEMP%\Snipmunk\current`, tabs for projects, Save as project / Open project dialogs, quit and new-recording questions, journal of unsaved project edits, file association, "Recent projects"), the live webcam bubble during recording (A6), a GPU export path (the decoder is the limit at 3440x1440), and the Settings cleanup that goes with the model change.
+- Session 7-B4: the **recording model change** is done: the recording mode shows the current recording (in `%TEMP%\Snipmunk\current`) or one opened `.snpr` project; Save as project, Open (Ctrl+O), Save (Ctrl+S), Save as, Close, Recent projects, the questions before a new recording and before Quit, a journal of unsaved project edits, low-disk warning, the file association, and the player reading a project straight from the file by offset. Small fixes (Save count, list header, playhead, webcam border colour and thickness) are in too.
+- Session 7-B5: the recording flow is fixed (a new recording closes an open project and is what you see afterwards; Discard recording; one Quit/restart path), the project header is one compact bar (rename, status chip, File menu, one main button), the **live webcam bubble** is done (excluded from capture, draggable and resizable from the countdown on; its place becomes the overlay), the `.snpr` icon with a video badge is registered by the installer hook, and the format is written down in `docs/snpr-format.md` (unknown data is kept on save; a newer major version is refused).
+- **Carried to Phase 8**: a GPU export path (the decoder is the limit at 3440x1440); the installer registration of `.snpr` is untested until an installer is built.
 
 ## Phase 7.5: Documents mode (Tango-style guides)
 - "Start guide" captures a step on every click (screenshot + click marker); a hotkey adds a manual step.
@@ -101,7 +103,8 @@ Done in the recorder sessions (details in `docs/manual-tests-phase-7.md`):
 - Drag screenshots from the clipboard list, or GIF/video clips from recordings, into a guide.
 - Groups and sections reuse the group engine; export to PDF, Word, Markdown and HTML; branding (title page, logo, colours, author).
 - `.snpd` project files on the same package format as `.snpr` (`package.rs`, another `kind`).
-- Later in 7.5 or after: Snipmunk Studio (auto-zoom on clicks, cursor smoothing, multi-clip timeline), Stack/Grid options.
+- Later in 7.5 or after: Stack/Grid options.
+- **Video editor = a separate Second Dawn app** (after Documents): it opens `.snpr` (see `docs/snpr-format.md`) and normal video files and has the editing features (auto-zoom on clicks, cursor smoothing, multi-clip timeline); the shared rendering (effects, export) may move to a dawn-core crate. Snipmunk keeps a quick review only: play, trim, effects, export, copy, share, project files.
 
 ## Phase 8: Polish and the first release (v0.1.0)
 - Memory reduction (about 700 MB now, goal under 300 MB), GPU export path everywhere, avoid reading text twice (OCR).

@@ -28,8 +28,31 @@ pub const MANIFEST: &str = "manifest.json";
 pub struct Manifest {
     /// What the package is: `snipmunk.recording` (`.snpr`); documents will use their own.
     pub format: String,
+    /// The major version of the layout: a reader that does not know it refuses the file.
     pub version: u32,
+    /// The minor version: only adds things; a reader of the same major version opens a newer minor version.
+    #[serde(default)]
+    pub minor: u32,
+    /// The version of the program that wrote the file last.
     pub app_version: String,
+    /// Any fields this version does not know are kept as they are when the file is saved (see `docs/snpr-format.md`).
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+}
+
+/// The newest layout this program reads and writes.
+pub const VERSION_MAJOR: u32 = 1;
+pub const VERSION_MINOR: u32 = 0;
+
+/// A manifest for a new package.
+pub fn new_manifest(kind: &str, version: u32) -> Manifest {
+    Manifest {
+        format: kind.to_string(),
+        version,
+        minor: VERSION_MINOR,
+        app_version: env!("CARGO_PKG_VERSION").to_string(),
+        extra: serde_json::Map::new(),
+    }
 }
 
 /// Where the bytes of an entry come from when a package is made.
@@ -63,40 +86,7 @@ fn tail_path(path: &Path) -> PathBuf {
 /// Make a package at `path`: written to a file next to it and renamed, so there is never a half-written project. The entries are
 /// written in the order given, after the manifest.
 pub fn create(path: &Path, kind: &str, version: u32, sources: &[Source]) -> io::Result<()> {
-    let tmp = {
-        let mut s = path.as_os_str().to_os_string();
-        s.push(format!(".part{}", std::process::id()));
-        PathBuf::from(s)
-    };
-    let result = (|| -> io::Result<()> {
-        let file = File::create(&tmp)?;
-        let mut zip = ZipWriter::new(io::BufWriter::new(file));
-        zip.start_file(MANIFEST, stored()).map_err(zerr)?;
-        let manifest = Manifest {
-            format: kind.to_string(),
-            version,
-            app_version: env!("CARGO_PKG_VERSION").to_string(),
-        };
-        zip.write_all(&serde_json::to_vec_pretty(&manifest).map_err(io::Error::other)?)?;
-        for s in sources {
-            zip.start_file(&s.name, stored()).map_err(zerr)?;
-            match &s.data {
-                Data::Bytes(b) => zip.write_all(b)?,
-                Data::File(p) => {
-                    io::copy(&mut File::open(p)?, &mut zip)?;
-                }
-            }
-        }
-        let mut out = zip.finish().map_err(zerr)?;
-        out.flush()?;
-        out.get_ref().sync_all()?;
-        Ok(())
-    })();
-    if let Err(e) = result {
-        let _ = std::fs::remove_file(&tmp);
-        return Err(e);
-    }
-    std::fs::rename(&tmp, path)
+    create_streaming(path, &new_manifest(kind, version), sources)
 }
 
 /// An opened package: its manifest and where every entry lies in the file.
@@ -137,6 +127,15 @@ pub fn open(path: &Path, kind: &str) -> io::Result<Package> {
         m.read_to_end(&mut text)?;
         serde_json::from_slice(&text).map_err(io::Error::other)?
     };
+    if manifest.version > VERSION_MAJOR {
+        return Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            format!(
+                "this project was made by a newer version of Snipmunk (format version {}, this one reads {})",
+                manifest.version, VERSION_MAJOR
+            ),
+        ));
+    }
     if manifest.format != kind {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
@@ -278,11 +277,16 @@ pub fn compact(from: &Path, to: &Path, kind: &str) -> io::Result<()> {
             data: Data::Bytes(pkg.meta(&n)?),
         });
     }
-    create_streaming(to, kind, pkg.manifest.version, &sources)
+    // The manifest is carried over with every field in it (also those this version does not know); only the writer's version changes.
+    let manifest = Manifest {
+        app_version: env!("CARGO_PKG_VERSION").to_string(),
+        ..pkg.manifest.clone()
+    };
+    create_streaming(to, &manifest, &sources)
 }
 
 /// Like `create`, but a `Data::File` whose path holds `<file>\0<offset>\0<len>` is a range of another file.
-fn create_streaming(path: &Path, kind: &str, version: u32, sources: &[Source]) -> io::Result<()> {
+fn create_streaming(path: &Path, manifest: &Manifest, sources: &[Source]) -> io::Result<()> {
     let tmp = {
         let mut s = path.as_os_str().to_os_string();
         s.push(format!(".part{}", std::process::id()));
@@ -291,12 +295,7 @@ fn create_streaming(path: &Path, kind: &str, version: u32, sources: &[Source]) -
     let result = (|| -> io::Result<()> {
         let mut zip = ZipWriter::new(io::BufWriter::new(File::create(&tmp)?));
         zip.start_file(MANIFEST, stored()).map_err(zerr)?;
-        let manifest = Manifest {
-            format: kind.to_string(),
-            version,
-            app_version: env!("CARGO_PKG_VERSION").to_string(),
-        };
-        zip.write_all(&serde_json::to_vec_pretty(&manifest).map_err(io::Error::other)?)?;
+        zip.write_all(&serde_json::to_vec_pretty(manifest).map_err(io::Error::other)?)?;
         for s in sources {
             zip.start_file(&s.name, stored()).map_err(zerr)?;
             match &s.data {
@@ -331,6 +330,7 @@ fn create_streaming(path: &Path, kind: &str, version: u32, sources: &[Source]) -
 /// video, `recording.json` and the card picture as `thumbnail.png`). The file is written next to its target and renamed.
 #[tauri::command]
 pub async fn project_save(
+    app: tauri::AppHandle,
     state: tauri::State<'_, crate::commands::AppState>,
     capture_id: String,
     path: String,
@@ -341,6 +341,7 @@ pub async fn project_save(
         .unwrap()
         .recording_dir(&capture_id)
         .ok_or_else(|| crate::error::CmdError::new("not_found", "this recording does not exist"))?;
+    let target = path.clone();
     tauri::async_runtime::spawn_blocking(move || -> io::Result<()> {
         let mut sources = Vec::new();
         for name in [
@@ -378,7 +379,16 @@ pub async fn project_save(
     })
     .await
     .map_err(|e| crate::error::CmdError::new("io", e.to_string()))?
-    .map_err(|e| crate::error::CmdError::new("io", e.to_string()))
+    .map_err(|e| crate::error::CmdError::new("io", e.to_string()))?;
+    // The current recording now counts as saved (it stays in temp until it is replaced).
+    let session = {
+        let mut store = state.sessions.lock().unwrap();
+        let _ = store.set_saved_path(&capture_id, Path::new(&target));
+        store.session().clone()
+    };
+    // The page learns that the recording is saved now (its header and the questions depend on it).
+    let _ = tauri::Emitter::emit(&app, "session-changed", &session);
+    Ok(())
 }
 
 /// What a project file holds: its manifest and the length of every entry (nothing is extracted).
@@ -519,6 +529,75 @@ mod tests {
         assert_eq!(c.read("recording.json").unwrap(), b"{\"v\":3}");
         assert!(!c.entries.keys().any(|k| k.starts_with("meta/")));
         assert_eq!(c.read("screen.mp4").unwrap(), vec![7u8; 100_000]);
+    }
+
+    /// A package as a future version might make it: an extra manifest field, an extra entry, an extra small item.
+    fn future_package(dir: &Path, major: u32, minor: u32) -> PathBuf {
+        let path = dir.join("future.snpr");
+        let manifest = serde_json::json!({
+            "format": "snipmunk.recording", "version": major, "minor": minor, "appVersion": "9.9.9",
+            "futureField": {"keep": [1, 2, 3]}
+        });
+        let mut zip = ZipWriter::new(File::create(&path).unwrap());
+        for (name, bytes) in [
+            (MANIFEST, serde_json::to_vec(&manifest).unwrap()),
+            ("screen.mp4", vec![5u8; 300]),
+            ("recording.json", b"{\"v\":1}".to_vec()),
+            ("future/notes.bin", vec![1, 2, 3, 4]),
+            ("meta/future.json.1", b"{\"f\":1}".to_vec()),
+        ] {
+            zip.start_file(name, stored()).unwrap();
+            zip.write_all(&bytes).unwrap();
+        }
+        zip.finish().unwrap();
+        path
+    }
+
+    #[test]
+    fn unknown_manifest_fields_and_unknown_entries_survive_a_save_and_a_save_as() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = future_package(dir.path(), 1, 7);
+        // A newer minor version opens.
+        let p = open(&path, KIND_RECORDING).unwrap();
+        assert_eq!(p.manifest.minor, 7);
+        drop(p);
+        append_meta(
+            &path,
+            KIND_RECORDING,
+            &[("recording.json".into(), b"{\"v\":2}".to_vec())],
+        )
+        .unwrap();
+        let copy = dir.path().join("copy.snpr");
+        compact(&path, &copy, KIND_RECORDING).unwrap();
+        for file in [&path, &copy] {
+            let p = open(file, KIND_RECORDING).unwrap();
+            assert_eq!(
+                p.manifest.extra["futureField"]["keep"],
+                serde_json::json!([1, 2, 3]),
+                "the unknown manifest field is kept"
+            );
+            assert_eq!(p.manifest.minor, 7, "the minor version of the file is kept");
+            assert_eq!(
+                p.read("future/notes.bin").unwrap(),
+                vec![1, 2, 3, 4],
+                "the unknown entry is kept"
+            );
+            assert_eq!(
+                p.meta("future.json").unwrap(),
+                b"{\"f\":1}",
+                "an unknown small item is kept"
+            );
+            assert_eq!(p.meta("recording.json").unwrap(), b"{\"v\":2}");
+        }
+    }
+
+    #[test]
+    fn a_newer_major_version_is_refused_with_a_clear_message() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = future_package(dir.path(), 2, 0);
+        let e = open(&path, KIND_RECORDING).err().unwrap();
+        assert_eq!(e.kind(), io::ErrorKind::Unsupported);
+        assert!(e.to_string().contains("newer version of Snipmunk"), "{e}");
     }
 
     #[test]

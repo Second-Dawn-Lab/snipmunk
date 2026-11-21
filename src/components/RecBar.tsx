@@ -1,3 +1,4 @@
+import { listen } from "@tauri-apps/api/event";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useT } from "../i18n";
 import { ipc } from "../ipc";
@@ -21,6 +22,8 @@ export function RecBar() {
   const [sound, setSound] = useState(true);
   const [mic, setMic] = useState(false);
   const [webcam, setWebcam] = useState(false);
+  // The temp drive is nearly full: a line on the bar says so (the recording is stopped by itself at the critical level).
+  const [low, setLow] = useState(false);
   const capsule = useRef<HTMLDivElement>(null);
   const live = clock.recording;
 
@@ -45,6 +48,7 @@ export function RecBar() {
       setMic(s.recMic);
       setWebcam(s.webcamOn);
     });
+    const lowDisk = listen<number>("recording-disk-low", () => setLow(true));
     const counting = ipc.onRecCountdown((n) => setCount(n > 0 ? n : null));
     const timer = setInterval(() => setNow(Date.now()), 250);
     return () => {
@@ -52,6 +56,7 @@ export function RecBar() {
       void state.then((fn) => fn());
       void settings.then((fn) => fn());
       void counting.then((fn) => fn());
+      void lowDisk.then((fn) => fn());
     };
   }, []);
 
@@ -103,6 +108,11 @@ export function RecBar() {
       ) : (
         <span className="floatbar__time floatbar__time--count" dir="ltr" role="timer" aria-live="assertive" data-tauri-drag-region>
           {count ?? ""}
+        </span>
+      )}
+      {low && live && (
+        <span className="floatbar__low" role="alert">
+          {t("rec.notice.diskLow")}
         </span>
       )}
       {asking && live ? (

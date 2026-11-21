@@ -780,6 +780,63 @@ pub async fn pick_folder(app: AppHandle, start: Option<String>) -> CmdResult<Opt
         .map(|p| p.to_string_lossy().into_owned()))
 }
 
+/// "Save as project…": a save dialog for a `.snpr` file (starts in `start` with `name`). `None` when cancelled.
+#[tauri::command]
+pub async fn pick_project_save(
+    app: AppHandle,
+    start: Option<String>,
+    name: String,
+) -> CmdResult<Option<String>> {
+    use tauri_plugin_dialog::DialogExt;
+    let mut dialog = app
+        .dialog()
+        .file()
+        .add_filter("Snipmunk recording project", &["snpr"])
+        .set_file_name(format!("{}.snpr", crate::recstore::safe_name(&name)));
+    if let Some(s) = start.filter(|s| Path::new(s).is_dir()) {
+        dialog = dialog.set_directory(s);
+    }
+    if let Some(w) = app.get_webview_window("main") {
+        dialog = dialog.set_parent(&w);
+    }
+    let (tx, rx) = std::sync::mpsc::channel();
+    dialog.save_file(move |f| {
+        let _ = tx.send(f);
+    });
+    let chosen = rx.recv().map_err(|e| CmdError::new("io", e))?;
+    Ok(chosen.and_then(|f| f.into_path().ok()).map(|p| {
+        let mut s = p.to_string_lossy().into_owned();
+        if !s.to_lowercase().ends_with(".snpr") {
+            s.push_str(".snpr");
+        }
+        s
+    }))
+}
+
+/// "Open project…": a file dialog for one `.snpr` file. `None` when cancelled.
+#[tauri::command]
+pub async fn pick_project_open(app: AppHandle, start: Option<String>) -> CmdResult<Option<String>> {
+    use tauri_plugin_dialog::DialogExt;
+    let mut dialog = app
+        .dialog()
+        .file()
+        .add_filter("Snipmunk recording project", &["snpr"]);
+    if let Some(s) = start.filter(|s| Path::new(s).is_dir()) {
+        dialog = dialog.set_directory(s);
+    }
+    if let Some(w) = app.get_webview_window("main") {
+        dialog = dialog.set_parent(&w);
+    }
+    let (tx, rx) = std::sync::mpsc::channel();
+    dialog.pick_file(move |f| {
+        let _ = tx.send(f);
+    });
+    let chosen = rx.recv().map_err(|e| CmdError::new("io", e))?;
+    Ok(chosen
+        .and_then(|f| f.into_path().ok())
+        .map(|p| p.to_string_lossy().into_owned()))
+}
+
 /// A file picker with several choices for the image types Snipmunk can import. Returns the chosen paths (empty = cancelled).
 #[tauri::command]
 pub async fn pick_images(app: AppHandle) -> CmdResult<Vec<String>> {

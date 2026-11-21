@@ -85,9 +85,10 @@ export interface Settings {
   webcamShape: "circle" | "rounded" | "rect";
   webcamSize: "s" | "m" | "l";
   webcamPosition: "top-left" | "top-right" | "bottom-left" | "bottom-right";
-  webcamBorder: boolean;
+  webcamBorder: "off" | "thin" | "medium" | "thick";
+  webcamBorderColor: string;
   /** Where recordings are kept ("" = the Windows Videos folder + Snipmunk). */
-  recordingsDir: string;
+  projectsDir: string;
   /** Save each screenshot automatically (to `autoSaveDir`, "" = the Pictures folder + Snipmunk). */
   autoSaveScreenshots: boolean;
   autoSaveDir: string;
@@ -170,8 +171,9 @@ export const defaultSettings: Settings = {
   webcamShape: "circle",
   webcamSize: "m",
   webcamPosition: "bottom-right",
-  webcamBorder: true,
-  recordingsDir: "",
+  webcamBorder: "thin",
+  webcamBorderColor: "#FFFFFF",
+  projectsDir: "",
   autoSaveScreenshots: false,
   autoSaveDir: "",
   saveFormat: "png",
