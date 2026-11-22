@@ -1888,3 +1888,60 @@ html[data-window="scrollpill"], html[data-window="scrollpill"] body, html[data-w
 .scrollpill__cancel { background: rgba(255,255,255,.16); color: #fff; }
 html[data-window="scrollframe"], html[data-window="scrollframe"] body, html[data-window="scrollframe"] #root, html[data-window="scrollpill"], html[data-window="scrollpill"] body, html[data-window="scrollpill"] #root { background: transparent !important; }
 .recframe--scroll { border-color: #2f9e5b; }
+
+/* Documents mode: the list of guides, the guide view and the recording bar. */
+.guides, .guide { position: relative; display: flex; flex-direction: column; min-height: 0; flex: 1; padding: 14px 18px; gap: 12px; overflow: hidden; }
+.guides__head, .guide__head { display: flex; align-items: center; gap: 12px; }
+.guides__head h2 { margin: 0; flex: 1; font-size: 18px; }
+.guides__empty { flex: 1; display: grid; place-content: center; justify-items: center; gap: 10px; text-align: center; opacity: .75; }
+.guides__list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; overflow: auto; align-content: start; }
+.gcard { position: relative; border: 1px solid var(--dw-border, rgba(128,128,128,.35)); border-radius: 10px; background: var(--dw-surface, transparent); overflow: hidden; }
+.gcard__open { display: flex; flex-direction: column; width: 100%; text-align: start; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; padding: 0; }
+.gcard__open:hover { background: rgba(128,128,128,.1); }
+.gcard__thumb { display: block; aspect-ratio: 16 / 9; background: rgba(128,128,128,.18); overflow: hidden; }
+.gcard__thumb img { width: 100%; height: 100%; object-fit: cover; object-position: top left; display: block; }
+.gcard__text { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; min-height: 44px; }
+.gcard__text strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gcard__text small { opacity: .7; }
+.gcard__rename { position: absolute; left: 8px; right: 8px; bottom: 8px; height: 28px; padding: 0 8px; font: inherit; }
+.gcard__actions { position: absolute; top: 6px; inset-inline-end: 6px; display: flex; gap: 4px; opacity: 0; transition: opacity .12s; }
+.gcard:hover .gcard__actions, .gcard:focus-within .gcard__actions { opacity: 1; }
+.gcard__actions button, .gstep__btn { width: 28px; height: 28px; display: inline-grid; place-items: center; border: 0; border-radius: 6px; background: rgba(0,0,0,.55); color: #fff; cursor: pointer; }
+.gcard__actions svg, .gstep__btn svg { stroke: currentColor; fill: none; stroke-width: 1.8; }
+.guide__back { display: inline-flex; align-items: center; gap: 4px; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; padding: 4px 6px; border-radius: 6px; }
+.guide__back:hover { background: rgba(128,128,128,.18); }
+.guide__back svg { transform: rotate(90deg); stroke: currentColor; fill: none; stroke-width: 2; }
+[dir="rtl"] .guide__back svg { transform: rotate(-90deg); }
+.guide__title { flex: 1; min-width: 0; text-align: start; font: inherit; font-size: 18px; font-weight: 700; border: 0; background: none; color: inherit; cursor: text; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.guide__title--edit { border: 1px solid var(--dw-border-strong, rgba(128,128,128,.5)); border-radius: 6px; padding: 2px 6px; background: var(--dw-surface, transparent); }
+.guide__count { opacity: .7; white-space: nowrap; }
+.guide__list { flex: 1; min-height: 0; overflow-y: auto; scroll-behavior: smooth; display: flex; flex-direction: column; gap: 18px; padding: 4px 4px 40px; outline: none; }
+.guide__none { opacity: .7; }
+.gstep { display: flex; flex-direction: column; gap: 8px; max-width: 920px; width: 100%; margin: 0 auto; outline: none; contain: layout paint; }
+.gstep:focus-visible .gstep__pic { box-shadow: 0 0 0 3px var(--dw-brand, #3b82f6); }
+.gstep__head { display: flex; align-items: flex-start; gap: 10px; }
+.gstep__badge { flex: none; min-width: 26px; height: 26px; padding: 0 6px; border-radius: 13px; display: inline-grid; place-items: center; background: var(--dw-brand, #3b82f6); color: #fff; font-weight: 700; font-size: 13px; }
+.gstep__text { flex: 1; margin: 2px 0 0; font-size: 15px; line-height: 1.4; }
+.gstep__actions { display: flex; gap: 4px; opacity: 0; }
+.gstep:hover .gstep__actions, .gstep:focus-within .gstep__actions { opacity: 1; }
+.gstep__pic { position: relative; width: 100%; overflow: hidden; border-radius: 8px; border: 1px solid var(--dw-border, rgba(128,128,128,.35)); background: rgba(128,128,128,.12); }
+.gstep__pic img { position: absolute; height: auto; max-width: none; display: block; user-select: none; }
+.gstep__marker { position: absolute; width: 34px; height: 34px; margin: -17px 0 0 -17px; border: 4px solid #ff5a36; border-radius: 50%; box-shadow: 0 0 0 2px rgba(255,255,255,.85), 0 0 8px rgba(0,0,0,.35); pointer-events: none; }
+.guide__undo { position: absolute; bottom: 18px; inset-inline-start: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 12px; padding: 8px 14px; border-radius: 20px; background: #1f2023; color: #fff; box-shadow: 0 6px 20px rgba(0,0,0,.4); }
+.guide__undo button { border: 0; background: none; color: #8ab4ff; font: inherit; font-weight: 600; cursor: pointer; }
+html[data-window="guidebar"], html[data-window="guidebar"] body, html[data-window="guidebar"] #root { background: transparent !important; overflow: hidden; }
+.guidebar { display: inline-flex; flex-direction: column; gap: 6px; margin: 4px; padding: 8px 10px; border-radius: 18px; background: #1f2023; color: #fff; box-shadow: 0 6px 24px rgba(0,0,0,.45); font-size: 13px; min-width: 300px; }
+.guidebar__row { display: flex; align-items: center; gap: 8px; }
+.guidebar__dot { width: 10px; height: 10px; border-radius: 50%; background: #777; flex: none; }
+.guidebar__dot--live { background: #e5484d; animation: gbpulse 1.4s ease-in-out infinite; }
+@keyframes gbpulse { 50% { opacity: .35; } }
+.guidebar__steps { flex: 1; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.guidebar__icon { width: 30px; height: 30px; display: inline-grid; place-items: center; border: 0; border-radius: 15px; background: rgba(255,255,255,.14); color: #fff; cursor: pointer; }
+.guidebar__icon:disabled { opacity: .35; cursor: default; }
+.guidebar__icon svg { stroke: currentColor; fill: none; stroke-width: 1.8; }
+.guidebar__btn { height: 30px; padding: 0 14px; border: 0; border-radius: 15px; background: rgba(255,255,255,.16); color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
+.guidebar__btn--stop, .guidebar__btn--danger { background: #d62828; }
+.guidebar__btn:disabled { opacity: .45; cursor: default; }
+.guidebar__ask { display: flex; align-items: center; gap: 8px; }
+.guidebar__ask > div { display: flex; flex-direction: column; flex: 1; font-size: 12px; }
+.guidebar__hint { font-size: 12px; color: #ffd08a; max-width: 360px; line-height: 1.3; }

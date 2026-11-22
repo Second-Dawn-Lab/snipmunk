@@ -91,6 +91,16 @@ fn run(app: &AppHandle, name: &str) {
                 let _ = app.emit("start-recording", ());
             }
         }
+        // Documents mode: start a guide / take a step now (the countdown, the bar and the hooks are made on their own threads).
+        "guide" => {
+            if !crate::steprec::is_recording(app) {
+                let app = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    let _ = crate::steprec::guide_start(app).await;
+                });
+            }
+        }
+        "guidestep" => crate::steprec::take_step(app),
         _ => {}
     }
 }
@@ -98,7 +108,7 @@ fn run(app: &AppHandle, name: &str) {
 /// Make the keyboard hook follow the settings (called at startup and whenever a shortcut changes). Installs the hook when needed;
 /// an unusable capture shortcut leaves the hook without it and reports why. A recording shortcut that is the same key combination as
 /// the capture shortcut is not used (the capture shortcut wins), and one that cannot be parsed is left out.
-pub fn apply(app: &AppHandle, capture: &str, record: &str) {
+pub fn apply(app: &AppHandle, capture: &str, record: &str, extra: &[(&str, &str)]) {
     let manager = app.state::<HotkeyManager>();
     let cap = parse(capture);
     let rec = parse(record)
@@ -110,6 +120,14 @@ pub fn apply(app: &AppHandle, capture: &str, record: &str) {
     }
     if let Some(r) = rec {
         list.push(("record".into(), r));
+    }
+    // The shortcuts of Documents mode; one that is the same combination as an earlier one is left out.
+    for (name, text) in extra {
+        if let Ok(sc) = parse(text) {
+            if !list.iter().any(|(_, o)| o.same_combo(&sc)) {
+                list.push((name.to_string(), sc));
+            }
+        }
     }
     let status = {
         let mut hook = manager.hook.lock().unwrap();
@@ -169,7 +187,7 @@ pub fn apply(app: &AppHandle, capture: &str, record: &str) {
 /// A shortcut seen by the page of a Snipmunk window (the hook sees it too; `claim_fire` keeps only one).
 #[tauri::command]
 pub fn shortcut_fired(app: AppHandle, name: String) {
-    if (name == "capture" || name == "record")
+    if ["capture", "record", "guide", "guidestep"].contains(&name.as_str())
         && app
             .state::<HotkeyManager>()
             .claim_fire(&name, Instant::now())

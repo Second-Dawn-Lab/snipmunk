@@ -514,7 +514,7 @@ pub fn close_behavior(setting: &str) -> CloseBehavior {
 fn quit_or_ask(app: &tauri::AppHandle, restart: bool) {
     use tauri::{Emitter, Manager};
     let state = QuitState {
-        recording: crate::recording::is_recording(app),
+        recording: crate::recording::is_recording(app) || crate::steprec::is_recording(app),
         scrolling: crate::scrollshot::running(),
         unsaved: {
             let s = app.state::<crate::commands::AppState>();

@@ -410,7 +410,7 @@ pub fn dev_scroll_test() -> CmdResult<()> {
 }
 
 #[cfg(windows)]
-mod win {
+pub(crate) mod win {
     use super::{Rect, Shot, Source};
     use std::sync::mpsc::SyncSender;
     use std::sync::{Arc, Mutex};
@@ -459,6 +459,58 @@ mod win {
             (r.bottom - r.top).max(0) as u32,
         );
         (w > 0 && hh > 0).then(|| Rect::new(p.x, p.y, w, hh))
+    }
+
+    /// Every monitor of the desktop: its place (physical pixels) and its scale.
+    pub fn monitors() -> Vec<(Rect, f64)> {
+        use windows::core::BOOL;
+        use windows::Win32::Foundation::LPARAM;
+        use windows::Win32::Graphics::Gdi::{EnumDisplayMonitors, HDC, HMONITOR};
+        unsafe extern "system" fn each(m: HMONITOR, _: HDC, _: *mut RECT, data: LPARAM) -> BOOL {
+            // SAFETY: `data` is the vector passed below, alive for the whole call.
+            let v = unsafe { &mut *(data.0 as *mut Vec<(Rect, f64)>) };
+            let mut info = MONITORINFO {
+                cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+                ..Default::default()
+            };
+            // SAFETY: a valid monitor handle and out pointer.
+            if unsafe { GetMonitorInfoW(m, &mut info) }.as_bool() {
+                let r = info.rcMonitor;
+                let c = ((r.left + r.right) / 2, (r.top + r.bottom) / 2);
+                v.push((
+                    Rect::new(
+                        r.left,
+                        r.top,
+                        (r.right - r.left) as u32,
+                        (r.bottom - r.top) as u32,
+                    ),
+                    scale_at(c.0, c.1),
+                ));
+            }
+            BOOL(1)
+        }
+        let mut v: Vec<(Rect, f64)> = Vec::new();
+        // SAFETY: the callback only uses the vector behind the pointer.
+        unsafe {
+            let _ = EnumDisplayMonitors(None, None, Some(each), LPARAM(&mut v as *mut _ as isize));
+        }
+        v
+    }
+
+    /// The place of a window on the desktop.
+    pub fn window_rect(hwnd: isize) -> Rect {
+        use windows::Win32::UI::WindowsAndMessaging::GetWindowRect;
+        let mut r = RECT::default();
+        // SAFETY: a window handle and a valid out pointer.
+        unsafe {
+            let _ = GetWindowRect(HWND(hwnd as *mut _), &mut r);
+        }
+        Rect::new(
+            r.left,
+            r.top,
+            (r.right - r.left).max(1) as u32,
+            (r.bottom - r.top).max(1) as u32,
+        )
     }
 
     pub fn monitor_rect_at(x: i32, y: i32) -> Option<Rect> {

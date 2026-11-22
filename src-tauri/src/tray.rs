@@ -8,6 +8,7 @@ pub struct TrayLabels {
     open: MenuItem<Wry>,
     capture: MenuItem<Wry>,
     record: MenuItem<Wry>,
+    guide: MenuItem<Wry>,
     settings: MenuItem<Wry>,
     quit: MenuItem<Wry>,
 }
@@ -27,6 +28,24 @@ fn record_label(lang: &str) -> &'static str {
         "ar" => "بدء التسجيل",
         "ur" => "ریکارڈنگ شروع کریں",
         _ => "Start recording",
+    }
+}
+
+/// "New guide" in the interface language (Documents mode).
+fn guide_label(lang: &str) -> &'static str {
+    match crate::language::resolve(lang) {
+        "de" => "Neue Anleitung",
+        "es" => "Nueva guía",
+        "fr" => "Nouveau guide",
+        "it" => "Nuova guida",
+        "nl" => "Nieuwe handleiding",
+        "pl" => "Nowy przewodnik",
+        "tr" => "Yeni kılavuz",
+        "zh-Hans" => "新建指南",
+        "zh-Hant" => "新增指南",
+        "ar" => "دليل جديد",
+        "ur" => "نیا رہنما",
+        _ => "New guide",
     }
 }
 
@@ -114,9 +133,10 @@ pub fn build(app: &AppHandle, lang: &str) -> tauri::Result<()> {
     let open = MenuItem::with_id(app, "open", o, true, None::<&str>)?;
     let capture = MenuItem::with_id(app, "capture", c, true, None::<&str>)?;
     let record = MenuItem::with_id(app, "record", record_label(lang), true, None::<&str>)?;
+    let guide = MenuItem::with_id(app, "guide", guide_label(lang), true, None::<&str>)?;
     let settings = MenuItem::with_id(app, "settings", s, true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", q, true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&open, &capture, &record, &settings, &quit])?;
+    let menu = Menu::with_items(app, &[&open, &capture, &record, &guide, &settings, &quit])?;
 
     let mut builder = TrayIconBuilder::with_id("main")
         .tooltip("Snipmunk")
@@ -136,6 +156,20 @@ pub fn build(app: &AppHandle, lang: &str) -> tauri::Result<()> {
                 } else {
                     show_main(app);
                     let _ = tauri::Emitter::emit(app, "start-recording", ());
+                }
+            }
+            "guide" => {
+                if crate::steprec::is_recording(app) {
+                    // Stop from the tray: the guide is finished and opens in the guide view.
+                    let app = app.clone();
+                    tauri::async_runtime::spawn(async move {
+                        let _ = crate::steprec::guide_stop(app).await;
+                    });
+                } else {
+                    let app = app.clone();
+                    tauri::async_runtime::spawn(async move {
+                        let _ = crate::steprec::guide_start(app).await;
+                    });
                 }
             }
             "settings" => open_settings_window(app),
@@ -161,6 +195,7 @@ pub fn build(app: &AppHandle, lang: &str) -> tauri::Result<()> {
         open,
         capture,
         record,
+        guide,
         settings,
         quit,
     });
@@ -173,6 +208,7 @@ pub fn set_language(app: &AppHandle, lang: &str) {
         let _ = l.open.set_text(o);
         let _ = l.capture.set_text(c);
         let _ = l.record.set_text(record_label(lang));
+        let _ = l.guide.set_text(guide_label(lang));
         let _ = l.settings.set_text(s);
         let _ = l.quit.set_text(q);
     }

@@ -2,12 +2,13 @@
 // title and description in the active language. Pure (no React), so the search is unit tested.
 import type { Key } from "../locales/en";
 
-export type Tab = "general" | "screenshots" | "recording" | "sessions" | "copy" | "ocr" | "about";
+export type Tab = "general" | "screenshots" | "recording" | "documents" | "sessions" | "copy" | "ocr" | "about";
 
-export const TABS: { id: Tab; label: Key; icon: "settings" | "scan" | "clock" | "copy" | "text" | "info" | "play" }[] = [
+export const TABS: { id: Tab; label: Key; icon: "settings" | "scan" | "clock" | "copy" | "text" | "info" | "play" | "documents" }[] = [
   { id: "general", label: "settings.general", icon: "settings" },
   { id: "screenshots", label: "settings.tab.screenshots", icon: "scan" },
   { id: "recording", label: "settings.tab.recording", icon: "play" },
+  { id: "documents", label: "settings.tab.documents", icon: "documents" },
   { id: "sessions", label: "settings.sessions", icon: "clock" },
   { id: "copy", label: "settings.tab.copy", icon: "copy" },
   { id: "ocr", label: "settings.tab.ocr", icon: "text" },
@@ -34,6 +35,16 @@ export const INDEX: SettingEntry[] = [
   { id: "captureMode", tab: "screenshots", title: "settings.captureMode", desc: "settings.captureModeDesc" },
   { id: "captureDelay", tab: "screenshots", title: "settings.captureDelay", desc: "settings.captureDelayDesc" },
   { id: "afterCapture", tab: "screenshots", title: "settings.afterCapture", desc: "settings.afterCaptureDesc" },
+  { id: "docStepMode", tab: "documents", title: "settings.docStepMode", desc: "settings.docStepModeDesc" },
+  { id: "docStepHotkey", tab: "documents", title: "settings.docStepHotkey", desc: "settings.docStepHotkeyDesc" },
+  { id: "docStartHotkey", tab: "documents", title: "settings.docStartHotkey", desc: "settings.docStartHotkeyDesc" },
+  { id: "docTyping", tab: "documents", title: "settings.docTyping", desc: "settings.docTypingDesc" },
+  { id: "docShortcuts", tab: "documents", title: "settings.docShortcuts", desc: "settings.docShortcutsDesc" },
+  { id: "docEnterTab", tab: "documents", title: "settings.docEnterTab", desc: "settings.docEnterTabDesc" },
+  { id: "docPicture", tab: "documents", title: "settings.docPicture", desc: "settings.docPictureDesc" },
+  { id: "docZoom", tab: "documents", title: "settings.docZoom", desc: "settings.docZoomDesc" },
+  { id: "docMarker", tab: "documents", title: "settings.docMarker", desc: "settings.docMarkerDesc" },
+  { id: "docCountdown", tab: "documents", title: "settings.docCountdown", desc: "settings.docCountdownDesc" },
   { id: "autoCopy", tab: "screenshots", title: "settings.autoCopy", desc: "settings.autoCopyDesc" },
   { id: "autoSave", tab: "screenshots", title: "settings.autoSave", desc: "settings.autoSaveDesc" },
   { id: "autoSaveNaming", tab: "screenshots", title: "settings.autoSaveNaming", desc: "settings.autoSaveNaming" },

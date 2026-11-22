@@ -172,6 +172,38 @@ export function recordingUrl(session: Session, capture: Capture, name: string): 
   return convertFileSrc(`${session.id}/rec/${capture.id}/${name}`, "snipmunk-img");
 }
 
+/** A guide in the list of Documents mode. */
+export interface GuideSummary {
+  id: string;
+  title: string;
+  created: number;
+  state: string;
+  steps: number;
+  firstImage: string | null;
+  firstSize: [number, number] | null;
+}
+
+/** One step of a guide (rectangles are [x, y, w, h] and points [x, y] in the pixels of the step picture). */
+export interface GuideStep {
+  n: number;
+  kind: "click" | "rightClick" | "doubleClick" | "type" | "key" | null;
+  t: number;
+  image: string;
+  imageSize: [number, number];
+  click: [number, number] | null;
+  window: { rect: [number, number, number, number]; title: string; process: string } | null;
+  zoom: [number, number, number, number] | null;
+  text: { t: string; b?: boolean }[];
+  deleted: boolean;
+}
+
+export interface GuideState {
+  recording: boolean;
+  paused: boolean;
+  steps: number;
+  id: string;
+}
+
 /** An opened project file. */
 export interface OpenProject {
   id: string;
@@ -320,6 +352,27 @@ export const ipc = {
   onCaptureAdded: (cb: (a: { captureId: string; groupId: string }) => void) =>
     on<{ captureId: string; groupId: string }>("capture-added", cb),
   onCaptureError: (cb: (message: string) => void) => on<string>("capture-error", cb),
+  guidesList: () => call<GuideSummary[]>("guides_list"),
+  guideGet: (id: string) => call<{ id: string; title: string } | null>("guide_get", { id }),
+  guideSteps: (id: string) => call<GuideStep[]>("guide_steps", { id }),
+  guideRename: (id: string, title: string) => call<string>("guide_rename", { id, title }),
+  guideDelete: (id: string) => call<void>("guide_delete", { id }),
+  guideStepDelete: (id: string, n: number, restore: boolean) => call<void>("guide_step_delete", { id, n, restore }),
+  guidesUnfinished: () => call<[string, string, number][]>("guides_unfinished"),
+  guideRecover: (id: string) => call<void>("guide_recover", { id }),
+  guideText: (id: string) => call<string>("guide_text", { id }),
+  guideBarFit: (width: number, height: number) => call<void>("guide_bar_fit", { width, height }),
+  guideStart: () => call<string>("guide_start"),
+  guidePause: () => call<void>("guide_pause"),
+  guideResume: () => call<void>("guide_resume"),
+  guideTakeStep: () => call<void>("guide_take_step"),
+  guideState: () => call<GuideState>("guide_state"),
+  guideStop: () => call<string | null>("guide_stop"),
+  guideCancel: () => call<void>("guide_cancel"),
+  onGuideState: (cb: (s: GuideState) => void) => on<GuideState>("guide-state", cb),
+  onGuideFinished: (cb: (id: string) => void) => on<string>("guide-finished", cb),
+  onGuideHint: (cb: (hint: string) => void) => on<string>("guide-hint", cb),
+  onGuideCountdown: (cb: (n: number) => void) => on<number>("guide-countdown", cb),
   /** Is the parked scrolling screenshot switched on (development builds with SNIPMUNK_EXPERIMENTAL_SCROLL=1 only)? */
   experimentalScroll: () => call<boolean>("experimental_scroll"),
   /** The Done and Cancel buttons of the scrolling screenshot's pill. */

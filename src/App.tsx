@@ -3,6 +3,7 @@ import { useSettings } from "@seconddawn/settings";
 import { applyTheme } from "@seconddawn/ui";
 import { useEffect, useState } from "react";
 import { MainWindow } from "./components/MainWindow";
+import { GuideBar } from "./components/GuideBar";
 import { ScrollPill } from "./components/ScrollPill";
 import { WebcamBubble } from "./components/WebcamBubble";
 import { RecBar } from "./components/RecBar";
@@ -86,6 +87,7 @@ function Root({ label }: { label: string }) {
   if (label === "recbar") return <RecBar />;
   if (label === "webcambubble") return <WebcamBubble />;
   if (label === "scrollpill") return <ScrollPill />;
+  if (label === "guidebar") return <GuideBar />;
   if (label === "scrollframe") return <div className="recframe recframe--scroll" />;
   return <MainWindow />;
 }

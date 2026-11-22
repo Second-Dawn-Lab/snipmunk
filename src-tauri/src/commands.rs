@@ -89,7 +89,15 @@ pub fn apply(app: &AppHandle, settings: &Settings) {
         let (app2, on) = (app.clone(), settings.webcam_on);
         std::thread::spawn(move || crate::bubble::set_visible(&app2, on));
     }
-    crate::hotkey::apply(app, &settings.capture_hotkey, &settings.record_hotkey);
+    crate::hotkey::apply(
+        app,
+        &settings.capture_hotkey,
+        &settings.record_hotkey,
+        &[
+            ("guide", &settings.doc_start_hotkey),
+            ("guidestep", &settings.doc_step_hotkey),
+        ],
+    );
 }
 
 /// Only touches the Windows registry entry when the state differs.
@@ -388,6 +396,13 @@ pub fn serve_image<R: tauri::Runtime>(
     let path = percent_decode(request.uri().path().trim_matches('/'));
     // A recording (the player reads it in parts: the video element sends Range requests).
     if let Some((session, file)) = path.split_once('/') {
+        // A picture of a guide (Documents mode): guide/<id>/<file>
+        if session == "guide" {
+            if let Some((id, name)) = file.split_once('/') {
+                let target = crate::guides::image_path(id, name).map(|p| (p, 0, None));
+                return serve_recording(target, name, None);
+            }
+        }
         // A project (a .snpr file): the media is read from the file by offset, nothing is extracted.
         if let Some(rest) = file.strip_prefix("proj/") {
             if let Some((id, name)) = rest.split_once('/') {

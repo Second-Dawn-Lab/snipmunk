@@ -39,6 +39,22 @@ pub struct Settings {
     pub auto_copy_to_clipboard: bool,
     /// The scrolling screenshot stops at this height (pixels).
     pub scroll_max_height: u32,
+    /// Documents mode: what makes a step, "auto" (every click) or "manual" (the step hotkey).
+    pub doc_step_mode: String,
+    /// The shortcut that takes a step now (the only trigger in manual mode).
+    pub doc_step_hotkey: String,
+    /// The shortcut that starts a new guide.
+    pub doc_start_hotkey: String,
+    pub doc_record_typing: bool,
+    pub doc_record_shortcuts: bool,
+    /// Enter and Tab alone become steps.
+    pub doc_enter_tab: bool,
+    /// "window" (cropped to the active window) or "screen" (the whole monitor).
+    pub doc_step_picture: String,
+    /// Show the zoom area around the click by default.
+    pub doc_zoom_default: bool,
+    /// The colour of the click marker (#RRGGBB).
+    pub doc_marker_color: String,
     /// Show the magnifier loupe while selecting.
     pub show_magnifier: bool,
     // The last colors and sizes picked in the annotation tool popovers (used by the tools from Phase 5).
@@ -151,6 +167,15 @@ impl Default for Settings {
             after_capture: "front".into(),
             auto_copy_to_clipboard: true,
             scroll_max_height: 20_000,
+            doc_step_mode: "auto".into(),
+            doc_step_hotkey: "Ctrl+Alt+S".into(),
+            doc_start_hotkey: "Ctrl+Alt+G".into(),
+            doc_record_typing: true,
+            doc_record_shortcuts: true,
+            doc_enter_tab: false,
+            doc_step_picture: "window".into(),
+            doc_zoom_default: false,
+            doc_marker_color: "#FF5A36".into(),
             show_magnifier: true,
             last_pen_color: "#E53935".into(),
             last_pen_size: 4,
@@ -281,6 +306,33 @@ impl Settings {
             &d.after_capture,
         );
         self.scroll_max_height = self.scroll_max_height.clamp(1000, 32_000);
+        one_of(
+            &mut self.doc_step_mode,
+            &["auto", "manual"],
+            &d.doc_step_mode,
+        );
+        one_of(
+            &mut self.doc_step_picture,
+            &["window", "screen"],
+            &d.doc_step_picture,
+        );
+        if self
+            .doc_step_hotkey
+            .parse::<dawn_hotkeys::shortcut::Shortcut>()
+            .is_err()
+        {
+            self.doc_step_hotkey = d.doc_step_hotkey.clone();
+        }
+        if self
+            .doc_start_hotkey
+            .parse::<dawn_hotkeys::shortcut::Shortcut>()
+            .is_err()
+        {
+            self.doc_start_hotkey = d.doc_start_hotkey.clone();
+        }
+        if !is_hex_color(&self.doc_marker_color) {
+            self.doc_marker_color = d.doc_marker_color.clone();
+        }
         if ![0, 3, 5, 10].contains(&self.capture_delay) {
             self.capture_delay = d.capture_delay;
         }
@@ -323,7 +375,7 @@ impl Settings {
         self.save_quality = self.save_quality.clamp(10, 100);
         one_of(
             &mut self.capture_kind,
-            &["screenshot", "video"],
+            &["screenshot", "video", "documents"],
             &d.capture_kind,
         );
         one_of(

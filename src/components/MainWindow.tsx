@@ -26,6 +26,7 @@ import { ipc, type Capture, type CmdError, type Group, type Session } from "../i
 import { hasRecordingGroup, mergeGroupOrder } from "../recordingGroups";
 import { SearchIndex } from "../search";
 import { stageAll } from "../share/exporter";
+import { DocumentsView } from "./DocumentsView";
 import { SaveDialog } from "./SaveDialog";
 import { Toasts, useToasts, type ToastAction } from "./Toasts";
 import { SearchResults, type SearchHit } from "./SearchResults";
@@ -86,6 +87,17 @@ export function MainWindow() {
   // The window shows one kind at a time: the screenshot groups, or (in the recording mode) the recording groups. They are
   // independent: no screenshot appears among the recordings and no recording among the screenshots.
   const recMode = settings.captureKind === "video";
+  const docMode = settings.captureKind === "documents";
+  // A guide that was just stopped opens in the list of guides.
+  const [guideToOpen, setGuideToOpen] = useState<string | null>(null);
+  useEffect(() => {
+    const p = ipc.onGuideFinished((id) => {
+      if (!id) return;
+      void patch({ captureKind: "documents" });
+      setGuideToOpen(id);
+    });
+    return () => void p.then((fn) => fn());
+  }, []);
   const session = useMemo<Session | null>(
     () => (rawSession ? { ...rawSession, groups: rawSession.groups.filter((g) => (g.kind === "recording") === recMode) } : null),
     [rawSession, recMode],
@@ -781,6 +793,7 @@ export function MainWindow() {
         onCapture={(mode) => void ipc.startCapture(mode).catch((e) => setError(messageOf(e)))}
         zoom={zoom}
         recording={recMode}
+        documents={{ onNew: () => void ipc.guideStart().catch((e) => setError(messageOf(e))), hotkey: settings.docStartHotkey }}
         onRecord={(area) => rec.startRecording(area)}
         share={{
           hasCapture: capture !== null,
@@ -816,6 +829,17 @@ export function MainWindow() {
       )}
 
 
+      {docMode ? (
+        <main className="panels panels--single">
+          <DocumentsView
+            settings={settings}
+            openId={guideToOpen}
+            onOpened={() => setGuideToOpen(null)}
+            hotkey={settings.docStartHotkey}
+            onNew={() => void ipc.guideStart().catch((e) => setError(messageOf(e)))}
+          />
+        </main>
+      ) : (
       <main className={`panels${recMode ? " panels--single" : ""}`}>
         {!recMode && (
         <div className={`panel panel--left panel--${galleryView}`}>
@@ -931,8 +955,9 @@ export function MainWindow() {
           </div>
         )}
       </main>
+      )}
 
-      <BottomBar
+      {!docMode && <BottomBar
         selectedCount={view.sel.ids.size}
         hasCapture={capture !== null}
         recording={recMode}
@@ -942,7 +967,7 @@ export function MainWindow() {
         onCopy={() => (recMode ? selectionOrCurrent()[0] && recCopy(selectionOrCurrent()[0]) : void share.copy(selectionOrCurrent(), copyMode))}
         onSave={() => (recMode ? selectionOrCurrent()[0] && recSave(selectionOrCurrent()[0]) : share.save(selectionOrCurrent()))}
         onShare={recMode ? () => capture && recShare(capture) : undefined}
-      />
+      />}
 
       <SaveDialog
         captures={share.saving}

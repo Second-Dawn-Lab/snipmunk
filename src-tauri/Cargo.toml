@@ -96,6 +96,7 @@ features = [
   "Win32_UI_WindowsAndMessaging",
   # The scrolling screenshot: UI Automation scroll patterns, drawing a window into a bitmap, DPI of a monitor.
   "Win32_UI_Accessibility",
+  "Win32_Security",
   "Win32_Storage_Xps",
   "Win32_UI_HiDpi",
   "Win32_UI_Controls",

@@ -63,10 +63,13 @@ export function TopBar(props: {
   onRecord: (area: CaptureSettings["recMode"]) => void;
   /** What the buttons on the right do with the capture shown in the preview. */
   share: ShareApi;
+  /** Documents mode: "New guide" instead of the capture controls, nothing on the right. */
+  documents?: { onNew: () => void; hotkey: string };
 }) {
   const { t, locale } = useT();
   const { settings, zoom, share } = props;
   const video = settings.captureKind === "video";
+  const docs = settings.captureKind === "documents";
   const off = !share.hasCapture || share.busy || !!props.recording;
   // Save, Copy and Share work for recordings too (they use the rendered video); Edit in Paint does not.
   const offShare = !share.hasCapture || share.busy;
@@ -99,7 +102,7 @@ export function TopBar(props: {
   return (
     <div className="topbar" role="toolbar" aria-label={t("app.name")}>
       <div className="topbar__group">
-        {video ? (
+        {docs ? null : video ? (
           <RecordControls settings={settings} onPatch={props.onPatch} onRecord={props.onRecord} />
         ) : (
           <>
@@ -164,7 +167,7 @@ export function TopBar(props: {
           <button
             type="button"
             className="segmented__btn"
-            aria-pressed={!video}
+            aria-pressed={!video && !docs}
             title={t("kind.screenshot")}
             aria-label={t("kind.screenshot")}
             onClick={() => props.onPatch({ captureKind: "screenshot" })}
@@ -181,10 +184,21 @@ export function TopBar(props: {
           >
             <AppIcon name="video" size={17} />
           </button>
+          <button
+            type="button"
+            className="segmented__btn"
+            aria-pressed={docs}
+            title={t("kind.documents")}
+            aria-label={t("kind.documents")}
+            onClick={() => props.onPatch({ captureKind: "documents" })}
+          >
+            <AppIcon name="documents" size={17} />
+          </button>
         </div>
 
       </div>
 
+      {!docs && (
       <div className="topbar__group topbar__group--end">
         {!props.recording && (
         <button
@@ -273,6 +287,7 @@ export function TopBar(props: {
           />
         </Pop>
       </div>
+      )}
     </div>
   );
 }

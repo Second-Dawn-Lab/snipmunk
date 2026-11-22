@@ -24,6 +24,16 @@ export interface Settings {
   autoCopyToClipboard: boolean;
   /** The scrolling screenshot stops at this height (pixels). */
   scrollMaxHeight: number;
+  /** Documents mode: what makes a step. */
+  docStepMode: "auto" | "manual";
+  docStepHotkey: string;
+  docStartHotkey: string;
+  docRecordTyping: boolean;
+  docRecordShortcuts: boolean;
+  docEnterTab: boolean;
+  docStepPicture: "window" | "screen";
+  docZoomDefault: boolean;
+  docMarkerColor: string;
   showMagnifier: boolean;
   // The last colors and sizes picked in the annotation tool popovers. Colors are "#rrggbb"; fill and outline
   // may also be "none". Opacities are 0 to 100.
@@ -59,7 +69,7 @@ export interface Settings {
   /** A custom word must be a whole word. */
   quickRedactWholeWord: boolean;
   /** The top bar mode. */
-  captureKind: "screenshot" | "video";
+  captureKind: "screenshot" | "video" | "documents";
   /** Screen recording (the recording options menu in the top bar). */
   recMode: "rectangle" | "window" | "fullscreen";
   recCountdown: 0 | 3 | 5 | 10;
@@ -127,6 +137,15 @@ export const defaultSettings: Settings = {
   afterCapture: "front",
   autoCopyToClipboard: true,
   scrollMaxHeight: 20000,
+  docStepMode: "auto",
+  docStepHotkey: "Ctrl+Alt+S",
+  docStartHotkey: "Ctrl+Alt+G",
+  docRecordTyping: true,
+  docRecordShortcuts: true,
+  docEnterTab: false,
+  docStepPicture: "window",
+  docZoomDefault: false,
+  docMarkerColor: "#FF5A36",
   showMagnifier: true,
   lastPenColor: "#E53935",
   lastPenSize: 4,

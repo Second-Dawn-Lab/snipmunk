@@ -5,6 +5,7 @@ import { WindowControls } from "../components/WindowControls";
 import { useT } from "../i18n";
 import { ipc } from "../ipc";
 import { AboutPage, CopyPage, GeneralPage, OcrPage, ScreenshotsPage, SessionsPage } from "./pages";
+import { DocumentsPage } from "./DocumentsPage";
 import { RecordingPage } from "./RecordingPage";
 import type { Settings } from "./defaults";
 import { searchSettings, TABS, type SettingEntry, type Tab } from "./model";
@@ -132,6 +133,7 @@ export function SettingsWindow() {
           {tab === "general" && <GeneralPage settings={settings} set={set} />}
           {tab === "screenshots" && <ScreenshotsPage settings={settings} set={set} />}
           {tab === "recording" && <RecordingPage settings={settings} set={set} />}
+          {tab === "documents" && <DocumentsPage settings={settings} set={set} />}
           {tab === "sessions" && <SessionsPage settings={settings} set={set} />}
           {tab === "copy" && <CopyPage settings={settings} set={set} />}
           {tab === "ocr" && <OcrPage settings={settings} set={set} />}

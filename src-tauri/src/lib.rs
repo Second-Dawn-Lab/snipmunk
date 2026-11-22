@@ -13,6 +13,7 @@ mod freeform;
 mod gallery;
 mod geometry;
 mod gifexport;
+mod guides;
 mod hotkey;
 mod import;
 mod language;
@@ -31,6 +32,8 @@ mod scrollshot;
 mod sessions;
 mod settings;
 mod startup;
+mod steprec;
+mod steptext;
 mod stitch;
 mod thumbs;
 mod titlebar;
@@ -66,6 +69,7 @@ pub fn run() {
         })
         .manage(capture::Capture::new())
         .manage(recording::Recorder::new())
+        .manage(steprec::GuideRec::default())
         .manage(hotkey::HotkeyManager::new())
         .manage(render::RenderJob::default())
         .register_uri_scheme_protocol("snipmunk-img", commands::serve_image)
@@ -167,6 +171,30 @@ pub fn run() {
             ocr::copy_table,
             ocr::open_os_settings,
             gallery::debug_seed_session,
+            steprec::guide_start,
+            steprec::guide_pause,
+            steprec::guide_resume,
+            steprec::guide_take_step,
+            steprec::guide_state,
+            steprec::guide_bar_fit,
+            steprec::guide_stop,
+            steprec::guide_cancel,
+            steprec::dev_guide_start,
+            steprec::dev_guide_inject,
+            steprec::dev_guide_hook_test,
+            steprec::dev_guide_scenario,
+            steprec::dev_guide_bar,
+            guides::guides_list,
+            guides::guide_get,
+            guides::guide_steps,
+            guides::guide_rename,
+            guides::guide_delete,
+            guides::guide_step_delete,
+            guides::guides_unfinished,
+            guides::guide_recover,
+            guides::guide_text,
+            guides::guide_image_path,
+            guides::dev_guide_seed,
             scrollshot::experimental_scroll,
             scrollshot::scroll_done,
             scrollshot::scroll_cancel,

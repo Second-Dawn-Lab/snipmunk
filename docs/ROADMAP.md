@@ -97,22 +97,12 @@ Done in the recorder sessions (details in `docs/manual-tests-phase-7.md`):
 - **Carried to Phase 8**: a GPU export path (the decoder is the limit at 3440x1440); the installer registration of `.snpr` is untested until an installer is built.
 
 ## Phase 7.5: Documents mode (Tango-style guides)
-Order of work:
-- **7.5-A Step recorder**: "Start guide" captures a step on every click (screenshot + click marker); a hotkey adds a manual step.
-- **7.5-B Step editor**: vertical editor with title, description and screenshot per step; reorder, delete, merge; the annotation tools on step screenshots.
-- **7.5-C Templates and export**: templates (basic; built-in ones with colour schemes; own templates), export to PDF, Word, Markdown and HTML, and the `.snpd` project file on the package format of `.snpr`.
-
-Details:
-- "Start guide" captures a step on every click (screenshot + click marker); a hotkey adds a manual step.
-- Automatic step text from the clicked element's name ("Click 'Save'") through UI Automation, in the UI language; typing steps ("Type '…'"), password fields always hidden.
-- Screenshot per step as window, screen or zoom around the click.
-- Vertical step editor: title, description, screenshot; reorder, delete, merge.
-- Editing tools on step screenshots: blur, shapes, arrows, highlight boxes, callout bubbles, step number badges.
-- Drag screenshots from the clipboard list, or GIF/video clips from recordings, into a guide.
-- Groups and sections reuse the group engine; export to PDF, Word, Markdown and HTML; branding (title page, logo, colours, author).
-- `.snpd` project files on the same package format as `.snpr` (`package.rs`, another `kind`).
-- Later in 7.5 or after: Stack/Grid options.
-- **Video editor = a separate Second Dawn app** (after Documents): it opens `.snpr` (see `docs/snpr-format.md`) and normal video files and has the editing features (auto-zoom on clicks, cursor smoothing, multi-clip timeline); the shared rendering (effects, export) may move to a dawn-core crate. Snipmunk keeps a quick review only: play, trim, effects, export, copy, share, project files.
+A free, offline, account-free step guide recorder for any Windows app: each step is one picture plus an automatically written text.
+- **7.5-A Step recorder ✅**: the third mode (Documents), the list of guides and a read-only guide view; the recorder (mouse and keyboard hooks on their own thread, live pictures of the monitors, UI Automation on its own thread, double-click and typing grouping, shortcuts, pause, Auto/Manual, floating bar, start/step shortcuts, tray item, crash recovery); the step text in 12 languages as structured parts; the storage (`docs/documents-storage.md`); Settings → Documents. Tests in `docs/manual-tests-phase-7.5.md`.
+- **7.5-B Step editor**: edit the step text, reorder, delete/merge, insert screenshots or GIFs, the per-step zoom toggle, annotations (arrows, boxes, callouts, number badges), blur and manual redaction (typed text is recorded unmasked), groups and sections (the group engine).
+- **7.5-C Templates and export**: templates in three levels (basic; built-in ones with colour schemes; own templates), export to PDF, Word, Markdown and HTML, and the `.snpd` file on the package container of `.snpr`.
+- **Video editor = a separate Second Dawn app** (after Documents): it opens `.snpr` (see `docs/snpr-format.md`) and normal video files and has the editing features (auto-zoom on clicks, cursor smoothing, multi-clip timeline); the shared rendering may move to a dawn-core crate. Snipmunk keeps a quick review only: play, trim, effects, export, copy, share, project files.
+- Later: Stack/Grid options.
 
 ## Phase 8: Polish and the first release (v0.1.0)
 - Memory reduction (about 700 MB now, goal **under 300 MB**): **one shared WebView2 environment** for all windows, and the **hidden windows (overlay, floating bar, bubble) created only when needed** instead of pre-created; GPU export path everywhere; avoid reading text twice (OCR).

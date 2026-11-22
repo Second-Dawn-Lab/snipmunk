@@ -675,7 +675,11 @@ export function useRecordingMode(args: {
                 setStopAsk(false);
                 // The recording is stopped and kept as the current recording; then the list of what is not saved.
                 void ipc
-                  .stopRecording()
+                  .guideState()
+                  .then(async (g) => {
+                    if (g.recording) await ipc.guideStop();
+                    else await ipc.stopRecording();
+                  })
                   .then(() => setQuitAsk(true))
                   .catch((e) => {
                     setError(errorText(e));
