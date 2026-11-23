@@ -123,4 +123,15 @@ describe("the history of the document", () => {
     expect(h.undo(d)).toBe(d);
     expect(h.undo(d)).toBe(d);
   });
+
+  it("inserts at the place of the + button: between blocks 3 and 4, at the end and at the start", () => {
+    let d = createDocument("T", 1, [step(1), step(2), step(3), step(4), step(5)], defaults);
+    d = insertBlock(d, 3, content("between"));
+    expect(ids(d).indexOf("between")).toBe(3);
+    expect(d.blocks.length).toBe(6);
+    d = insertBlock(d, d.blocks.length, content("last"));
+    expect(ids(d)[d.blocks.length - 1]).toBe("last");
+    d = insertBlock(d, 0, content("first"));
+    expect(ids(d)[0]).toBe("first");
+  });
 });

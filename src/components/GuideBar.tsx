@@ -10,7 +10,7 @@ import { AppIcon } from "./AppIcons";
  */
 export function GuideBar() {
   const { t } = useT();
-  const [state, setState] = useState({ recording: false, paused: false, steps: 0 });
+  const [state, setState] = useState({ recording: false, paused: false, steps: 0, id: "", area: "active", target: "", ignored: 0 });
   const [count, setCount] = useState<number | null>(null);
   const [asking, setAsking] = useState(false);
   const [hint, setHint] = useState(false);
@@ -32,7 +32,7 @@ export function GuideBar() {
     const el = capsule.current;
     if (!el) return;
     void ipc.guideBarFit(Math.ceil(el.offsetWidth + 8), Math.ceil(el.offsetHeight + 8)).catch(() => undefined);
-  }, [asking, hint, count, state.paused]);
+  }, [asking, hint, count, state.paused, state.ignored, state.area]);
 
   const stop = () => {
     setBusy(true);
@@ -40,17 +40,17 @@ export function GuideBar() {
   };
 
   return (
-    <div className="guidebar" ref={capsule} role="toolbar" aria-label={t("docs.title")}>
+    <div className="floatbar guidebar" ref={capsule} role="toolbar" aria-label={t("docs.title")}>
       {asking ? (
         <div className="guidebar__ask">
           <div>
             <strong>{t("docbar.cancelTitle")}</strong>
             <span>{t("docbar.cancelBody")}</span>
           </div>
-          <button type="button" className="guidebar__btn" onClick={() => setAsking(false)}>
+          <button type="button" className="floatbar__btn" onClick={() => setAsking(false)}>
             {t("docbar.keep")}
           </button>
-          <button type="button" className="guidebar__btn guidebar__btn--danger" onClick={() => void ipc.guideCancel()}>
+          <button type="button" className="floatbar__btn floatbar__btn--danger" onClick={() => void ipc.guideCancel()}>
             {t("docbar.cancel")}
           </button>
         </div>
@@ -58,15 +58,18 @@ export function GuideBar() {
         <>
           <div className="guidebar__row">
             <span className={`guidebar__dot${state.paused || count !== null ? "" : " guidebar__dot--live"}`} aria-hidden="true" />
+            <span className="guidebar__area" title={t("guide.area")}>
+              {state.area === "window" ? t("docbar.area.window", { name: state.target || "…" }) : t(`docbar.area.${state.area === "screen" || state.area === "region" ? state.area : "active"}`)}
+            </span>
             <span className="guidebar__steps" aria-live="polite">
               {count !== null ? t("docbar.countdown", { count }) : state.paused ? `${t("docbar.steps", { count: state.steps })} · ${t("docbar.pause")}` : t("docbar.steps", { count: state.steps })}
             </span>
-            <button type="button" className="guidebar__icon" disabled={count !== null || state.paused} title={t("docbar.take")} aria-label={t("docbar.take")} onClick={() => void ipc.guideTakeStep()}>
+            <button type="button" className="floatbar__btn floatbar__btn--icon" disabled={count !== null || state.paused} title={t("docbar.take")} aria-label={t("docbar.take")} onClick={() => void ipc.guideTakeStep()}>
               <AppIcon name="camera" size={16} />
             </button>
             <button
               type="button"
-              className="guidebar__icon"
+              className="floatbar__btn floatbar__btn--icon"
               disabled={count !== null}
               title={state.paused ? t("docbar.resume") : t("docbar.pause")}
               aria-label={state.paused ? t("docbar.resume") : t("docbar.pause")}
@@ -74,14 +77,15 @@ export function GuideBar() {
             >
               <AppIcon name={state.paused ? "play" : "pause"} size={16} />
             </button>
-            <button type="button" className="guidebar__btn guidebar__btn--stop" disabled={busy || count !== null} onClick={stop}>
+            <button type="button" className="floatbar__btn floatbar__btn--danger floatbar__btn--stop" disabled={busy || count !== null} onClick={stop}>
               {t("docbar.stop")}
             </button>
-            <button type="button" className="guidebar__icon" title={t("docbar.cancel")} aria-label={t("docbar.cancel")} onClick={() => setAsking(true)}>
+            <button type="button" className="floatbar__btn floatbar__btn--icon" title={t("docbar.cancel")} aria-label={t("docbar.cancel")} onClick={() => setAsking(true)}>
               <AppIcon name="close" size={15} />
             </button>
           </div>
           {hint && <div className="guidebar__hint">{t("docbar.elevated")}</div>}
+          {state.ignored > 0 && <div className="guidebar__hint">{t("docbar.outside")} ({state.ignored})</div>}
         </>
       )}
     </div>

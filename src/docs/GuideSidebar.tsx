@@ -1,7 +1,8 @@
 import { Button, Select, Switch } from "@seconddawn/ui";
 import { useT } from "../i18n";
 import type { GuideStep } from "../ipc";
-import { cropRect, type GuideDoc, type MarkerShape, type MarkerSize, type Rect, type StepBlock } from "./model";
+import { applyArea, areaOf, type Area } from "./areas";
+import type { GuideDoc, MarkerShape, MarkerSize, StepBlock } from "./model";
 
 const SHAPES: MarkerShape[] = ["circle", "ring", "arrow", "hand", "box"];
 const SIZES: MarkerSize[] = ["small", "medium", "large"];
@@ -12,17 +13,6 @@ const row = (id: string, label: string, control: React.ReactNode) => (
     <span className="fxrow__control">{control}</span>
   </div>
 );
-
-const sameRect = (a: Rect, b: Rect) => a.every((v, i) => v === b[i]);
-
-/** Which picture area a step uses: the guide's, the window, the whole screen or a crop of its own. */
-function areaOf(step: GuideStep, block: StepBlock): "default" | "window" | "screen" | "custom" {
-  if (!block.crop) return "default";
-  const [iw, ih] = step.imageSize;
-  if (sameRect(block.crop, [0, 0, iw, ih])) return "screen";
-  const w = cropRect(step, { ...block, crop: null }, { picture: "window", keepFull: false });
-  return sameRect(block.crop, w) ? "window" : "custom";
-}
 
 /**
  * The right sidebar of a guide, like the Effects panel of a recording (same width, headers and rows): "Guide" (marker, step numbers,
@@ -83,11 +73,7 @@ export function GuideSidebar(props: {
                 <Select
                   label={t("guide.stepArea")}
                   value={area}
-                  onChange={(v) => {
-                    if (v === "default") props.patch({ crop: null });
-                    else if (v === "screen") props.patch({ crop: [0, 0, step.imageSize[0], step.imageSize[1]] });
-                    else if (v === "window") props.patch({ crop: cropRect(step, { ...block, crop: null }, { picture: "window", keepFull: false }) });
-                  }}
+                  onChange={(v) => applyArea(step, block, v as Area, props.patch)}
                   options={[
                     { value: "default", label: t("guide.areaDefault") },
                     { value: "window", label: t("settings.docPictureWindow") },

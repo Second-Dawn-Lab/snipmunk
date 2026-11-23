@@ -32,6 +32,8 @@ export interface Settings {
   docRecordShortcuts: boolean;
   docEnterTab: boolean;
   docStepPicture: "window" | "screen";
+  /** What a new guide records: the active app, the whole screen, a chosen window or a chosen area. */
+  docArea: "active" | "screen" | "window" | "region";
   docZoomDefault: boolean;
   docMarkerColor: string;
   docMarkerRight: string;
@@ -150,6 +152,7 @@ export const defaultSettings: Settings = {
   docRecordShortcuts: true,
   docEnterTab: false,
   docStepPicture: "window",
+  docArea: "active",
   docZoomDefault: false,
   docMarkerColor: "#FF5A36",
   docMarkerRight: "#3B82F6",

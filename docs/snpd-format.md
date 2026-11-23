@@ -49,6 +49,12 @@ The nodes used are `paragraph`, `heading` (1–3), `bulletList`, `orderedList`, 
 `image` (`src` is the name of an `m-*.png` entry), `hardBreak`; marks `bold`, `italic`, `underline`, `strike`, `link` (`href`; `javascript:` links are removed when pasting), `textStyle` (`color`, `fontFamily`, `fontSize`) and `highlight` (`color`); `textAlign` as attribute of paragraphs
 and headings (`start`, `center`, `end`, so it follows the writing direction). A reader that does not know a node shows its text.
 
+**Images and tables (7.5-B3, no version change: all attributes are optional, so older files open as before).**
+- `image` nodes: `src`, `alt`, `file` (the `m-*.png` entry) as before, and `width` / `height` (shown size in CSS pixels; `height` only for a free resize),
+  `align` (`start`, `center`, `end`, `full`), `crop` (`[x, y, w, h]` as fractions 0..1 of the original; the original stays in the file) and
+  `nw` / `nh` (the natural size, so the height is known before the picture loads).
+- `table` nodes: `align` (`start`, `center`, `end`); the cells keep `colwidth` (pixels per column, set by dragging the column borders), `colspan`, `rowspan`.
+
 **Step block** — a step with its picture and everything that belongs to it:
 
 ```json
@@ -70,9 +76,18 @@ and headings (`start`, `center`, `end`, so it follows the writing direction). A 
 - `zoom`, `zoomRect`, `markerHidden`, `markerPos`, `marker`, `annotations` are the per-step edits. The click marker is **drawn when the guide
   is shown or exported, never burned into the picture**; annotations are vectors, also drawn at view time. `annotations[].kind` is one of
   `arrow`, `line`, `rect`, `ellipse`, `highlight`, `pen`, `text`, `callout`, `badge`.
+- The picture area of a step is its `crop` (a rectangle in the pixels of the picture kept in the working folder): "Guide default" is no crop,
+  "Active window" the window's rectangle, "Full screen" the whole picture, "Custom area" any other rectangle (also one that is larger than the
+  window: *Expand area*). On save the stored picture is cut to that area, so only the shown area is in the file (unless "Keep full
+  screenshots" is on), and a step whose full frame is not in the file (its picture is smaller than its monitor) cannot be expanded.
 - Not stored: `crop` and `redact`. They are applied when the file is written (section 4) and only the result is in the file.
 
 Unknown fields — at any level — are kept by Snipmunk when it saves a file again.
+
+`guide.json` of the working folder (not in the `.snpd`) has `settings.area` (`active`, `screen`, `window`, `region`), `settings.region`
+(`[x, y, w, h]` on the desktop) and `settings.hwnd`: what the guide was recorded with, so "Record more steps" uses the same area. Steps of a
+shell element (taskbar, tray, Start menu, desktop) have the shell element's rectangle (with a margin) as their window rectangle, never the
+desktop window.
 
 ## 4. Privacy: what a picture contains
 

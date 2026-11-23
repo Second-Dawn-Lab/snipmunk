@@ -184,6 +184,41 @@ const paths = {
       <path d="M15 12.6v1.2M15 20.2v1.2M10.6 17h1.2M18.2 17h1.2M11.9 13.9l.85.85M17.25 19.25l.85.85M11.9 20.1l.85-.85M17.25 14.75l.85-.85" />
     </>
   ),
+  /** The tools of the guide's step pictures that the screenshot tools do not have. */
+  callout: <path d="M4 5h16v11h-9l-4 4v-4H4z" />,
+  badge: (
+    <>
+      <circle cx="12" cy="12" r="8.500" />
+      <path d="M10 10l2.200-1.800V16" />
+    </>
+  ),
+  pixelate: (
+    <>
+      <rect x="4" y="4" width="16" height="16" rx="2" />
+      <path d="M4 9.300h16M4 14.700h16M9.300 4v16M14.700 4v16" />
+    </>
+  ),
+  blackbox: <rect x="3.500" y="6" width="17" height="12" rx="1.500" fill="currentColor" />,
+  zoomarea: (
+    <>
+      <circle cx="10.500" cy="10.500" r="6" />
+      <path d="M15 15l5.500 5.500M7.800 10.500h5.400M10.500 7.800v5.400" />
+    </>
+  ),
+  expand: <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />,
+  marker: (
+    <>
+      <circle cx="12" cy="12" r="3" />
+      <circle cx="12" cy="12" r="8.500" />
+    </>
+  ),
+  markeroff: (
+    <>
+      <circle cx="12" cy="12" r="3" />
+      <circle cx="12" cy="12" r="8.500" />
+      <path d="M4.500 19.500L19.500 4.500" />
+    </>
+  ),
   /** The guide quick settings: a document with a gear in front of it. */
   docoptions: (
     <>

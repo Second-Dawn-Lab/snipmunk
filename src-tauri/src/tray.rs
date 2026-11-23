@@ -168,7 +168,7 @@ pub fn build(app: &AppHandle, lang: &str) -> tauri::Result<()> {
                 } else {
                     let app = app.clone();
                     tauri::async_runtime::spawn(async move {
-                        let _ = crate::steprec::guide_start(app).await;
+                        let _ = crate::steprec::guide_start(app, None).await;
                     });
                 }
             }

@@ -96,7 +96,7 @@ fn run(app: &AppHandle, name: &str) {
             if !crate::steprec::is_recording(app) {
                 let app = app.clone();
                 tauri::async_runtime::spawn(async move {
-                    let _ = crate::steprec::guide_start(app).await;
+                    let _ = crate::steprec::guide_start(app, None).await;
                 });
             }
         }

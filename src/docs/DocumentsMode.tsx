@@ -152,7 +152,7 @@ function GuideHome({ guide, hotkey }: { guide: GuideApi; hotkey: string }) {
       <div className="guides__head">
         <h2>{t("docs.title")}</h2>
         <Button onClick={guide.open}>{t("guide.open")}</Button>
-        <Button variant="primary" title={t("docs.newTip", { hotkey })} onClick={guide.newGuide}>
+        <Button variant="primary" title={t("docs.newTip", { hotkey })} onClick={() => guide.newGuide()}>
           {t("docs.new")}
         </Button>
       </div>

@@ -496,24 +496,14 @@ fn prepare_screen(app: &AppHandle, area: Rect) {
     crate::bubble::open(app, area);
 }
 
-/// Where the floating bar goes (its top left corner): centred on the recorded area, below it when that fits on the monitor, else
-/// above it, else (the area fills the monitor) at the top centre inside the area, where the bar is left out of the video. Always
-/// inside the monitor. `gap` is the distance to the area.
-pub fn bar_position(area: Rect, mon: Rect, bar_w: i32, bar_h: i32, gap: i32) -> (i32, i32) {
-    let centre = area.x + area.w as i32 / 2;
+/// Where the floating bar goes (its top left corner): at the TOP centre of the monitor that is recorded, like the bars of the
+/// screenshot and the guide, whatever area is recorded; always inside the monitor. `gap` is the distance to the top edge.
+pub fn bar_position(mon: Rect, bar_w: i32, gap: i32) -> (i32, i32) {
+    let centre = mon.x + mon.w as i32 / 2;
     let x = (centre - bar_w / 2)
         .min(mon.x + mon.w as i32 - bar_w)
         .max(mon.x);
-    let below = area.y + area.h as i32 + gap;
-    let above = area.y - gap - bar_h;
-    let y = if below + bar_h <= mon.y + mon.h as i32 {
-        below
-    } else if above >= mon.y {
-        above
-    } else {
-        (area.y + gap).max(mon.y)
-    };
-    (x, y)
+    (x, mon.y + gap)
 }
 
 /// The floating bar at the top centre of the recorded monitor: timer, stop and discard. It is excluded from the picture.
@@ -528,13 +518,7 @@ fn show_bar(app: &AppHandle, area: Rect) {
         .unwrap_or(1.0);
     let (w, h) = ((200.0 * scale) as u32, (52.0 * scale) as u32);
     // The bar is about 420 CSS pixels wide when it has loaded; its place is worked out for that width.
-    let (bx, by) = bar_position(
-        area,
-        mon,
-        (430.0 * scale) as i32,
-        h as i32,
-        (8.0 * scale) as i32,
-    );
+    let (bx, by) = bar_position(mon, (430.0 * scale) as i32, (16.0 * scale) as i32);
     let built = tauri::WebviewWindowBuilder::new(
         app,
         "recbar",
@@ -2031,34 +2015,19 @@ mod tests {
     }
 
     #[test]
-    fn the_bar_goes_below_or_above_the_area_or_inside_it_when_nothing_else_fits() {
+    fn the_bar_goes_to_the_top_centre_of_the_recorded_monitor() {
         let mon = Rect::new(0, 0, 1920, 1080);
-        // Room below: just below the area, centred on it.
+        assert_eq!(bar_position(mon, 400, 16), (760, 16));
+        // A narrow monitor never lets it leave the monitor.
+        assert_eq!(bar_position(Rect::new(0, 0, 300, 200), 400, 16).0, 0);
+        // A second monitor to the left (negative coordinates) and one below.
         assert_eq!(
-            bar_position(Rect::new(400, 200, 800, 400), mon, 400, 52, 8),
-            (600, 608)
-        );
-        // No room below (the area reaches the bottom): above it.
-        assert_eq!(
-            bar_position(Rect::new(400, 600, 800, 470), mon, 400, 52, 8),
-            (600, 540)
-        );
-        // The area fills the monitor: top centre inside the area.
-        assert_eq!(bar_position(mon, mon, 400, 52, 8), (760, 8));
-        // Never outside the monitor, also next to its edge.
-        assert_eq!(
-            bar_position(Rect::new(0, 100, 200, 200), mon, 400, 52, 8).0,
-            0
+            bar_position(Rect::new(-1920, 0, 1920, 1080), 400, 16),
+            (-1160, 16)
         );
         assert_eq!(
-            bar_position(Rect::new(1800, 100, 120, 200), mon, 400, 52, 8).0,
-            1520
-        );
-        // A second monitor to the left (negative coordinates).
-        let left = Rect::new(-1920, 0, 1920, 1080);
-        assert_eq!(
-            bar_position(Rect::new(-1500, 100, 600, 300), left, 400, 52, 8),
-            (-1400, 408)
+            bar_position(Rect::new(0, 1080, 1920, 1080), 400, 16),
+            (760, 1096)
         );
     }
 

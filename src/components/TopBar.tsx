@@ -65,7 +65,7 @@ export function TopBar(props: {
   /** What the buttons on the right do with the capture shown in the preview. */
   share: ShareApi;
   /** Documents mode: "New guide" instead of the capture controls, nothing on the right. */
-  documents?: { onNew: () => void; hotkey: string };
+  documents?: { onNew: (area?: string) => void; hotkey: string };
 }) {
   const { t, locale } = useT();
   const { settings, zoom, share } = props;

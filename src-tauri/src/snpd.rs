@@ -1114,4 +1114,69 @@ mod tests {
         assert!(append_ms < 3000, "append save took {append_ms} ms");
         assert!(as_ms < 60_000, "save as took {as_ms} ms");
     }
+
+    /// The attributes of images and tables in text blocks (size, alignment, crop, alt text, column widths) are part of the content
+    /// JSON: they survive Save as, an appended save and opening again, and a guide without them (7.5-B) opens as before.
+    #[test]
+    fn image_and_table_attributes_of_text_blocks_survive_save_and_open() {
+        let (d, steps, mut doc) = work_with_steps(1);
+        let work = d.path().join("work");
+        let content = json!({ "type": "doc", "content": [
+            { "type": "image", "attrs": { "src": "x", "alt": "A diagram", "file": "m-0001.png", "width": 320, "height": null, "align": "center", "crop": [0.1, 0.2, 0.5, 0.6], "nw": 800, "nh": 600 } },
+            { "type": "table", "attrs": { "align": "end" }, "content": [ { "type": "tableRow", "content": [
+                { "type": "tableHeader", "attrs": { "colspan": 1, "rowspan": 1, "colwidth": [140] }, "content": [ { "type": "paragraph" } ] },
+                { "type": "tableCell", "attrs": { "colspan": 1, "rowspan": 1, "colwidth": [220] }, "content": [ { "type": "paragraph" } ] } ] } ] },
+            { "type": "image", "attrs": { "src": "y", "alt": null, "file": "m-0002.png" } }
+        ] });
+        doc["blocks"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({ "id": "c1", "type": "content", "doc": content.clone() }));
+        let file = d.path().join("g.snpd");
+        save(&work, &file, &doc, &steps, true).unwrap();
+        doc["title"] = json!("Again");
+        save(&work, &file, &doc, &steps, false).unwrap(); // appended
+        let work2 = d.path().join("work2");
+        open_file(&work2, &file).unwrap();
+        let back = read_document(&work2).unwrap();
+        let block = back["blocks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|b| b["id"] == "c1")
+            .unwrap();
+        assert_eq!(block["doc"], content, "every attribute is kept exactly");
+        // The old image node (no new attributes) is still just that.
+        assert!(block["doc"]["content"][2]["attrs"].get("align").is_none());
+    }
+
+    /// "Expand area": a step whose area was dragged OUTSIDE its window is stored with exactly that area (the stored picture has
+    /// the size of the new area and the click moved with it); an area dragged inwards stores less. Only the shown area is stored.
+    #[test]
+    fn an_expanded_or_reduced_area_is_what_is_stored() {
+        let (d, steps, mut doc) = work_with_steps(2);
+        let work = d.path().join("work");
+        // The window of the steps is (50,20)-(150,80) of a 200x100 picture. Step 1 is expanded to (10,10)-(190,95), step 2 reduced.
+        doc["blocks"][0]["crop"] = json!([10, 10, 180, 85]);
+        doc["blocks"][1]["crop"] = json!([60, 30, 40, 20]);
+        let file = d.path().join("g.snpd");
+        save(&work, &file, &doc, &steps, true).unwrap();
+        let pkg = package::open(&file, KIND_DOC).unwrap();
+        let stored: Value = serde_json::from_slice(&pkg.meta("document.json").unwrap()).unwrap();
+        let s1: Step = serde_json::from_value(stored["blocks"][0]["step"].clone()).unwrap();
+        let s2: Step = serde_json::from_value(stored["blocks"][1]["step"].clone()).unwrap();
+        assert_eq!(s1.image_size, [180, 85]);
+        assert_eq!(
+            s1.click,
+            Some([60, 30]),
+            "the click (70,40) moved with the area"
+        );
+        assert_eq!(s2.image_size, [40, 20]);
+        let img = image::load_from_memory(&pkg.meta(&s1.image).unwrap())
+            .unwrap()
+            .to_rgba8();
+        assert_eq!((img.width(), img.height()), (180, 85));
+        // The red area (10..50, 10..30) of the screenshot is inside the expanded area: it is in the picture now.
+        assert!(img.pixels().any(|p| p.0 == [255, 0, 0, 255]));
+    }
 }

@@ -53,6 +53,8 @@ pub struct Settings {
     pub doc_step_picture: String,
     /// Show the zoom area around the click by default.
     pub doc_zoom_default: bool,
+    /// What a new guide records: "active" (the active app), "screen", "window" (a chosen window) or "region" (a chosen area).
+    pub doc_area: String,
     /// The colour of the click marker for a left (and middle) click (#RRGGBB), and for a right click.
     pub doc_marker_color: String,
     pub doc_marker_right: String,
@@ -186,6 +188,7 @@ impl Default for Settings {
             doc_enter_tab: false,
             doc_step_picture: "window".into(),
             doc_zoom_default: false,
+            doc_area: "active".into(),
             doc_marker_color: "#FF5A36".into(),
             doc_marker_right: "#3B82F6".into(),
             doc_marker_shape: "circle".into(),
@@ -327,6 +330,11 @@ impl Settings {
             &mut self.doc_step_mode,
             &["auto", "manual"],
             &d.doc_step_mode,
+        );
+        one_of(
+            &mut self.doc_area,
+            &["active", "screen", "window", "region"],
+            &d.doc_area,
         );
         one_of(
             &mut self.doc_step_picture,

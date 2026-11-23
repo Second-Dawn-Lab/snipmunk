@@ -27,6 +27,8 @@ import {
 import type { GuideApi } from "./useGuide";
 import { guideImageUrl } from "./urls";
 import { GuideSidebar } from "./GuideSidebar";
+import { GuideTools } from "./GuideTools";
+import { areaOf } from "./areas";
 
 /** A screenshot of Snipmunk's list that can become a step. */
 export interface ScreenshotChoice {
@@ -70,6 +72,17 @@ function InsertBar(props: { index: number; onInsert: (index: number, what: "text
   const { t } = useT();
   const [open, setOpen] = useState(false);
   const [over, setOver] = useState(false);
+  // The menu opens upwards when there is no room below the "+" inside the list.
+  const [up, setUp] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const m = menuRef.current;
+    const list = m?.closest(".glist");
+    if (!m || !list) return;
+    const room = list.getBoundingClientRect().bottom - m.parentElement!.getBoundingClientRect().bottom;
+    setUp(room < m.offsetHeight + 12);
+  }, [open]);
   const item = (what: Parameters<typeof props.onInsert>[1], label: string) => (
     <button type="button" role="menuitem" className="ginsert__item" onClick={() => (setOpen(false), props.onInsert(props.index, what))}>
       {label}
@@ -100,7 +113,7 @@ function InsertBar(props: { index: number; onInsert: (index: number, what: "text
         +
       </button>
       {open && (
-        <div className="ginsert__menu" role="menu" onMouseLeave={() => setOpen(false)}>
+        <div ref={menuRef} className={`ginsert__menu${up ? " ginsert__menu--up" : ""}`} role="menu" onMouseLeave={() => setOpen(false)}>
           {item("text", t("guide.insertText"))}
           {item("image", t("guide.insertImageFile"))}
           {item("clipboard", t("guide.insertImageClipboard"))}
@@ -113,26 +126,19 @@ function InsertBar(props: { index: number; onInsert: (index: number, what: "text
   );
 }
 
+/**
+ * A click anywhere on a block selects it (Ctrl/Shift for several). Clicks that belong to something inside the block - a text editor,
+ * a button, a field, the toolbar - and clicks while a picture tool is active keep their own meaning.
+ */
+function selectByClick(e: React.MouseEvent, toolActive: boolean, id: string, onSelect: (id: string, e: React.MouseEvent) => void) {
+  if (toolActive) return;
+  if ((e.target as HTMLElement).closest("button,input,select,textarea,a,.ProseMirror,.gtools,.rich__bar,.gann")) return;
+  onSelect(id, e);
+}
+
 // --- one step -----------------------------------------------------------------------------------------------------------------------
 
-const COLORS = ["#d62828", "#f77f00", "#fcbf49", "#2a9d8f", "#2563eb", "#7c3aed", "#000000", "#ffffff"];
-const TOOLS: { id: Tool; label: Parameters<ReturnType<typeof useT>["t"]>[0] }[] = [
-  { id: "arrow", label: "guide.tool.arrow" },
-  { id: "line", label: "guide.tool.line" },
-  { id: "rect", label: "guide.tool.rect" },
-  { id: "ellipse", label: "guide.tool.ellipse" },
-  { id: "highlight", label: "guide.tool.highlight" },
-  { id: "pen", label: "guide.tool.pen" },
-  { id: "text", label: "guide.tool.text" },
-  { id: "callout", label: "guide.tool.callout" },
-  { id: "badge", label: "guide.tool.badge" },
-  { id: "blur", label: "guide.tool.blur" },
-  { id: "pixelate", label: "guide.tool.pixelate" },
-  { id: "black", label: "guide.tool.black" },
-  { id: "crop", label: "guide.tool.crop" },
-  { id: "zoom", label: "guide.tool.zoom" },
-  { id: "marker", label: "guide.tool.marker" },
-];
+const AREA_LABEL = { default: "guide.areaDefault", window: "settings.docPictureWindow", screen: "settings.docPictureScreen", custom: "guide.areaCustom" } as const;
 
 const StepView = memo(function StepView(props: {
   block: StepBlock;
@@ -147,6 +153,10 @@ const StepView = memo(function StepView(props: {
   dragStart: (e: DragEvent, id: string) => void;
   /** A tool the sidebar asked for (the zoom area). */
   req: { id: string; tool: "zoom"; n: number } | null;
+  undo: () => void;
+  redo: () => void;
+  canUndo: boolean;
+  canRedo: boolean;
 }) {
   const { t } = useT();
   const { block, step, doc } = props;
@@ -155,23 +165,27 @@ const StepView = memo(function StepView(props: {
   useEffect(() => {
     if (reqN > 0 && props.req) setTool(props.req.tool);
   }, [reqN]);
-  const [color, setColor] = useState(COLORS[0]);
+  const [color, setColor] = useState("#D62828");
+  const [width, setWidth] = useState(3);
   const [ann, setAnn] = useState<string | null>(null);
   const patch = useCallback((c: Partial<StepBlock>, key = "") => props.change((d) => updateBlock<StepBlock>(d, block.id, c), key), [props, block.id]);
   if (!step) return null;
   const parts = block.text ?? step.text;
+  const showTools = props.selected || props.editing;
+  const canExpand = !!step.monitor && step.monitor[2] === step.imageSize[0] && step.monitor[3] === step.imageSize[1];
   const hasClick = step.click !== null && step.kind !== "type" && step.kind !== "key";
   const badge = doc.badge === "none" ? null : <span className={`gstep__badge gstep__badge--${doc.badge}`}>{props.number}</span>;
   return (
-    <article className={`gblock gstep${props.selected ? " gblock--sel" : ""}`} data-block={block.id} tabIndex={-1}>
+    <article className={`gblock gstep${props.selected ? " gblock--sel" : ""}`} data-block={block.id} tabIndex={-1} onClick={(e) => selectByClick(e, tool !== "none", block.id, props.onSelect)}>
       <div className="gstep__head">
-        <button type="button" className="gblock__handle" draggable title={t("guide.drag")} aria-label={t("guide.drag")} onDragStart={(e) => props.dragStart(e, block.id)} onClick={(e) => props.onSelect(block.id, e)}>
+        <button type="button" className="gblock__handle" draggable title={t("guide.drag")} aria-label={t("guide.drag")} onDragStart={(e) => props.dragStart(e, block.id)}>
           ⋮⋮
         </button>
         {badge}
         <div className="gstep__text">
           <RichText mode="step" singleLine value={partsToDoc(parts)} ariaLabel={t("guide.stepText")} onChange={(d) => patch({ text: docToParts(d) }, `text:${block.id}`)} />
         </div>
+        {step.image && <span className="gstep__area" title={t("guide.stepArea")}>{t(AREA_LABEL[areaOf(step, block)])}</span>}
         <span className="gstep__actions">
           {block.text && (
             <button type="button" className="gstep__btn" title={t("guide.resetText")} aria-label={t("guide.resetText")} onClick={() => patch({ text: undefined })}>
@@ -193,50 +207,29 @@ const StepView = memo(function StepView(props: {
       </div>
       {step.image && (
         <>
-          {props.editing && (
-            <div className="gtools" role="toolbar" aria-label={t("guide.editPicture")}>
-              {TOOLS.filter((x) => hasClick || x.id !== "marker").map((x) => (
-                <button key={x.id} type="button" className={`gtools__btn${tool === x.id ? " gtools__btn--on" : ""}`} aria-pressed={tool === x.id} onClick={() => setTool(tool === x.id ? "none" : x.id)}>
-                  {t(x.label)}
-                </button>
-              ))}
-              <span className="gtools__sep" />
-              {COLORS.map((c) => (
-                <button key={c} type="button" className={`gtools__swatch${color === c ? " gtools__swatch--on" : ""}`} style={{ background: c }} aria-label={c} onClick={() => setColor(c)} />
-              ))}
-              <span className="gtools__sep" />
-              {hasClick && (
-                <button type="button" className="gtools__btn" aria-pressed={!block.markerHidden} onClick={() => patch({ markerHidden: !block.markerHidden })}>
-                  {block.markerHidden ? t("guide.markerShow") : t("guide.markerHide")}
-                </button>
-              )}
-              {hasClick && (
-                <button type="button" className="gtools__btn" aria-pressed={block.zoom ?? doc.zoomDefault} onClick={() => patch({ zoom: !(block.zoom ?? doc.zoomDefault) })}>
-                  {t("guide.zoom")}
-                </button>
-              )}
-              {(block.crop || block.zoomRect || block.markerPos || (block.annotations?.length ?? 0) > 0 || (block.redact?.length ?? 0) > 0) && (
-                <>
-                  {block.crop && (
-                    <button type="button" className="gtools__btn" onClick={() => patch({ crop: null })}>
-                      {t("guide.resetCrop")}
-                    </button>
-                  )}
-                  {(block.annotations?.length ?? 0) > 0 && (
-                    <button type="button" className="gtools__btn" onClick={() => patch({ annotations: ann ? block.annotations!.filter((a) => a.id !== ann) : block.annotations!.slice(0, -1) })}>
-                      {ann ? t("guide.deleteSelected") : t("guide.undoLast")}
-                    </button>
-                  )}
-                  {(block.redact?.length ?? 0) > 0 && (
-                    <button type="button" className="gtools__btn" onClick={() => patch({ redact: block.redact!.slice(0, -1) })}>
-                      {t("guide.undoRedact")}
-                    </button>
-                  )}
-                </>
-              )}
-            </div>
+          {showTools && (
+            <GuideTools
+              tool={tool}
+              setTool={setTool}
+              color={color}
+              setColor={setColor}
+              width={width}
+              setWidth={setWidth}
+              step={step}
+              block={block}
+              doc={doc}
+              hasClick={hasClick}
+              canExpand={canExpand}
+              hasSelectedAnnotation={ann !== null}
+              onDeleteSelected={() => ann && (patch({ annotations: (block.annotations ?? []).filter((x) => x.id !== ann) }), setAnn(null))}
+              patch={patch}
+              undo={props.undo}
+              redo={props.redo}
+              canUndo={props.canUndo}
+              canRedo={props.canRedo}
+            />
           )}
-          <StepPicture step={step} block={block} doc={doc} tool={props.editing ? tool : "none"} color={color} selected={ann} onSelect={setAnn} onChange={(c) => patch(c)} />
+          <StepPicture step={step} block={block} doc={doc} tool={showTools ? tool : "none"} color={color} width={width} selected={ann} onSelect={setAnn} onChange={(c) => patch(c)} />
         </>
       )}
       {block.desc !== undefined && block.desc !== null ? (
@@ -254,9 +247,9 @@ const ContentView = memo(function ContentView(props: { block: ContentBlock; sele
   const { t } = useT();
   const { block } = props;
   return (
-    <article className={`gblock gcontent${props.selected ? " gblock--sel" : ""}`} data-block={block.id} tabIndex={-1}>
+    <article className={`gblock gcontent${props.selected ? " gblock--sel" : ""}`} data-block={block.id} tabIndex={-1} onClick={(e) => selectByClick(e, false, block.id, props.onSelect)}>
       <div className="gcontent__side">
-        <button type="button" className="gblock__handle" draggable title={t("guide.drag")} aria-label={t("guide.drag")} onDragStart={(e) => props.dragStart(e, block.id)} onClick={(e) => props.onSelect(block.id, e)}>
+        <button type="button" className="gblock__handle" draggable title={t("guide.drag")} aria-label={t("guide.drag")} onDragStart={(e) => props.dragStart(e, block.id)}>
           ⋮⋮
         </button>
         <button type="button" className="gstep__btn" title={t("docs.deleteStep")} aria-label={t("docs.deleteStep")} onClick={() => props.change((d) => removeBlocks(d, new Set([block.id])))}>
@@ -302,7 +295,7 @@ export function GuideEditor(props: { guide: GuideApi; screenshots: ScreenshotCho
     async (blob: Blob, index: number) => {
       try {
         const img = await storeImage(blob);
-        const node = { type: "image", attrs: { src: guideImageUrl(img.name), alt: "", file: img.name } };
+        const node = { type: "image", attrs: { src: guideImageUrl(img.name), alt: "", file: img.name, nw: img.width, nh: img.height } };
         change((d) => insertBlock(d, index, { id: newId(), type: "content", doc: { type: "doc", content: [node, { type: "paragraph" }] } } as ContentBlock));
       } catch (e) {
         notify(String((e as { message?: string })?.message ?? e), true);
@@ -387,6 +380,33 @@ export function GuideEditor(props: { guide: GuideApi; screenshots: ScreenshotCho
     [doc],
   );
 
+  /**
+   * Move the selected blocks one place. The view stays where it is: the browser's scroll anchoring is off for the list, the scroll
+   * position is put back after the move, and only when a moved block would leave the visible area is the list scrolled by the minimum
+   * ("nearest"), never centred.
+   */
+  const moveSelection = useCallback(
+    (delta: -1 | 1) => {
+      const list = document.querySelector<HTMLElement>(".glist");
+      const top = list?.scrollTop ?? 0;
+      const order = doc.blocks.filter((b) => sel.has(b.id)).map((b) => b.id);
+      const lead = delta < 0 ? order[0] : order[order.length - 1];
+      change((d) => moveBlocks(d, sel, delta));
+      window.setTimeout(() => {
+        if (!list) return;
+        list.scrollTop = top;
+        const el = list.querySelector<HTMLElement>(`[data-block="${lead}"]`);
+        if (!el) return;
+        const r = el.getBoundingClientRect();
+        const v = list.getBoundingClientRect();
+        // (a block taller than the view is still visible while part of it is on screen)
+        const gone = r.bottom < v.top + 24 || r.top > v.bottom - 24;
+        if (gone) el.scrollIntoView({ block: "nearest" });
+      }, 30);
+    },
+    [doc, sel, change],
+  );
+
   // Keys: Ctrl+Z / Ctrl+Y (a focused rich-text editor undoes its own typing first, then the document history), Alt+Up/Down move
   // the selected blocks, Delete deletes them (not while typing).
   useEffect(() => {
@@ -408,7 +428,8 @@ export function GuideEditor(props: { guide: GuideApi; screenshots: ScreenshotCho
       if (pm || (target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName))) return;
       if (e.altKey && (e.key === "ArrowUp" || e.key === "ArrowDown") && sel.size > 0) {
         e.preventDefault();
-        change((d) => moveBlocks(d, sel, e.key === "ArrowUp" ? -1 : 1));
+        e.stopPropagation();
+        moveSelection(e.key === "ArrowUp" ? -1 : 1);
       } else if ((e.key === "Delete" || e.key === "Backspace") && sel.size > 0 && !target?.closest("input,select,textarea")) {
         e.preventDefault();
         e.stopPropagation();
@@ -421,7 +442,7 @@ export function GuideEditor(props: { guide: GuideApi; screenshots: ScreenshotCho
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [guide, change, sel]);
+  }, [guide, change, sel, moveSelection]);
 
   const set = (c: Partial<GuideDoc>) => change((d) => ({ ...d, ...c }));
   const setMarker = (c: Partial<GuideDoc["marker"]>) => change((d) => ({ ...d, marker: { ...d.marker, ...c } }));
@@ -436,10 +457,10 @@ export function GuideEditor(props: { guide: GuideApi; screenshots: ScreenshotCho
         {sel.size > 0 && (
           <span className="gbar__sel">
             {t("guide.selected", { count: sel.size })}
-            <button type="button" className="gbar__btn" title={t("guide.moveUp")} aria-label={t("guide.moveUp")} onClick={() => change((d) => moveBlocks(d, sel, -1))}>
+            <button type="button" className="gbar__btn" title={t("guide.moveUp")} aria-label={t("guide.moveUp")} onClick={() => moveSelection(-1)}>
               ↑
             </button>
-            <button type="button" className="gbar__btn" title={t("guide.moveDown")} aria-label={t("guide.moveDown")} onClick={() => change((d) => moveBlocks(d, sel, 1))}>
+            <button type="button" className="gbar__btn" title={t("guide.moveDown")} aria-label={t("guide.moveDown")} onClick={() => moveSelection(1)}>
               ↓
             </button>
             <button
@@ -490,6 +511,10 @@ export function GuideEditor(props: { guide: GuideApi; screenshots: ScreenshotCho
                 selected={sel.has(b.id)}
                 editing={editing === b.id}
                 req={toolReq}
+                undo={guide.undo}
+                redo={guide.redo}
+                canUndo={guide.history.canUndo}
+                canRedo={guide.history.canRedo}
                 onEdit={setEditing}
                 onSelect={onSelectBlock}
                 change={change}

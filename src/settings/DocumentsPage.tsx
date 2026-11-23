@@ -25,7 +25,7 @@ export function DocumentsPage({ settings, set }: PageProps) {
             onChange={(v) => set({ docStepMode: v as "auto" | "manual" })}
             options={[
               { value: "auto", label: t("settings.docModeAuto") },
-              { value: "manual", label: t("settings.docModeManual") },
+              { value: "manual", label: t("settings.docModeManualKey", { hotkey: settings.docStepHotkey }) },
             ]}
           />
         </Setting>

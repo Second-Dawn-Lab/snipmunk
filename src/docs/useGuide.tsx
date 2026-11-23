@@ -84,7 +84,12 @@ export function useGuide(settings: Settings) {
       for (const s of all.steps) map.set(s.n, s);
       let d = all.document as GuideDoc | null;
       if (!d || !Array.isArray(d.blocks)) {
-        d = createDocument(all.info.title, all.info.created, all.steps, defaultsOf(settingsRef.current));
+        const defaults = defaultsOf(settingsRef.current);
+        // A guide of the whole screen shows the whole picture; one of a window or a region shows that area (the step's window).
+        const area = (all.info as { settings?: { area?: string } }).settings?.area;
+        if (area === "screen") defaults.picture = "screen";
+        else if (area === "window" || area === "region") defaults.picture = "window";
+        d = createDocument(all.info.title, all.info.created, all.steps, defaults);
       } else {
         d = syncSteps(d, all.steps, opts.insertAfter);
       }
@@ -274,8 +279,8 @@ export function useGuide(settings: Settings) {
 
   const openRecent = useCallback((path: string) => guard(() => void openPath(path)), [guard, openPath]);
 
-  const newGuide = useCallback(() => {
-    guard(() => void ipc.guideStart().catch((e) => setError(String((e as { message?: string })?.message ?? e))));
+  const newGuide = useCallback((area?: string) => {
+    guard(() => void ipc.guideStart(area).catch((e) => setError(String((e as { message?: string })?.message ?? e))));
   }, [guard]);
 
   const close = useCallback(() => guard(() => undefined), [guard]);

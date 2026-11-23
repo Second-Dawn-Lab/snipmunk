@@ -299,6 +299,89 @@ mod pure_tests {
     }
 
     #[test]
+    fn a_step_of_the_shell_shows_the_taskbar_the_start_menu_or_the_icon_never_the_wallpaper() {
+        use steptext::Area;
+        let frame = [1920, 1080];
+        // The taskbar (a strip of 48 px at the bottom) with a margin of 96 px above it.
+        assert_eq!(
+            shell_crop(Area::Taskbar, [0, 1032, 1920, 48], None, frame),
+            [0, 936, 1920, 144]
+        );
+        // The tray is the same taskbar.
+        assert_eq!(
+            shell_crop(Area::Tray, [0, 1032, 1920, 48], None, frame),
+            [0, 936, 1920, 144]
+        );
+        // A taskbar window that fills the picture is not trusted: the clicked button with a margin.
+        assert_eq!(
+            shell_crop(
+                Area::Taskbar,
+                [0, 0, 1920, 1080],
+                Some([100, 1040, 40, 40]),
+                frame
+            ),
+            [4, 944, 232, 136]
+        );
+        // The Start menu: its window with a margin.
+        assert_eq!(
+            shell_crop(Area::StartMenu, [560, 300, 640, 700], None, frame),
+            [536, 276, 688, 748]
+        );
+        // The desktop: the icon with a generous margin, at least 640 x 400, inside the picture; not the whole desktop window.
+        let r = shell_crop(
+            Area::Desktop,
+            [0, 0, 1920, 1080],
+            Some([40, 60, 80, 90]),
+            frame,
+        );
+        assert!(
+            r[2] >= 640
+                && r[3] >= 400
+                && r[0] == 0
+                && r[1] == 0
+                && r[0] + r[2] <= 1920
+                && r[1] + r[3] <= 1080,
+            "{r:?}"
+        );
+        assert!(r[2] < 1920);
+        assert_eq!(
+            shell_crop(Area::Desktop, [0, 0, 1920, 1080], None, frame),
+            [0, 0, 1920, 1080]
+        );
+        // A normal window is left alone.
+        assert_eq!(
+            shell_crop(Area::None, [100, 100, 800, 600], None, frame),
+            [100, 100, 800, 600]
+        );
+        // Everything stays inside the picture, also on the second monitor's coordinates (already relative).
+        let r = shell_crop(Area::Taskbar, [0, 0, 1280, 40], None, [1280, 720]);
+        assert_eq!(r, [0, 0, 1280, 136]);
+    }
+
+    #[test]
+    fn a_guide_of_a_region_or_a_window_ignores_clicks_outside_of_it() {
+        let region = AreaMode::Region(Rect::new(100, 100, 200, 150));
+        assert!(in_area(region, 100, 100, 0), "the corner is inside");
+        assert!(in_area(region, 299, 249, 0));
+        assert!(!in_area(region, 300, 120, 0), "the right edge is outside");
+        assert!(!in_area(region, 50, 120, 0));
+        assert!(!in_area(region, 120, 250, 0));
+        let window = AreaMode::Window(42);
+        assert!(in_area(window, 5, 5, 42));
+        assert!(!in_area(window, 5, 5, 43));
+        assert!(in_area(AreaMode::Active, -10, -10, 7) && in_area(AreaMode::Screen, 99999, 5, 7));
+        assert_eq!(
+            clip_to_frame([-20, -10, 100, 100], [1920, 1080]),
+            [0, 0, 80, 90]
+        );
+        assert_eq!(
+            clip_to_frame([1900, 1000, 100, 100], [1920, 1080]),
+            [1900, 1000, 20, 80]
+        );
+        assert_eq!(region.word(), "region");
+    }
+
+    #[test]
     fn the_title_of_a_page_is_the_window_title_without_the_browser() {
         assert_eq!(
             page_title("Inbox (3) - Mail - Google Chrome", "Google Chrome"),
@@ -542,6 +625,43 @@ pub struct RecSettings {
     pub allow_own: bool,
     /// The shortcuts of Snipmunk itself (start guide, step, capture, record): pressing them never makes a step.
     pub own_shortcuts: Vec<dawn_hotkeys::shortcut::Shortcut>,
+    /// What the guide records: the active app, the whole screen, one window or one region.
+    pub area: AreaMode,
+}
+
+/// What a guide records (the "New guide" area menu).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AreaMode {
+    /// Every step shows the window that was clicked.
+    #[default]
+    Active,
+    /// Every step shows the whole monitor.
+    Screen,
+    /// Only clicks in this window make steps; the pictures show it (the handle of the window).
+    Window(isize),
+    /// Only clicks inside this region (desktop pixels) make steps; the pictures are cropped to it.
+    Region(Rect),
+}
+
+impl AreaMode {
+    /// The word stored in guide.json and the settings.
+    pub fn word(&self) -> &'static str {
+        match self {
+            AreaMode::Active => "active",
+            AreaMode::Screen => "screen",
+            AreaMode::Window(_) => "window",
+            AreaMode::Region(_) => "region",
+        }
+    }
+}
+
+/// Does a click belong to the area of the guide? `root` is the top window under the pointer. Pure; tested.
+pub fn in_area(area: AreaMode, x: i32, y: i32, root: isize) -> bool {
+    match area {
+        AreaMode::Active | AreaMode::Screen => true,
+        AreaMode::Window(h) => root == h,
+        AreaMode::Region(r) => x >= r.x && y >= r.y && x < r.x + r.w as i32 && y < r.y + r.h as i32,
+    }
 }
 
 impl RecSettings {
@@ -560,6 +680,7 @@ impl RecSettings {
             zoom_default: s.doc_zoom_default,
             lang: crate::language::resolve(&s.language).to_string(),
             allow_own: false,
+            area: AreaMode::Active,
             own_shortcuts: [
                 &s.doc_start_hotkey,
                 &s.doc_step_hotkey,
@@ -585,6 +706,10 @@ struct Active {
     count: Arc<AtomicU32>,
     frames: Arc<Frames>,
     thread: Option<std::thread::JoinHandle<()>>,
+    /// What the guide records, the title of the chosen window and the clicks outside the area that were ignored.
+    area: AreaMode,
+    target: String,
+    ignored: Arc<AtomicU32>,
     #[cfg(windows)]
     hooks: Option<hooks::Hooks>,
 }
@@ -602,6 +727,12 @@ pub struct GuideState {
     pub paused: bool,
     pub steps: u32,
     pub id: String,
+    /// "active", "screen", "window" or "region".
+    pub area: String,
+    /// The title of the chosen window (for the bar).
+    pub target: String,
+    /// Clicks outside the area that were ignored (Choose window, Select area).
+    pub ignored: u32,
 }
 
 impl GuideRec {
@@ -613,12 +744,18 @@ impl GuideRec {
                     paused: a.paused.load(Ordering::SeqCst),
                     steps: a.count.load(Ordering::SeqCst),
                     id: a.id.clone(),
+                    area: a.area.word().to_string(),
+                    target: a.target.clone(),
+                    ignored: a.ignored.load(Ordering::SeqCst),
                 },
                 None => GuideState {
                     recording: false,
                     paused: false,
                     steps: 0,
                     id: String::new(),
+                    area: String::new(),
+                    target: String::new(),
+                    ignored: 0,
                 },
             },
             // (a command polled by a page never waits for the lock)
@@ -627,6 +764,9 @@ impl GuideRec {
                 paused: false,
                 steps: 0,
                 id: String::new(),
+                area: String::new(),
+                target: String::new(),
+                ignored: 0,
             },
         }
     }
@@ -664,8 +804,37 @@ static STARTING: AtomicBool = AtomicBool::new(false);
 /// Start recording a guide (after the countdown, from its own thread): the live pictures, the pipeline, the hooks, the bar.
 /// Every way of failing is told to the page (`capture-error`), also when the shortcut or the tray started it.
 #[tauri::command]
-pub async fn guide_start(app: AppHandle) -> CmdResult<String> {
-    start_command(app, false).await
+pub async fn guide_start(app: AppHandle, area: Option<String>) -> CmdResult<String> {
+    let word = {
+        let state = app.state::<crate::commands::AppState>();
+        let s = state.settings.lock().unwrap();
+        area.unwrap_or_else(|| s.doc_area.clone())
+    };
+    let word = if ["active", "screen", "window", "region"].contains(&word.as_str()) {
+        word
+    } else {
+        "active".to_string()
+    };
+    crate::commands::patch_settings(&app, serde_json::json!({ "docArea": word }))?;
+    match word.as_str() {
+        // Choose a window / draw a region on the selection overlay first; the guide starts when it is chosen.
+        "window" | "region" => {
+            if !crate::capture::pick_guide_area(&app, &word) {
+                return Err(CmdError::new("busy", "a capture is running already"));
+            }
+            Ok(String::new())
+        }
+        "screen" => start_command(app, false, Some(AreaMode::Screen)).await,
+        _ => start_command(app, false, Some(AreaMode::Active)).await,
+    }
+}
+
+/// The overlay chose a window or a region for a new guide: start it.
+pub fn area_picked(app: &AppHandle, area: AreaMode) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let _ = start_command(app, false, Some(area)).await;
+    });
 }
 
 /// "Record more steps" into the open guide: the new steps are appended to it.
@@ -674,14 +843,51 @@ pub async fn guide_record_more(app: AppHandle) -> CmdResult<String> {
     if !crate::snpd::is_open() {
         return Err(CmdError::new("not_found", "no guide is open"));
     }
-    start_command(app, true).await
+    // The area the guide was recorded with (a window that is gone: the active app).
+    let area = guides::read_info("current")
+        .map(|i| area_of_info(&i.settings))
+        .unwrap_or(AreaMode::Active);
+    start_command(app, true, Some(area)).await
 }
 
-async fn start_command(app: AppHandle, append: bool) -> CmdResult<String> {
+/// The area stored in a guide's settings (`area`, and `region` for a region).
+fn area_of_info(settings: &serde_json::Value) -> AreaMode {
+    match settings["area"].as_str() {
+        Some("screen") => AreaMode::Screen,
+        Some("region") => {
+            let r = &settings["region"];
+            match (r[0].as_i64(), r[1].as_i64(), r[2].as_u64(), r[3].as_u64()) {
+                (Some(x), Some(y), Some(w), Some(h)) => {
+                    AreaMode::Region(Rect::new(x as i32, y as i32, w as u32, h as u32))
+                }
+                _ => AreaMode::Active,
+            }
+        }
+        Some("window") => {
+            let h = settings["hwnd"].as_i64().unwrap_or(0) as isize;
+            if h != 0 && facts::is_window(h) {
+                AreaMode::Window(h)
+            } else {
+                AreaMode::Active
+            }
+        }
+        _ => AreaMode::Active,
+    }
+}
+
+async fn start_command(app: AppHandle, append: bool, area: Option<AreaMode>) -> CmdResult<String> {
     if STARTING.swap(true, Ordering::SeqCst) {
         return Err(CmdError::new("busy", "a guide is starting already"));
     }
-    let r = start_with(app.clone(), FrameSource::Monitors, false, true, append).await;
+    let r = start_with(
+        app.clone(),
+        FrameSource::Monitors,
+        false,
+        true,
+        append,
+        area.unwrap_or_default(),
+    )
+    .await;
     STARTING.store(false, Ordering::SeqCst);
     if let Err(e) = &r {
         if e.code != "cancelled" {
@@ -698,6 +904,7 @@ pub async fn start_with(
     dev: bool,
     real_hooks: bool,
     append: bool,
+    area: AreaMode,
 ) -> CmdResult<String> {
     if app.state::<GuideRec>().active.lock().unwrap().is_some()
         || crate::recording::is_recording(&app)
@@ -707,7 +914,13 @@ pub async fn start_with(
     let settings = {
         let mut s = RecSettings::from_app(&app);
         s.allow_own = dev;
+        s.area = area;
         s
+    };
+    let ignored = Arc::new(AtomicU32::new(0));
+    let target = match area {
+        AreaMode::Window(h) => facts::window_title(h),
+        _ => String::new(),
     };
     let app2 = app.clone();
     let id = tauri::async_runtime::spawn_blocking(move || -> CmdResult<String> {
@@ -736,6 +949,9 @@ pub async fn start_with(
         } else { guides::create(&default_title(), serde_json::json!({
             "stepMode": if settings.auto { "auto" } else { "manual" }, "typing": settings.typing,
             "shortcuts": settings.shortcuts, "enterTab": settings.enter_tab, "zoom": settings.zoom_default, "lang": settings.lang,
+            "area": area.word(),
+            "region": match area { AreaMode::Region(r) => serde_json::json!([r.x, r.y, r.w, r.h]), _ => serde_json::Value::Null },
+            "hwnd": match area { AreaMode::Window(h) => serde_json::json!(h as i64), _ => serde_json::Value::Null },
         }))? };
         let start_n = guides::read_steps(&info.id).iter().map(|s| s.n).max().unwrap_or(0);
         let (tx, rx) = std::sync::mpsc::channel::<Raw>();
@@ -743,7 +959,8 @@ pub async fn start_with(
         let count = Arc::new(AtomicU32::new(0));
         let thread = {
             let (app, frames, paused, count, id) = (app.clone(), frames.clone(), paused.clone(), count.clone(), info.id.clone());
-            std::thread::spawn(move || pipeline(app, id, rx, frames, settings, paused, count, start_n))
+            let ignored = ignored.clone();
+            std::thread::spawn(move || pipeline(app, id, rx, frames, settings, paused, count, ignored, start_n))
         };
         #[cfg(windows)]
         let hooks = if real_hooks { hooks::Hooks::install(tx.clone(), paused.clone()).ok() } else { None };
@@ -756,6 +973,9 @@ pub async fn start_with(
             count,
             frames,
             thread: Some(thread),
+            area,
+            target,
+            ignored,
             #[cfg(windows)]
             hooks,
         };
@@ -1051,6 +1271,73 @@ pub fn classify_shell(
     }
 }
 
+/// A rectangle inside the picture (at least 1 x 1).
+pub fn clip_to_frame(r: [i32; 4], frame: [i32; 2]) -> [i32; 4] {
+    let (x0, y0) = (r[0].max(0).min(frame[0] - 1), r[1].max(0).min(frame[1] - 1));
+    let (x1, y1) = (
+        (r[0] + r[2]).min(frame[0]).max(x0 + 1),
+        (r[1] + r[3]).min(frame[1]).max(y0 + 1),
+    );
+    [x0, y0, x1 - x0, y1 - y0]
+}
+
+/// The area a step of the Windows shell shows, in picture pixels: never the window of the desktop (the wallpaper), and not only a thin
+/// strip. The taskbar and the tray: the taskbar window with a margin of 96 px (what is above it). The Start menu: its window with a
+/// margin. The desktop: the clicked icon with a generous margin (at least 640 x 400). A shell window without a usable size shows the
+/// whole picture. The result is inside the picture.
+pub fn shell_crop(
+    area: steptext::Area,
+    win: [i32; 4],
+    elem: Option<[i32; 4]>,
+    frame: [i32; 2],
+) -> [i32; 4] {
+    use steptext::Area;
+    let whole = [0, 0, frame[0], frame[1]];
+    let inflate = |r: [i32; 4], m: i32| {
+        let (x0, y0) = ((r[0] - m).max(0), (r[1] - m).max(0));
+        let (x1, y1) = (
+            (r[0] + r[2] + m).min(frame[0]),
+            (r[1] + r[3] + m).min(frame[1]),
+        );
+        [x0, y0, (x1 - x0).max(1), (y1 - y0).max(1)]
+    };
+    let usable = |r: [i32; 4]| r[2] >= 8 && r[3] >= 8;
+    match area {
+        Area::None => win,
+        Area::Taskbar | Area::Tray => {
+            // A taskbar that fills the whole picture is not one: use the clicked element or everything.
+            if usable(win) && !(win[2] >= frame[0] && win[3] >= frame[1]) {
+                inflate(win, 96)
+            } else {
+                elem.filter(|e| usable(*e))
+                    .map_or(whole, |e| inflate(e, 96))
+            }
+        }
+        Area::StartMenu => {
+            if usable(win) {
+                inflate(win, 24)
+            } else {
+                whole
+            }
+        }
+        Area::Desktop => {
+            match elem.filter(|e| usable(*e) && !(e[2] >= frame[0] && e[3] >= frame[1])) {
+                Some(e) => {
+                    let r = inflate(e, 240);
+                    // at least 640 x 400, around the icon
+                    let (w, h) = (r[2].max(640).min(frame[0]), r[3].max(400).min(frame[1]));
+                    let cx = e[0] + e[2] / 2;
+                    let cy = e[1] + e[3] / 2;
+                    let x = (cx - w / 2).clamp(0, (frame[0] - w).max(0));
+                    let y = (cy - h / 2).clamp(0, (frame[1] - h).max(0));
+                    [x, y, w, h]
+                }
+                None => whole,
+            }
+        }
+    }
+}
+
 /// The title of a page without the name of the browser: "Inbox - Mail - Google Chrome" is "Inbox - Mail".
 pub fn page_title(window_title: &str, app: &str) -> String {
     let t = window_title.trim();
@@ -1068,6 +1355,8 @@ pub fn page_title(window_title: &str, app: &str) -> String {
 }
 
 struct Pipe {
+    /// Clicks outside the area of the guide (Choose window, Select area) that were ignored.
+    ignored: Arc<AtomicU32>,
     app: AppHandle,
     id: String,
     settings: RecSettings,
@@ -1097,9 +1386,11 @@ fn pipeline(
     settings: RecSettings,
     paused: Arc<AtomicBool>,
     count: Arc<AtomicU32>,
+    ignored: Arc<AtomicU32>,
     start_n: u32,
 ) {
     let mut p = Pipe {
+        ignored,
         app,
         id,
         settings,
@@ -1170,6 +1461,9 @@ impl Pipe {
                 if !self.settings.auto || self.is_own(x, y) {
                     return;
                 }
+                if self.outside_area(x, y) {
+                    return;
+                }
                 self.flush_typing_at(at);
                 match button {
                     Button::Left => {
@@ -1198,7 +1492,7 @@ impl Pipe {
             }
             Raw::Take { x, y, at } => {
                 self.dev_pointer = (x, y);
-                if self.is_own(x, y) {
+                if self.is_own(x, y) || self.outside_area(x, y) {
                     return;
                 }
                 self.flush_pending();
@@ -1215,6 +1509,22 @@ impl Pipe {
             } => self.key(vk, scan, mods, hkl, at),
             Raw::Stop => {}
         }
+    }
+
+    /// A click outside the area of the guide: ignored, counted, and the bar says so. (Region: only the rectangle is looked at;
+    /// Window: the top window under the pointer.)
+    fn outside_area(&self, x: i32, y: i32) -> bool {
+        let area = self.settings.area;
+        let root = match area {
+            AreaMode::Window(_) => facts::root_at(x, y),
+            _ => 0,
+        };
+        if in_area(area, x, y, root) {
+            return false;
+        }
+        self.ignored.fetch_add(1, Ordering::SeqCst);
+        announce(&self.app);
+        true
     }
 
     fn pointer_now(&self) -> (i32, i32) {
@@ -1396,8 +1706,23 @@ impl Pipe {
         }
         let click = matches!(kind, Kind::Click | Kind::RightClick | Kind::DoubleClick)
             .then(|| [snap.pt.0 - origin.0, snap.pt.1 - origin.1]);
+        let shell_area = snap.win.as_ref().map_or(steptext::Area::None, |w| {
+            classify_shell(
+                &w.class,
+                &w.point_class,
+                &w.process,
+                snap.uia.as_ref().map_or(&[][..], |u| &u.classes[..]),
+                snap.uia.as_ref().map_or("", |u| &u.automation_id),
+            )
+        });
         let window = snap.win.as_ref().map(|w| WindowInfo {
-            rect: to_frame(w.rect),
+            // The area of a step of the shell is the shell element, not the window under the point (the desktop is the wallpaper).
+            rect: shell_crop(
+                shell_area,
+                to_frame(w.rect),
+                snap.uia.as_ref().map(|u| to_frame(u.rect)),
+                [fw as i32, fh as i32],
+            ),
             title: w.title.clone(),
             process: w.process.clone(),
         });
@@ -1411,16 +1736,28 @@ impl Pipe {
             rect: to_frame(u.rect),
             parents: u.parents.clone(),
         });
+        // A guide of one window or one region: the pictures show exactly that (frame pixels, inside the picture).
+        let window = match (self.settings.area, window) {
+            (AreaMode::Region(r), w) => Some(WindowInfo {
+                rect: clip_to_frame(
+                    to_frame([r.x, r.y, r.w as i32, r.h as i32]),
+                    [fw as i32, fh as i32],
+                ),
+                title: w.as_ref().map(|w| w.title.clone()).unwrap_or_default(),
+                process: w.as_ref().map(|w| w.process.clone()).unwrap_or_default(),
+            }),
+            (AreaMode::Window(h), w) => match facts::window_rect(h) {
+                Some(r) => Some(WindowInfo {
+                    rect: clip_to_frame(to_frame(r), [fw as i32, fh as i32]),
+                    title: w.as_ref().map(|w| w.title.clone()).unwrap_or_default(),
+                    process: w.as_ref().map(|w| w.process.clone()).unwrap_or_default(),
+                }),
+                None => w,
+            },
+            (_, w) => w,
+        };
         let hwnd = snap.win.as_ref().map_or(0, |w| w.hwnd);
-        let area = snap.win.as_ref().map_or(steptext::Area::None, |w| {
-            classify_shell(
-                &w.class,
-                &w.point_class,
-                &w.process,
-                snap.uia.as_ref().map_or(&[][..], |u| &u.classes[..]),
-                snap.uia.as_ref().map_or("", |u| &u.automation_id),
-            )
-        });
+        let area = shell_area;
         let caption = snap
             .uia
             .as_ref()
@@ -1546,7 +1883,7 @@ pub async fn dev_guide_start(
         (None, Some(r)) => FrameSource::Synthetic(Rect::new(r[0], r[1], r[2] as u32, r[3] as u32)),
         _ => FrameSource::Synthetic(Rect::new(0, 0, 640, 360)),
     };
-    start_with(app, src, true, false, false).await
+    start_with(app, src, true, false, false, AreaMode::Active).await
 }
 
 #[cfg(debug_assertions)]
@@ -2091,6 +2428,40 @@ mod facts {
         String::from_utf16_lossy(&b[..n.max(0) as usize])
     }
 
+    /// The top window under a point (0 when none).
+    pub fn root_at(x: i32, y: i32) -> isize {
+        // SAFETY: plain window queries.
+        unsafe {
+            let h = WindowFromPoint(POINT { x, y });
+            if h.0.is_null() {
+                return 0;
+            }
+            let root = GetAncestor(h, GA_ROOT);
+            (if root.0.is_null() { h } else { root }).0 as isize
+        }
+    }
+
+    /// The rectangle of a window (desktop pixels), `None` when it is gone.
+    pub fn window_rect(h: isize) -> Option<[i32; 4]> {
+        let mut r = RECT::default();
+        // SAFETY: a window handle and a valid out pointer.
+        unsafe { GetWindowRect(HWND(h as *mut _), &mut r).ok()? };
+        Some([r.left, r.top, r.right - r.left, r.bottom - r.top])
+    }
+
+    pub fn window_title(h: isize) -> String {
+        let mut buf = [0u16; 256];
+        // SAFETY: a window handle and a buffer of the length it says.
+        let n = unsafe { GetWindowTextW(HWND(h as *mut _), &mut buf) };
+        String::from_utf16_lossy(&buf[..n.max(0) as usize])
+    }
+
+    pub fn is_window(h: isize) -> bool {
+        use windows::Win32::UI::WindowsAndMessaging::IsWindow;
+        // SAFETY: a plain query.
+        unsafe { IsWindow(Some(HWND(h as *mut _))).as_bool() }
+    }
+
     pub fn window_at(x: i32, y: i32) -> Option<WinFacts> {
         // SAFETY: plain window queries with valid out pointers.
         unsafe {
@@ -2525,6 +2896,18 @@ mod facts {
     pub fn foreground_root() -> isize {
         0
     }
+    pub fn root_at(_: i32, _: i32) -> isize {
+        0
+    }
+    pub fn window_rect(_: isize) -> Option<[i32; 4]> {
+        None
+    }
+    pub fn window_title(_: isize) -> String {
+        String::new()
+    }
+    pub fn is_window(_: isize) -> bool {
+        false
+    }
     pub fn layout_handle(_: &str) -> isize {
         0
     }
@@ -2776,8 +3159,21 @@ button,input,select{font:inherit} [role=tab]{padding:4px 10px;border:1px solid #
         })
     }
 
-    async fn run_events(app: &AppHandle, hwnd: isize, events: Vec<Inject>) -> CmdResult<String> {
-        let id = start_with(app.clone(), FrameSource::Window(hwnd), true, false, false).await?;
+    async fn run_events(
+        app: &AppHandle,
+        hwnd: isize,
+        events: Vec<Inject>,
+        area: AreaMode,
+    ) -> CmdResult<String> {
+        let id = start_with(
+            app.clone(),
+            FrameSource::Window(hwnd),
+            true,
+            false,
+            false,
+            area,
+        )
+        .await?;
         // The live pictures need a moment to start.
         pause(900).await;
         dev_guide_inject(app.clone(), events).await?;
@@ -2889,7 +3285,17 @@ button,input,select{font:inherit} [role=tab]{padding:4px 10px;border:1px solid #
             (h, t, None)
         };
         let ev = |ms| Inject::Wait { ms };
-        let events: Vec<Inject> = if kind == "web" {
+        let events: Vec<Inject> = if kind == "region" {
+            vec![
+                click(&targets, "save", Button::Left),
+                ev(700),
+                // outside the region: ignored
+                click(&targets, "list", Button::Left),
+                ev(700),
+                click(&targets, "save", Button::Right),
+                ev(700),
+            ]
+        } else if kind == "web" {
             let mut v = vec![
                 click(&targets, "save", Button::Left),
                 ev(700),
@@ -2962,7 +3368,14 @@ button,input,select{font:inherit} [role=tab]{padding:4px 10px;border:1px solid #
             ]);
             v
         };
-        let id = run_events(&app, hwnd, events).await?;
+        // "region": a guide of one area (around the Save button of the test window); a click outside it is ignored.
+        let area = if kind == "region" {
+            let (sx, sy) = targets["save"];
+            AreaMode::Region(Rect::new(sx - 90, sy - 50, 180, 100))
+        } else {
+            AreaMode::Active
+        };
+        let id = run_events(&app, hwnd, events, area).await?;
         let mut out = serde_json::Value::Null;
         if kind == "native" {
             // Pause: nothing is recorded; then it goes on.
@@ -2979,6 +3392,9 @@ button,input,select{font:inherit} [role=tab]{padding:4px 10px;border:1px solid #
             let paused_steps = guides::read_steps(&id).len();
             guide_resume(app.clone());
             out = serde_json::json!({ "stepsBeforePause": steps_before, "stepsWhilePaused": paused_steps });
+        }
+        if kind == "region" {
+            out = serde_json::json!({ "ignored": app.state::<GuideRec>().state().ignored, "area": app.state::<GuideRec>().state().area });
         }
         let _ = guide_stop(app.clone()).await?;
         let mut v = summary(&id);

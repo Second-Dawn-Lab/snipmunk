@@ -1,6 +1,6 @@
 import { Extension } from "@tiptap/core";
 import Highlight from "@tiptap/extension-highlight";
-import Image from "@tiptap/extension-image";
+import { GuideImage, GuideTable } from "./ImageNode";
 import { TableKit } from "@tiptap/extension-table";
 import TextAlign from "@tiptap/extension-text-align";
 import { TextStyleKit } from "@tiptap/extension-text-style";
@@ -110,12 +110,6 @@ export async function storeImage(f: Blob): Promise<{ name: string; width: number
   return ipc.docAddImage(await fileToBase64(f));
 }
 
-const GuideImage = Image.extend({
-  addAttributes() {
-    return { ...this.parent?.(), file: { default: null, parseHTML: (el: HTMLElement) => el.getAttribute("data-file") ?? null, renderHTML: (a: Record<string, unknown>) => (a.file ? { "data-file": a.file } : {}) } };
-  },
-});
-
 /** ctrl+Enter style helpers are not needed; Enter ends the edit of a single-line step text. */
 const SingleLine = Extension.create({
   name: "singleLine",
@@ -160,7 +154,8 @@ export function RichText(props: RichProps) {
       TextStyleKit.configure({ backgroundColor: false }),
       Highlight.configure({ multicolor: true }),
       TextAlign.configure({ types: ["heading", "paragraph"], alignments: ["start", "center", "end"], defaultAlignment: "start" }),
-      TableKit.configure({ table: { resizable: false } }),
+      TableKit.configure({ table: false }),
+      GuideTable.configure({ resizable: true }),
       GuideImage.configure({ allowBase64: false, inline: false }),
       Placeholder.configure({ placeholder: props.placeholder ?? "" }),
     ];
@@ -186,7 +181,7 @@ export function RichText(props: RichProps) {
             for (const f of images) {
               try {
                 const img = await storeImage(f);
-                editorRef.current?.chain().focus().setImage({ src: guideImageUrl(img.name), alt: "", ...( { file: img.name } as object) }).run();
+                editorRef.current?.chain().focus().setImage({ src: guideImageUrl(img.name), alt: "", ...({ file: img.name, nw: img.width, nh: img.height } as object) }).run();
               } catch (e) {
                 notify(String((e as { message?: string })?.message ?? e), true);
               }
@@ -217,7 +212,7 @@ export function RichText(props: RichProps) {
         void (async () => {
           for (const f of files) {
             const img = await storeImage(f).catch(() => null);
-            if (img) editorRef.current?.chain().focus().setImage({ src: guideImageUrl(img.name), alt: "", ...( { file: img.name } as object) }).run();
+            if (img) editorRef.current?.chain().focus().setImage({ src: guideImageUrl(img.name), alt: "", ...({ file: img.name, nw: img.width, nh: img.height } as object) }).run();
           }
         })();
         return true;
@@ -265,7 +260,7 @@ export function RichText(props: RichProps) {
   useEffect(() => () => window.clearTimeout(timer.current), []);
 
   return (
-    <div className={`rich${focused ? " rich--focus" : ""}`} ref={rootRef}>
+    <div className={`rich${mode === "full" ? " rich--box" : ""}${focused ? " rich--focus" : ""}`} ref={rootRef}>
       {editor && mode === "full" && focused && <Toolbar editor={editor} />}
       <EditorContent editor={editor} />
     </div>
@@ -290,6 +285,8 @@ function Toolbar({ editor }: { editor: Editor }) {
       color: (e.getAttributes("textStyle").color as string | undefined) ?? "",
       align: (e.getAttributes("paragraph").textAlign ?? e.getAttributes("heading").textAlign ?? "start") as string,
       table: e.isActive("table"),
+      tableHeader: e.isActive("tableHeader"),
+      tableAlign: ((e.getAttributes("table").align as string | undefined) ?? "start"),
     }),
   });
   const fonts = useMemo(installedFonts, []);
@@ -349,6 +346,25 @@ function Toolbar({ editor }: { editor: Editor }) {
       {btn("🔗", t("rich.link"), s.link, setLink)}
       {btn("▦", t("rich.table"), s.table, () => chain().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run())}
       {btn("✕", t("rich.clear"), false, () => chain().unsetAllMarks().clearNodes().run())}
+      {s.table && (
+        <div className="rich__row" role="toolbar" aria-label={t("rich.table")}>
+          {btn("↥", t("rich.tableRowAbove"), false, () => chain().addRowBefore().run())}
+          {btn("↧", t("rich.tableRowBelow"), false, () => chain().addRowAfter().run())}
+          {btn("↤", t("rich.tableColLeft"), false, () => chain().addColumnBefore().run(), "rich__btn--dir")}
+          {btn("↦", t("rich.tableColRight"), false, () => chain().addColumnAfter().run(), "rich__btn--dir")}
+          <span className="rich__sep" />
+          {btn("−▭", t("rich.tableDelRow"), false, () => chain().deleteRow().run())}
+          {btn("−▯", t("rich.tableDelCol"), false, () => chain().deleteColumn().run())}
+          {btn("🗑", t("rich.tableDel"), false, () => chain().deleteTable().run())}
+          <span className="rich__sep" />
+          {btn("H", t("rich.tableHeader"), s.tableHeader, () => chain().toggleHeaderRow().run())}
+          {btn("⧉", t("rich.tableMerge"), false, () => chain().mergeOrSplit().run())}
+          <span className="rich__sep" />
+          {btn("⇤", t("rich.alignStart"), s.tableAlign === "start", () => chain().updateAttributes("table", { align: "start" }).run(), "rich__btn--dir")}
+          {btn("↔", t("rich.alignCenter"), s.tableAlign === "center", () => chain().updateAttributes("table", { align: "center" }).run())}
+          {btn("⇥", t("rich.alignEnd"), s.tableAlign === "end", () => chain().updateAttributes("table", { align: "end" }).run(), "rich__btn--dir")}
+        </div>
+      )}
     </div>
   );
 }

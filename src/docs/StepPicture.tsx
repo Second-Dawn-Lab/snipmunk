@@ -4,7 +4,7 @@ import type { GuideStep } from "../ipc";
 import { cropRect, markerColor, newId, viewRect, type Annotation, type AnnotationKind, type GuideDoc, type MarkerShape, type MarkerSize, type Rect, type Redaction, type StepBlock } from "./model";
 import { guideImageUrl } from "./urls";
 
-export type Tool = "none" | AnnotationKind | "blur" | "pixelate" | "black" | "crop" | "zoom" | "marker";
+export type Tool = "none" | AnnotationKind | "blur" | "pixelate" | "black" | "crop" | "zoom" | "expand" | "marker";
 
 const SIZES: Record<MarkerSize, number> = { small: 22, medium: 34, large: 52 };
 
@@ -136,6 +136,8 @@ export interface PictureProps {
   /** Edit mode: the tool and its colour; the change is reported as a partial block. */
   tool: Tool;
   color: string;
+  /** The stroke width of new marks. */
+  width: number;
   selected: string | null;
   onSelect: (id: string | null) => void;
   onChange: (change: Partial<StepBlock>) => void;
@@ -152,7 +154,8 @@ export const StepPicture = memo(function StepPicture(props: PictureProps) {
   const [problem, setProblem] = useState<string | null>(null);
   useEffect(() => setProblem(null), [step.image]);
   if (!step.image) return <div className="gstep__blank">{t("guide.blankStep")}</div>;
-  const view = viewRect(step, block, doc);
+  // While the area is being expanded the whole frame is shown, with the shown area on it.
+  const view: Rect = props.tool === "expand" ? [0, 0, step.imageSize[0], step.imageSize[1]] : viewRect(step, block, doc);
   const [vx, vy, vw, vh] = view;
   const [iw] = step.imageSize;
   const unit = Math.max(1, vw / 700);
@@ -164,19 +167,19 @@ export const StepPicture = memo(function StepPicture(props: PictureProps) {
   };
   const tool = props.tool;
   const down = (e: RPointerEvent) => {
-    if (tool === "none" || e.button !== 0) return;
+    if (tool === "none" || tool === "expand" || e.button !== 0) return;
     e.preventDefault();
     (e.currentTarget as Element).setPointerCapture(e.pointerId);
     const [x, y] = point(e);
     if (tool === "badge") {
       const n = (block.annotations ?? []).filter((a) => a.kind === "badge").length + 1;
-      props.onChange({ annotations: [...(block.annotations ?? []), { id: newId(), kind: "badge", x, y, color: props.color, width: 3, n }] });
+      props.onChange({ annotations: [...(block.annotations ?? []), { id: newId(), kind: "badge", x, y, color: props.color, width: props.width, n }] });
       return;
     }
     if (tool === "text" || tool === "callout") {
       const text = window.prompt(t("guide.annotationText"), "");
       if (!text) return;
-      props.onChange({ annotations: [...(block.annotations ?? []), { id: newId(), kind: tool, x, y, x2: x + 40 * unit, y2: y + 60 * unit, color: props.color, width: 3, text }] });
+      props.onChange({ annotations: [...(block.annotations ?? []), { id: newId(), kind: tool, x, y, x2: x + 40 * unit, y2: y + 60 * unit, color: props.color, width: props.width, text }] });
       return;
     }
     if (tool === "marker") {
@@ -203,14 +206,55 @@ export const StepPicture = memo(function StepPicture(props: PictureProps) {
     } else if (tool === "zoom") {
       if (big) props.onChange({ zoom: true, zoomRect: rect });
     } else if (tool === "pen") {
-      if (d.pts.length > 2) props.onChange({ annotations: [...(block.annotations ?? []), { id: newId(), kind: "pen", x: d.x, y: d.y, points: d.pts, color: props.color, width: 3 }] });
+      if (d.pts.length > 2) props.onChange({ annotations: [...(block.annotations ?? []), { id: newId(), kind: "pen", x: d.x, y: d.y, points: d.pts, color: props.color, width: props.width }] });
     } else if (big || Math.hypot(d.x2 - d.x, d.y2 - d.y) > 8) {
-      props.onChange({ annotations: [...(block.annotations ?? []), { id: newId(), kind: tool as AnnotationKind, x: d.x, y: d.y, x2: d.x2, y2: d.y2, color: props.color, width: 3 }] });
+      props.onChange({ annotations: [...(block.annotations ?? []), { id: newId(), kind: tool as AnnotationKind, x: d.x, y: d.y, x2: d.x2, y2: d.y2, color: props.color, width: props.width }] });
     }
   };
+  // Expand area: drag the edges or corners of the shown area on the whole frame (outwards or inwards).
+  const [exp, setExp] = useState<Rect | null>(null);
+  const startExpand = (e: RPointerEvent, mode: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const [iw2, ih2] = step.imageSize;
+    const r0: Rect = cropRect(step, block, doc);
+    const target = e.currentTarget as Element;
+    target.setPointerCapture(e.pointerId);
+    const [px, py] = point(e);
+    let last: Rect = r0;
+    const move = (ev: PointerEvent) => {
+      const b = box.current!.getBoundingClientRect();
+      const x = ((ev.clientX - b.left) / b.width) * iw2;
+      const y = ((ev.clientY - b.top) / b.height) * ih2;
+      let [rx, ry, rw, rh] = r0;
+      const right = rx + rw;
+      const bottom = ry + rh;
+      if (mode.includes("w")) {
+        rx = Math.max(0, Math.min(right - 40, rx + (x - px)));
+        rw = right - rx;
+      }
+      if (mode.includes("e")) rw = Math.max(40, Math.min(iw2 - rx, rw + (x - px)));
+      if (mode.includes("n")) {
+        ry = Math.max(0, Math.min(bottom - 40, ry + (y - py)));
+        rh = bottom - ry;
+      }
+      if (mode.includes("s")) rh = Math.max(40, Math.min(ih2 - ry, rh + (y - py)));
+      last = [Math.round(rx), Math.round(ry), Math.round(rw), Math.round(rh)];
+      setExp(last);
+    };
+    const up = () => {
+      target.removeEventListener("pointermove", move as EventListener);
+      target.removeEventListener("pointerup", up);
+      setExp(null);
+      props.onChange({ crop: last });
+    };
+    target.addEventListener("pointermove", move as EventListener);
+    target.addEventListener("pointerup", up);
+  };
+  const expandRect: Rect | null = tool === "expand" ? (exp ?? cropRect(step, block, doc)) : null;
   const live: Annotation | null =
     drag && !["blur", "pixelate", "black", "crop", "zoom", "marker", "text", "callout", "badge", "none"].includes(tool)
-      ? { id: "live", kind: tool as AnnotationKind, x: drag.x, y: drag.y, x2: drag.x2, y2: drag.y2, points: drag.pts, color: props.color, width: 3 }
+      ? { id: "live", kind: tool as AnnotationKind, x: drag.x, y: drag.y, x2: drag.x2, y2: drag.y2, points: drag.pts, color: props.color, width: props.width }
       : null;
   const liveBox = drag && ["blur", "pixelate", "black", "crop", "zoom"].includes(tool) ? drag : null;
   void cropRect;
@@ -228,6 +272,16 @@ export const StepPicture = memo(function StepPicture(props: PictureProps) {
           onError={() => fail(setProblem, step.image, "the picture could not be loaded")}
           style={{ width: `${(iw / vw) * 100}%`, left: `${-((vx) / vw) * 100}%`, top: `${-((vy) / vh) * 100}%` }}
         />
+      )}
+      {expandRect && (
+        <div
+          className="gpic__expand"
+          style={{ left: `${(expandRect[0] / iw) * 100}%`, top: `${(expandRect[1] / step.imageSize[1]) * 100}%`, width: `${(expandRect[2] / iw) * 100}%`, height: `${(expandRect[3] / step.imageSize[1]) * 100}%` }}
+        >
+          {["n", "s", "e", "w", "ne", "nw", "se", "sw"].map((m) => (
+            <span key={m} className={`gpic__eh gpic__eh--${m}`} onPointerDown={(e) => startExpand(e, m)} />
+          ))}
+        </div>
       )}
       {problem && (
         <div className="gpic__missing" role="img" aria-label={t("guide.pictureMissing")} title={import.meta.env.DEV ? problem : undefined}>

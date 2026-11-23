@@ -49,6 +49,8 @@ pub struct Capture {
     run: Mutex<Option<Run>>,
     /// The running selection is for a screen recording, not for a screenshot.
     recording: AtomicBool,
+    /// The recording overlay was opened to choose the window or region of a new guide.
+    guide_pick: AtomicBool,
     /// A capture is in progress (countdown, overlays, or saving).
     busy: AtomicBool,
     next_id: AtomicU64,
@@ -59,6 +61,7 @@ impl Capture {
         Self {
             run: Mutex::new(None),
             recording: AtomicBool::new(false),
+            guide_pick: AtomicBool::new(false),
             busy: AtomicBool::new(false),
             next_id: AtomicU64::new(1),
         }
@@ -181,6 +184,7 @@ fn finish_run(app: &AppHandle) {
     release_own_windows(app);
     let capture = app.state::<Capture>();
     capture.recording.store(false, Ordering::SeqCst);
+    capture.guide_pick.store(false, Ordering::SeqCst);
     *capture.run.lock().unwrap() = None;
     capture.busy.store(false, Ordering::SeqCst);
 }
@@ -212,6 +216,25 @@ pub fn trigger_recording(app: &AppHandle) {
     capture.recording.store(true, Ordering::SeqCst);
     let app = app.clone();
     std::thread::spawn(move || begin(&app));
+}
+
+/// Choose the window ("window") or the region ("region") of a new guide on the selection overlay. `false` while another capture runs.
+pub fn pick_guide_area(app: &AppHandle, word: &str) -> bool {
+    let capture = app.state::<Capture>();
+    if capture.busy.load(Ordering::SeqCst) {
+        return false;
+    }
+    let mode = if word == "window" {
+        "window"
+    } else {
+        "rectangle"
+    };
+    if crate::commands::patch_settings(app, serde_json::json!({ "recMode": mode })).is_err() {
+        return false;
+    }
+    capture.guide_pick.store(true, Ordering::SeqCst);
+    trigger_recording(app);
+    true
 }
 
 /// The delay (when set), then the grab and the overlays. A capture is marked busy already. Runs on its own thread.
@@ -650,6 +673,16 @@ pub fn capture_finish(app: AppHandle, args: FinishArgs) -> CmdResult<()> {
             .window_hwnd
             .filter(|_| args.mode == "window")
             .map(|h| h as usize);
+        if capture.guide_pick.swap(false, Ordering::SeqCst) {
+            // The window or region of a new guide: the guide starts now (after its countdown).
+            let target = match hwnd {
+                Some(h) => crate::steprec::AreaMode::Window(h as isize),
+                None => crate::steprec::AreaMode::Region(area),
+            };
+            capture.busy.store(false, Ordering::SeqCst);
+            crate::steprec::area_picked(&app, target);
+            return Ok(());
+        }
         std::thread::spawn(move || {
             crate::recording::begin_area(&app, area, hwnd);
             app.state::<Capture>().busy.store(false, Ordering::SeqCst);

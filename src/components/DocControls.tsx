@@ -1,11 +1,18 @@
-import { Button, Select } from "@seconddawn/ui";
+import { Select } from "@seconddawn/ui";
 import { useState } from "react";
 import { useT } from "../i18n";
 import type { Settings } from "../settings/defaults";
-import { AppIcon } from "./AppIcons";
+import { AppIcon, type AppIconName } from "./AppIcons";
+import { MenuItem } from "./MenuItem";
 import { Pop } from "./Pop";
 
 const COUNTDOWNS = [0, 3, 5, 10] as const;
+const AREAS: [Settings["docArea"], AppIconName][] = [
+  ["active", "window"],
+  ["screen", "fullscreen"],
+  ["window", "select"],
+  ["region", "rectangle"],
+];
 const SHAPES = ["circle", "ring", "arrow", "hand", "box"] as const;
 const SIZES = ["small", "medium", "large"] as const;
 
@@ -13,16 +20,45 @@ const SIZES = ["small", "medium", "large"] as const;
  * The top bar in Documents mode: "New guide" (the start shortcut is in its tip), the countdown (shared with recording) and a quick
  * menu with the options of the step recorder (the same ones as Settings → Documents).
  */
-export function DocControls(props: { settings: Settings; onPatch: (change: Partial<Settings>) => void; onNew: () => void }) {
+export function DocControls(props: { settings: Settings; onPatch: (change: Partial<Settings>) => void; onNew: (area?: string) => void }) {
   const { t } = useT();
   const { settings, onPatch } = props;
   const [open, setOpen] = useState(false);
+  const [areaOpen, setAreaOpen] = useState(false);
   return (
     <>
-      <Button variant="primary" title={t("docs.newTip", { hotkey: settings.docStartHotkey })} onClick={props.onNew}>
-        <AppIcon name="documents" size={17} />
-        <span>{t("docs.new")}</span>
-      </Button>
+      <Pop
+        open={areaOpen}
+        onClose={() => setAreaOpen(false)}
+        kind="menu"
+        label={t("guide.area")}
+        trigger={
+          <span className="splitbtn splitbtn--doc">
+            <button type="button" className="splitbtn__main" title={t("docs.newTip", { hotkey: settings.docStartHotkey })} onClick={() => props.onNew()}>
+              <AppIcon name="documents" size={17} />
+              <span>{t("docs.new")}</span>
+            </button>
+            <button type="button" className="splitbtn__more" aria-haspopup="menu" aria-expanded={areaOpen} aria-label={t("guide.area")} title={t("guide.area")} onClick={() => setAreaOpen((o) => !o)}>
+              <AppIcon name="chevron" size={14} />
+            </button>
+          </span>
+        }
+      >
+        {AREAS.map(([a, icon]) => (
+          <MenuItem
+            key={a}
+            role="menuitemradio"
+            icon={icon}
+            label={t(`guide.area.${a}`)}
+            checked={settings.docArea === a}
+            onSelect={() => {
+              setAreaOpen(false);
+              onPatch({ docArea: a });
+              props.onNew(a);
+            }}
+          />
+        ))}
+      </Pop>
       <label className="delay" title={t("rec.countdown")}>
         <AppIcon name="clock" size={16} />
         <Select
@@ -51,9 +87,13 @@ export function DocControls(props: { settings: Settings; onPatch: (change: Parti
               onChange={(v) => onPatch({ docStepMode: v as Settings["docStepMode"] })}
               options={[
                 { value: "auto", label: t("settings.docModeAuto") },
-                { value: "manual", label: t("settings.docModeManual") },
+                { value: "manual", label: t("settings.docModeManualKey", { hotkey: settings.docStepHotkey }) },
               ]}
             />
+          </label>
+          <label className="recopts__row">
+            <span>{t("guide.area")}</span>
+            <Select label={t("guide.area")} value={settings.docArea} onChange={(v) => onPatch({ docArea: v as Settings["docArea"] })} options={AREAS.map(([a]) => ({ value: a, label: t(`guide.area.${a}`) }))} />
           </label>
           <label className="recopts__row">
             <span>{t("settings.docPicture")}</span>

@@ -190,6 +190,8 @@ export interface GuideStep {
   t: number;
   image: string;
   imageSize: [number, number];
+  /** The monitor the picture was taken from (x, y, width, height); the picture is the whole monitor while its size is the same. */
+  monitor?: [number, number, number, number];
   click: [number, number] | null;
   window: { rect: [number, number, number, number]; title: string; process: string } | null;
   zoom: [number, number, number, number] | null;
@@ -232,6 +234,12 @@ export interface GuideState {
   paused: boolean;
   steps: number;
   id: string;
+  /** "active", "screen", "window" or "region". */
+  area: string;
+  /** The title of the chosen window. */
+  target: string;
+  /** Clicks outside the area that were ignored. */
+  ignored: number;
 }
 
 /** An opened project file. */
@@ -409,7 +417,7 @@ export const ipc = {
   guideRecover: (id: string) => call<void>("guide_recover", { id }),
   guideText: (id: string) => call<string>("guide_text", { id }),
   guideBarFit: (width: number, height: number) => call<void>("guide_bar_fit", { width, height }),
-  guideStart: () => call<string>("guide_start"),
+  guideStart: (area?: string) => call<string>("guide_start", { area: area ?? null }),
   guidePause: () => call<void>("guide_pause"),
   guideResume: () => call<void>("guide_resume"),
   guideTakeStep: () => call<void>("guide_take_step"),
