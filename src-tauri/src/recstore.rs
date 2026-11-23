@@ -113,6 +113,30 @@ pub fn default_recordings_dir() -> PathBuf {
         .join("Snipmunk")
 }
 
+/// The default folder of guides: the Documents folder + `\Snipmunk`.
+pub fn default_guides_dir() -> PathBuf {
+    #[cfg(windows)]
+    let docs = {
+        use windows::Win32::System::Com::CoTaskMemFree;
+        use windows::Win32::UI::Shell::{
+            FOLDERID_Documents, SHGetKnownFolderPath, KF_FLAG_DEFAULT,
+        };
+        // SAFETY: the returned string is read once and freed with CoTaskMemFree as the API requires.
+        unsafe {
+            SHGetKnownFolderPath(&FOLDERID_Documents, KF_FLAG_DEFAULT, None)
+                .ok()
+                .and_then(|p| {
+                    let s = p.to_string().ok();
+                    CoTaskMemFree(Some(p.0 as *const _));
+                    s.map(PathBuf::from)
+                })
+        }
+    };
+    #[cfg(not(windows))]
+    let docs = std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Documents"));
+    docs.unwrap_or_else(std::env::temp_dir).join("Snipmunk")
+}
+
 /// The default folder of the automatically saved screenshots: the Pictures folder + `\Snipmunk`.
 pub fn default_pictures_dir() -> PathBuf {
     known_folder(false)

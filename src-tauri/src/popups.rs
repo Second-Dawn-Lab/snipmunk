@@ -29,7 +29,11 @@ fn ensure(app: &AppHandle, label: &str, size: (f64, f64)) -> tauri::Result<Webvi
         return Ok(w);
     }
     let window = WebviewWindowBuilder::new(app, label, WebviewUrl::default())
-        .title("Snipmunk")
+        .title(match label {
+            "toast" => "Snipmunk – Notice",
+            "countdown" => "Snipmunk – Countdown",
+            _ => "Snipmunk – Popup",
+        })
         .inner_size(size.0, size.1)
         .decorations(false)
         .transparent(true)

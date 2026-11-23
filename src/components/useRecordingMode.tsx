@@ -39,8 +39,11 @@ export function useRecordingMode(args: {
   setError: (message: string | null) => void;
   setNotice: (text: string | null) => void;
   errorText: (e: unknown) => string;
+  /** The open guide of Documents mode: Quit lists it when it is not saved, and "Save" saves it too. */
+  guide?: { dirty: boolean; title: string; save: () => Promise<boolean> };
 }) {
   const { rawSession, settings, recMode, setError, errorText } = args;
+  const guideInfo = args.guide;
   const { t } = useT();
   const [currentId, setCurrentId] = useState<string | null>(null);
   const [tabs, setTabs] = useState<OpenProject[]>([]);
@@ -712,6 +715,7 @@ export function useRecordingMode(args: {
                 void (async () => {
                   for (const p of dirtyTabs) if (!(await commit(p.id))) return;
                   if (currentUnsaved && !(await saveCurrent())) return;
+                  if (guideInfo?.dirty && !(await guideInfo.save())) return;
                   await ipc.quitApp();
                 })()
               }
@@ -727,6 +731,7 @@ export function useRecordingMode(args: {
           {dirtyTabs.map((p) => (
             <li key={p.id}>{t("proj.quitItemProject", { name: p.name })}</li>
           ))}
+          {guideInfo?.dirty && <li>{t("guide.quitItem", { name: guideInfo.title })}</li>}
           {quitScrolling && <li>{t("proj.quitItemScrolling")}</li>}
         </ul>
       </Dialog>

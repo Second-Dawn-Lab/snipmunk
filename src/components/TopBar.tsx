@@ -1,3 +1,4 @@
+import { DocControls } from "./DocControls";
 import { useExperimentalScroll } from "../experimental";
 import { IconButton, Select } from "@seconddawn/ui";
 import { useState } from "react";
@@ -70,6 +71,8 @@ export function TopBar(props: {
   const { settings, zoom, share } = props;
   const video = settings.captureKind === "video";
   const docs = settings.captureKind === "documents";
+  // Recording and Documents mode: only the ⋯ menu (Settings) on the right; the screenshot actions belong to Screenshots mode.
+  const limited = !!props.recording || docs;
   const off = !share.hasCapture || share.busy || !!props.recording;
   // Save, Copy and Share work for recordings too (they use the rendered video); Edit in Paint does not.
   const offShare = !share.hasCapture || share.busy;
@@ -102,7 +105,9 @@ export function TopBar(props: {
   return (
     <div className="topbar" role="toolbar" aria-label={t("app.name")}>
       <div className="topbar__group">
-        {docs ? null : video ? (
+        {docs && props.documents ? (
+          <DocControls settings={settings} onPatch={props.onPatch} onNew={props.documents.onNew} />
+        ) : video ? (
           <RecordControls settings={settings} onPatch={props.onPatch} onRecord={props.onRecord} />
         ) : (
           <>
@@ -163,6 +168,10 @@ export function TopBar(props: {
           </>
         )}
 
+
+      </div>
+
+      <div className="topbar__center">
         <div className="segmented" role="group" aria-label={t("kind.label")}>
           <button
             type="button"
@@ -195,12 +204,10 @@ export function TopBar(props: {
             <AppIcon name="documents" size={17} />
           </button>
         </div>
-
       </div>
 
-      {!docs && (
       <div className="topbar__group topbar__group--end">
-        {!props.recording && (
+        {!limited && (
         <button
           type="button"
           className="editbtn"
@@ -213,7 +220,7 @@ export function TopBar(props: {
         </button>
         )}
         {/* Recording mode: Export, Copy and Share are at the bottom right; Save, Copy, Share and Zoom here are for screenshots. */}
-        {!props.recording && (
+        {!limited && (
           <>
         <ActionButton icon="save" label={t("actions.save")} tip={soonTip ?? t("actions.saveTip")} disabled={offShare} onClick={share.onSave} />
         <ActionButton icon="copy" label={t("actions.copy")} tip={soonTip ?? t("actions.copyTip")} disabled={offShare} onClick={share.onCopy} />
@@ -227,7 +234,7 @@ export function TopBar(props: {
           </>
         )}
 
-        {!props.recording && (
+        {!limited && (
         <Pop
           open={zoomOpen}
           onClose={() => setZoomOpen(false)}
@@ -269,14 +276,14 @@ export function TopBar(props: {
             />
           }
         >
-          {!props.recording && (
+          {!limited && (
             <SubmenuItem label={t("menu.zoom")} icon="zoom">
               {zoomItems(() => setMoreOpen(false))}
             </SubmenuItem>
           )}
-          {!props.recording && <MenuItem label={t("menu.openFile")} icon="openfile" hint={key("Ctrl+O")} disabled={share.busy} onSelect={() => { setMoreOpen(false); share.onOpenFile(); }} />}
-          {!props.recording && <MenuItem label={t("menu.openFolder")} icon="window" onSelect={() => { setMoreOpen(false); share.onOpenFolder(); }} />}
-          {!props.recording && <MenuItem label={t("menu.print")} icon="print" hint={key("Ctrl+P")} disabled={off} onSelect={() => { setMoreOpen(false); share.onPrint(); }} />}
+          {!limited && <MenuItem label={t("menu.openFile")} icon="openfile" hint={key("Ctrl+O")} disabled={share.busy} onSelect={() => { setMoreOpen(false); share.onOpenFile(); }} />}
+          {!limited && <MenuItem label={t("menu.openFolder")} icon="window" onSelect={() => { setMoreOpen(false); share.onOpenFolder(); }} />}
+          {!limited && <MenuItem label={t("menu.print")} icon="print" hint={key("Ctrl+P")} disabled={off} onSelect={() => { setMoreOpen(false); share.onPrint(); }} />}
           <MenuItem
             label={t("menu.settings")}
             icon="settings"
@@ -287,7 +294,6 @@ export function TopBar(props: {
           />
         </Pop>
       </div>
-      )}
     </div>
   );
 }

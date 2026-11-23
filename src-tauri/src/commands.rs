@@ -239,6 +239,7 @@ pub fn default_folders() -> Value {
     serde_json::json!({
         "recordings": crate::recstore::default_recordings_dir().to_string_lossy(),
         "pictures": crate::recstore::default_pictures_dir().to_string_lossy(),
+        "guides": crate::recstore::default_guides_dir().to_string_lossy(),
     })
 }
 

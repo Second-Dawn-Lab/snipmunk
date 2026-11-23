@@ -296,7 +296,7 @@ pub fn open_settings_window(app: &AppHandle) {
             return;
         }
         let built = tauri::WebviewWindowBuilder::new(&app, "settings", settings_url(&app))
-            .title("Snipmunk Settings")
+            .title("Snipmunk – Settings")
             .inner_size(880.0, 640.0)
             .min_inner_size(700.0, 460.0)
             .decorations(false)

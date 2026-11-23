@@ -4,11 +4,11 @@ import type { Key } from "../locales/en";
 
 export type Tab = "general" | "screenshots" | "recording" | "documents" | "sessions" | "copy" | "ocr" | "about";
 
-export const TABS: { id: Tab; label: Key; icon: "settings" | "scan" | "clock" | "copy" | "text" | "info" | "play" | "documents" }[] = [
+export const TABS: { id: Tab; label: Key; icon: "settings" | "scan" | "clock" | "copy" | "text" | "info" | "play" | "doc" }[] = [
   { id: "general", label: "settings.general", icon: "settings" },
   { id: "screenshots", label: "settings.tab.screenshots", icon: "scan" },
   { id: "recording", label: "settings.tab.recording", icon: "play" },
-  { id: "documents", label: "settings.tab.documents", icon: "documents" },
+  { id: "documents", label: "settings.tab.documents", icon: "doc" },
   { id: "sessions", label: "settings.sessions", icon: "clock" },
   { id: "copy", label: "settings.tab.copy", icon: "copy" },
   { id: "ocr", label: "settings.tab.ocr", icon: "text" },
@@ -44,6 +44,12 @@ export const INDEX: SettingEntry[] = [
   { id: "docPicture", tab: "documents", title: "settings.docPicture", desc: "settings.docPictureDesc" },
   { id: "docZoom", tab: "documents", title: "settings.docZoom", desc: "settings.docZoomDesc" },
   { id: "docMarker", tab: "documents", title: "settings.docMarker", desc: "settings.docMarkerDesc" },
+  { id: "docMarkerRight", tab: "documents", title: "guide.markerRight" },
+  { id: "docMarkerShape", tab: "documents", title: "guide.markerShape" },
+  { id: "docMarkerSize", tab: "documents", title: "guide.markerSize" },
+  { id: "docBadge", tab: "documents", title: "guide.badge" },
+  { id: "docKeepFull", tab: "documents", title: "settings.docKeepFull", desc: "settings.docKeepFullDesc" },
+  { id: "docGuidesDir", tab: "documents", title: "settings.docGuidesDir", desc: "settings.docGuidesDirDesc" },
   { id: "docCountdown", tab: "documents", title: "settings.docCountdown", desc: "settings.docCountdownDesc" },
   { id: "autoCopy", tab: "screenshots", title: "settings.autoCopy", desc: "settings.autoCopyDesc" },
   { id: "autoSave", tab: "screenshots", title: "settings.autoSave", desc: "settings.autoSaveDesc" },

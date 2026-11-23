@@ -64,6 +64,102 @@ pub struct Meta {
     pub typed: String,
     /// The shortcut that was pressed, "Ctrl+S" (a shortcut step).
     pub keys: String,
+    /// A part of the Windows shell (taskbar, Start menu, system tray, desktop): the step says so instead of naming the app.
+    pub area: Area,
+    /// A standard caption button of a window (the name comes from the UI language, not from the element).
+    pub caption: Option<Caption>,
+    /// The title of the page or tab (Chrome, Edge, Electron, web view apps) for a click without an element name.
+    pub page: String,
+}
+
+/// A part of the Windows shell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Area {
+    #[default]
+    None,
+    Taskbar,
+    StartMenu,
+    Tray,
+    Desktop,
+}
+
+/// The four caption buttons.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Caption {
+    Minimize,
+    Maximize,
+    Restore,
+    Close,
+}
+
+/// The caption button an element is: by its automation id (the same in every Windows language), only for buttons.
+pub fn caption_of(control: &str, automation_id: &str, name: &str) -> Option<Caption> {
+    if control != "Button" {
+        return None;
+    }
+    match automation_id {
+        "Minimize" | "MinimizeButton" | "minimizeButton" => Some(Caption::Minimize),
+        "Maximize" | "MaximizeButton" | "maximizeButton" => Some(Caption::Maximize),
+        "Restore" | "RestoreButton" | "restoreButton" => Some(Caption::Restore),
+        "Close" | "CloseButton" | "closeButton" => Some(Caption::Close),
+        // Classic windows name their buttons in the language of Windows and give them no id.
+        _ => match name.trim().to_lowercase().as_str() {
+            "minimize" | "minimise" => Some(Caption::Minimize),
+            "maximize" | "maximise" => Some(Caption::Maximize),
+            "restore" | "restore down" => Some(Caption::Restore),
+            "close" => Some(Caption::Close),
+            _ => None,
+        },
+    }
+}
+
+/// The name of a taskbar button for people: "Snipping Tool - 1 running window pinned" and "File Explorer pinned" become the app name.
+/// The words around the name are in the language of Windows, so the name is cut at the first " - " (also "–", "—") and the known
+/// state words are dropped at the end.
+pub fn clean_taskbar_name(raw: &str) -> String {
+    let mut s = raw.trim().to_string();
+    for sep in [" - ", " – ", " — ", " | "] {
+        if let Some(i) = s.find(sep) {
+            s.truncate(i);
+        }
+    }
+    const STATE: &[&str] = &[
+        "pinned",
+        "running",
+        "angeheftet",
+        "epingle",
+        "épinglé",
+        "anclado",
+        "fissato",
+        "vastgemaakt",
+        "przypięty",
+        "sabitlenmiş",
+        "已固定",
+        "已釘選",
+        "已钉选",
+        "مثبت",
+        "پن شدہ",
+    ];
+    loop {
+        let t = s.trim_end();
+        let low = t.to_lowercase();
+        let hit = STATE
+            .iter()
+            .find(|w| low.ends_with(&w.to_lowercase()) && t.chars().count() > w.chars().count());
+        match hit {
+            Some(w) => {
+                let keep = t.chars().count() - w.chars().count();
+                s = t
+                    .chars()
+                    .take(keep)
+                    .collect::<String>()
+                    .trim_end()
+                    .to_string();
+            }
+            None => break,
+        }
+    }
+    clean_name(&s)
 }
 
 /// A name for people: trimmed, spaces collapsed, no trailing ":" "…" "...", at most 60 characters; "" for a raw id.
@@ -134,27 +230,45 @@ struct T {
     type_plain: &'static str,
     press: &'static str,
     in_app: &'static str,
+    in_taskbar: &'static str,
+    in_start: &'static str,
+    in_tray: &'static str,
+    on_desktop: &'static str,
+    click_page: &'static str,
+    cap_min: &'static str,
+    cap_max: &'static str,
+    cap_restore: &'static str,
+    cap_close: &'static str,
 }
 
 fn templates(lang: &str) -> T {
     match lang.split('-').next().unwrap_or("en") {
         "de" => T {
-            click: "Klicke auf {b0}",
-            click_here: "Klicke hier",
-            click_in: "Klicke in {b0}",
-            right: "Klicke mit rechts auf {b0}",
-            right_here: "Klicke hier mit rechts",
-            dbl: "Doppelklicke auf {b0}",
-            dbl_here: "Doppelklicke hier",
-            select: "Wähle {b0}",
-            tab: "Öffne den Tab {b0}",
-            check: "Aktiviere {b0}",
-            uncheck: "Deaktiviere {b0}",
-            field: "Klicke in das Feld {b0}",
-            type_in: "Gib „{p0}“ in {b1} ein",
-            type_plain: "Gib „{p0}“ ein",
-            press: "Drücke {b0}",
+            click: "Klicken Sie auf {b0}",
+            click_here: "Klicken Sie hier",
+            click_in: "Klicken Sie in {b0}",
+            right: "Klicken Sie mit der rechten Maustaste auf {b0}",
+            right_here: "Klicken Sie hier mit der rechten Maustaste",
+            dbl: "Doppelklicken Sie auf {b0}",
+            dbl_here: "Doppelklicken Sie hier",
+            select: "Wählen Sie {b0}",
+            tab: "Öffnen Sie den Tab {b0}",
+            check: "Aktivieren Sie {b0}",
+            uncheck: "Deaktivieren Sie {b0}",
+            field: "Klicken Sie in das Feld {b0}",
+            type_in: "Geben Sie „{p0}“ in {b1} ein",
+            type_plain: "Geben Sie „{p0}“ ein",
+            press: "Drücken Sie {b0}",
             in_app: " in {b0}",
+            in_taskbar: " in der Taskleiste",
+            in_start: " im Startmenü",
+            in_tray: " im Infobereich",
+            on_desktop: " auf dem Desktop",
+            click_page: "Klicken Sie in {b0} ({p1})",
+            cap_min: "Minimieren",
+            cap_max: "Maximieren",
+            cap_restore: "Wiederherstellen",
+            cap_close: "Schließen",
         },
         "es" => T {
             click: "Haz clic en {b0}",
@@ -173,6 +287,15 @@ fn templates(lang: &str) -> T {
             type_plain: "Escribe «{p0}»",
             press: "Pulsa {b0}",
             in_app: " en {b0}",
+            in_taskbar: " en la barra de tareas",
+            in_start: " en el menú Inicio",
+            in_tray: " en el área de notificaciones",
+            on_desktop: " en el escritorio",
+            click_page: "Haz clic en {b0} ({p1})",
+            cap_min: "Minimizar",
+            cap_max: "Maximizar",
+            cap_restore: "Restaurar",
+            cap_close: "Cerrar",
         },
         "fr" => T {
             click: "Cliquez sur {b0}",
@@ -191,6 +314,15 @@ fn templates(lang: &str) -> T {
             type_plain: "Saisissez « {p0} »",
             press: "Appuyez sur {b0}",
             in_app: " dans {b0}",
+            in_taskbar: " dans la barre des tâches",
+            in_start: " dans le menu Démarrer",
+            in_tray: " dans la zone de notification",
+            on_desktop: " sur le Bureau",
+            click_page: "Cliquez dans {b0} ({p1})",
+            cap_min: "Réduire",
+            cap_max: "Agrandir",
+            cap_restore: "Restaurer",
+            cap_close: "Fermer",
         },
         "it" => T {
             click: "Fai clic su {b0}",
@@ -209,6 +341,15 @@ fn templates(lang: &str) -> T {
             type_plain: "Digita \"{p0}\"",
             press: "Premi {b0}",
             in_app: " in {b0}",
+            in_taskbar: " nella barra delle applicazioni",
+            in_start: " nel menu Start",
+            in_tray: " nell’area di notifica",
+            on_desktop: " sul desktop",
+            click_page: "Fai clic in {b0} ({p1})",
+            cap_min: "Riduci a icona",
+            cap_max: "Ingrandisci",
+            cap_restore: "Ripristina",
+            cap_close: "Chiudi",
         },
         "nl" => T {
             click: "Klik op {b0}",
@@ -227,6 +368,15 @@ fn templates(lang: &str) -> T {
             type_plain: "Typ \"{p0}\"",
             press: "Druk op {b0}",
             in_app: " in {b0}",
+            in_taskbar: " in de taakbalk",
+            in_start: " in het menu Start",
+            in_tray: " in het systeemvak",
+            on_desktop: " op het bureaublad",
+            click_page: "Klik in {b0} ({p1})",
+            cap_min: "Minimaliseren",
+            cap_max: "Maximaliseren",
+            cap_restore: "Herstellen",
+            cap_close: "Sluiten",
         },
         "pl" => T {
             click: "Kliknij {b0}",
@@ -245,6 +395,15 @@ fn templates(lang: &str) -> T {
             type_plain: "Wpisz „{p0}”",
             press: "Naciśnij {b0}",
             in_app: " w {b0}",
+            in_taskbar: " na pasku zadań",
+            in_start: " w menu Start",
+            in_tray: " w obszarze powiadomień",
+            on_desktop: " na pulpicie",
+            click_page: "Kliknij w {b0} ({p1})",
+            cap_min: "Minimalizuj",
+            cap_max: "Maksymalizuj",
+            cap_restore: "Przywróć",
+            cap_close: "Zamknij",
         },
         "tr" => T {
             click: "{b0} öğesine tıklayın",
@@ -263,6 +422,15 @@ fn templates(lang: &str) -> T {
             type_plain: "“{p0}” yazın",
             press: "{b0} tuşlarına basın",
             in_app: " ({b0})",
+            in_taskbar: " (görev çubuğu)",
+            in_start: " (Başlat menüsü)",
+            in_tray: " (sistem tepsisi)",
+            on_desktop: " (masaüstü)",
+            click_page: "{b0} içinde tıklayın ({p1})",
+            cap_min: "Simge durumuna küçült",
+            cap_max: "Ekranı kapla",
+            cap_restore: "Önceki boyut",
+            cap_close: "Kapat",
         },
         "zh" => {
             if lang.contains("Hant") || lang.ends_with("TW") || lang.ends_with("HK") {
@@ -283,6 +451,15 @@ fn templates(lang: &str) -> T {
                     type_plain: "輸入「{p0}」",
                     press: "按 {b0}",
                     in_app: "（在 {b0} 中）",
+                    in_taskbar: "（在工作列中）",
+                    in_start: "（在「開始」功能表中）",
+                    in_tray: "（在系統匣中）",
+                    on_desktop: "（在桌面上）",
+                    click_page: "在 {b0} 中點選（{p1}）",
+                    cap_min: "最小化",
+                    cap_max: "最大化",
+                    cap_restore: "還原",
+                    cap_close: "關閉",
                 }
             } else {
                 T {
@@ -302,6 +479,15 @@ fn templates(lang: &str) -> T {
                     type_plain: "输入“{p0}”",
                     press: "按 {b0}",
                     in_app: "（在 {b0} 中）",
+                    in_taskbar: "（在任务栏中）",
+                    in_start: "（在“开始”菜单中）",
+                    in_tray: "（在系统托盘中）",
+                    on_desktop: "（在桌面上）",
+                    click_page: "在 {b0} 中点击（{p1}）",
+                    cap_min: "最小化",
+                    cap_max: "最大化",
+                    cap_restore: "还原",
+                    cap_close: "关闭",
                 }
             }
         }
@@ -322,6 +508,15 @@ fn templates(lang: &str) -> T {
             type_plain: "اكتب «{p0}»",
             press: "اضغط {b0}",
             in_app: " في {b0}",
+            in_taskbar: " في شريط المهام",
+            in_start: " في قائمة ابدأ",
+            in_tray: " في منطقة الإعلام",
+            on_desktop: " على سطح المكتب",
+            click_page: "انقر في {b0} ({p1})",
+            cap_min: "تصغير",
+            cap_max: "تكبير",
+            cap_restore: "استعادة",
+            cap_close: "إغلاق",
         },
         "ur" => T {
             click: "{b0} پر کلک کریں",
@@ -340,6 +535,15 @@ fn templates(lang: &str) -> T {
             type_plain: "«{p0}» لکھیں",
             press: "{b0} دبائیں",
             in_app: " میں {b0}",
+            in_taskbar: " ٹاسک بار میں",
+            in_start: " اسٹارٹ مینو میں",
+            in_tray: " سسٹم ٹرے میں",
+            on_desktop: " ڈیسک ٹاپ پر",
+            click_page: "{b0} میں کلک کریں ({p1})",
+            cap_min: "چھوٹا کریں",
+            cap_max: "بڑا کریں",
+            cap_restore: "بحال کریں",
+            cap_close: "بند کریں",
         },
         _ => T {
             click: "Click {b0}",
@@ -358,8 +562,73 @@ fn templates(lang: &str) -> T {
             type_plain: "Type '{p0}'",
             press: "Press {b0}",
             in_app: " in {b0}",
+            in_taskbar: " in the taskbar",
+            in_start: " in the Start menu",
+            in_tray: " in the system tray",
+            on_desktop: " on the desktop",
+            click_page: "Click in {b0} ({p1})",
+            cap_min: "Minimize",
+            cap_max: "Maximize",
+            cap_restore: "Restore",
+            cap_close: "Close",
         },
     }
+}
+
+/// The local name of a key in step texts, where one is standard (the recorder always writes the English names; the text is made
+/// in the language of the program). Languages without an entry keep the English names.
+fn key_names(lang: &str) -> &'static [(&'static str, &'static str)] {
+    match lang.split('-').next().unwrap_or("en") {
+        "de" => &[
+            ("Ctrl", "Strg"),
+            ("Shift", "Umschalt"),
+            ("Delete", "Entf"),
+            ("Enter", "Eingabe"),
+            ("Home", "Pos1"),
+            ("End", "Ende"),
+            ("Page Up", "Bild↑"),
+            ("Page Down", "Bild↓"),
+            ("Insert", "Einfg"),
+            ("Backspace", "Rück"),
+            ("Space", "Leertaste"),
+        ],
+        "fr" => &[
+            ("Shift", "Maj"),
+            ("Delete", "Suppr"),
+            ("Enter", "Entrée"),
+            ("Esc", "Échap"),
+            ("Backspace", "Retour arrière"),
+            ("Space", "Espace"),
+        ],
+        "es" => &[
+            ("Shift", "Mayús"),
+            ("Delete", "Supr"),
+            ("Enter", "Intro"),
+            ("Backspace", "Retroceso"),
+            ("Space", "Espacio"),
+        ],
+        "it" => &[
+            ("Shift", "Maiusc"),
+            ("Delete", "Canc"),
+            ("Enter", "Invio"),
+            ("Space", "Spazio"),
+        ],
+        _ => &[],
+    }
+}
+
+/// A shortcut such as "Ctrl+Shift+S" with the key names of the language.
+pub fn localize_keys(keys: &str, lang: &str) -> String {
+    let table = key_names(lang);
+    keys.split('+')
+        .map(|k| {
+            table
+                .iter()
+                .find(|(en, _)| *en == k)
+                .map_or(k, |(_, local)| *local)
+        })
+        .collect::<Vec<_>>()
+        .join("+")
 }
 
 /// Fill a template: `{b0}`/`{b1}` become bold parts, `{p0}` a plain one.
@@ -390,8 +659,22 @@ fn render(tpl: &str, args: &[&str]) -> Vec<Part> {
 /// The text of a step in the language `lang` ("en", "de-DE", "zh-Hans", ...).
 pub fn step_text(kind: Kind, m: &Meta, lang: &str) -> Vec<Part> {
     let t = templates(lang);
-    let name = clean_name(&m.name);
+    let mut name = match m.area {
+        Area::Taskbar => clean_taskbar_name(&m.name),
+        _ => clean_name(&m.name),
+    };
+    // A caption button is named in the language of the guide, whatever Windows or the app calls it.
+    if let Some(c) = m.caption {
+        name = match c {
+            Caption::Minimize => t.cap_min,
+            Caption::Maximize => t.cap_max,
+            Caption::Restore => t.cap_restore,
+            Caption::Close => t.cap_close,
+        }
+        .to_string();
+    }
     let window = clean_name(&m.window);
+    let page = clean_name(&m.page);
     let mut parts = match kind {
         Kind::Type => {
             let text = m.typed.as_str();
@@ -401,7 +684,7 @@ pub fn step_text(kind: Kind, m: &Meta, lang: &str) -> Vec<Part> {
                 render(t.type_in, &[text, &name])
             }
         }
-        Kind::Key => render(t.press, &[&m.keys]),
+        Kind::Key => render(t.press, &[&localize_keys(&m.keys, lang)]),
         Kind::RightClick => {
             if name.is_empty() {
                 render(t.right_here, &[])
@@ -420,6 +703,9 @@ pub fn step_text(kind: Kind, m: &Meta, lang: &str) -> Vec<Part> {
             if name.is_empty() {
                 if window.is_empty() {
                     render(t.click_here, &[])
+                } else if !page.is_empty() && page != window {
+                    // A web page whose elements have no names: the page (tab) title, then the app.
+                    render(t.click_page, &[&page, &window])
                 } else {
                     render(t.click_in, &[&window])
                 }
@@ -451,8 +737,26 @@ pub fn step_text(kind: Kind, m: &Meta, lang: &str) -> Vec<Part> {
             }
         }
     };
+    // The shell says where it is ("in the taskbar"); the app of the shell (File Explorer) is not named.
+    let suffix = match m.area {
+        Area::Taskbar => Some(t.in_taskbar),
+        Area::StartMenu => Some(t.in_start),
+        Area::Tray => Some(t.in_tray),
+        Area::Desktop => Some(t.on_desktop),
+        Area::None => None,
+    };
+    if let (Some(sfx), true) = (suffix, kind != Kind::Key && kind != Kind::Type) {
+        parts.push(Part::plain(sfx));
+        return parts;
+    }
     // The first step in a new window or app says where it happens.
-    if m.new_window && !window.is_empty() && kind != Kind::Key {
+    // (a click that named the page already said where it was)
+    let page_used = kind == Kind::Click
+        && name.is_empty()
+        && !window.is_empty()
+        && !page.is_empty()
+        && page != window;
+    if m.new_window && !window.is_empty() && kind != Kind::Key && !page_used {
         let already = parts.iter().any(|p| p.b && p.t == window);
         if !already {
             parts.extend(render(t.in_app, &[&window]));
@@ -531,6 +835,141 @@ mod tests {
     }
 
     #[test]
+    fn taskbar_buttons_are_named_by_the_app_and_the_step_says_where() {
+        assert_eq!(
+            clean_taskbar_name("Snipping Tool - 1 running window pinned"),
+            "Snipping Tool"
+        );
+        assert_eq!(
+            clean_taskbar_name("Google Chrome - 3 running windows"),
+            "Google Chrome"
+        );
+        assert_eq!(clean_taskbar_name("File Explorer pinned"), "File Explorer");
+        assert_eq!(
+            clean_taskbar_name("Snipping Tool – 1 laufendes Fenster angeheftet"),
+            "Snipping Tool"
+        );
+        assert_eq!(clean_taskbar_name("Notepad"), "Notepad");
+        let m = Meta {
+            control: "Button".into(),
+            name: "Snipping Tool - 1 running window pinned".into(),
+            window: "File Explorer".into(),
+            new_window: true,
+            area: Area::Taskbar,
+            ..Default::default()
+        };
+        let p = step_text(Kind::Click, &m, "en");
+        assert_eq!(plain(&p), "Click Snipping Tool in the taskbar");
+        assert_eq!(bold(&p), ["Snipping Tool"]);
+        assert_eq!(
+            plain(&step_text(Kind::Click, &m, "de")),
+            "Klicken Sie auf Snipping Tool in der Taskleiste"
+        );
+        let start = Meta {
+            area: Area::StartMenu,
+            name: "Settings".into(),
+            control: "Button".into(),
+            window: "Start".into(),
+            new_window: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            plain(&step_text(Kind::Click, &start, "en")),
+            "Click Settings in the Start menu"
+        );
+        assert_eq!(
+            plain(&step_text(Kind::Click, &start, "de")),
+            "Klicken Sie auf Settings im Startmenü"
+        );
+        let tray = Meta {
+            area: Area::Tray,
+            name: "Volume".into(),
+            control: "Button".into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            plain(&step_text(Kind::Click, &tray, "en")),
+            "Click Volume in the system tray"
+        );
+        let desk = Meta {
+            area: Area::Desktop,
+            name: "Recycle Bin".into(),
+            control: "ListItem".into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            plain(&step_text(Kind::DoubleClick, &desk, "en")),
+            "Double-click Recycle Bin on the desktop"
+        );
+        assert_eq!(
+            plain(&step_text(Kind::Click, &desk, "de")),
+            "Wählen Sie Recycle Bin auf dem Desktop"
+        );
+    }
+
+    #[test]
+    fn caption_buttons_use_the_words_of_the_guide_language() {
+        assert_eq!(
+            caption_of("Button", "Maximize", "Maximise"),
+            Some(Caption::Maximize)
+        );
+        assert_eq!(
+            caption_of("Button", "", "Minimise"),
+            Some(Caption::Minimize)
+        );
+        assert_eq!(caption_of("Button", "", "Schließen"), None);
+        assert_eq!(caption_of("Edit", "Close", ""), None);
+        let m = Meta {
+            control: "Button".into(),
+            name: "Maximise".into(),
+            window: "Snipping Tool".into(),
+            new_window: true,
+            caption: Some(Caption::Maximize),
+            ..Default::default()
+        };
+        assert_eq!(
+            plain(&step_text(Kind::Click, &m, "en")),
+            "Click Maximize in Snipping Tool"
+        );
+        assert_eq!(
+            plain(&step_text(Kind::Click, &m, "de")),
+            "Klicken Sie auf Maximieren in Snipping Tool"
+        );
+        let c = Meta {
+            caption: Some(Caption::Close),
+            ..m.clone()
+        };
+        assert_eq!(
+            plain(&step_text(Kind::Click, &c, "de")),
+            "Klicken Sie auf Schließen in Snipping Tool"
+        );
+    }
+
+    #[test]
+    fn a_web_page_without_element_names_falls_back_to_the_page_title() {
+        let m = Meta {
+            window: "Google Chrome".into(),
+            page: "Inbox (3) - Mail".into(),
+            ..Default::default()
+        };
+        let p = step_text(Kind::Click, &m, "en");
+        assert_eq!(plain(&p), "Click in Inbox (3) - Mail (Google Chrome)");
+        assert_eq!(bold(&p), ["Inbox (3) - Mail"]);
+        assert_eq!(
+            plain(&step_text(Kind::Click, &m, "de")),
+            "Klicken Sie in Inbox (3) - Mail (Google Chrome)"
+        );
+        let none = Meta {
+            window: "Google Chrome".into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            plain(&step_text(Kind::Click, &none, "en")),
+            "Click in Google Chrome"
+        );
+    }
+
+    #[test]
     fn the_first_step_in_a_window_says_where_and_a_missing_name_has_a_fallback() {
         let mut m = meta("Button", "Save");
         m.new_window = true;
@@ -557,23 +996,42 @@ mod tests {
         let de = |k, m: &Meta| plain(&step_text(k, m, "de-DE"));
         assert_eq!(
             de(Kind::Click, &meta("Button", "Speichern")),
-            "Klicke auf Speichern"
+            "Klicken Sie auf Speichern"
         );
         assert_eq!(
             de(Kind::DoubleClick, &meta("ListItem", "Bericht.docx")),
-            "Doppelklicke auf Bericht.docx"
+            "Doppelklicken Sie auf Bericht.docx"
         );
+        assert_eq!(
+            de(Kind::RightClick, &meta("ListItem", "Bericht.docx")),
+            "Klicken Sie mit der rechten Maustaste auf Bericht.docx"
+        );
+        let mut mi = meta("MenuItem", "Speichern unter…");
+        mi.menu_path = vec!["Datei".into()];
+        assert_eq!(de(Kind::Click, &mi), "Wählen Sie Datei › Speichern unter");
         let mut t = meta("Edit", "Stadt");
         t.typed = "Hamburg".into();
-        assert_eq!(de(Kind::Type, &t), "Gib „Hamburg“ in Stadt ein");
+        assert_eq!(de(Kind::Type, &t), "Geben Sie „Hamburg“ in Stadt ein");
         let mut m = meta("Button", "Speichern");
         m.new_window = true;
-        assert_eq!(de(Kind::Click, &m), "Klicke auf Speichern in Notepad");
+        assert_eq!(de(Kind::Click, &m), "Klicken Sie auf Speichern in Notepad");
         let k = Meta {
-            keys: "Strg+S".into(),
+            keys: "Ctrl+S".into(),
             ..Default::default()
         };
-        assert_eq!(de(Kind::Key, &k), "Drücke Strg+S");
+        assert_eq!(de(Kind::Key, &k), "Drücken Sie Strg+S");
+        // Key names: the local ones where they are standard, English elsewhere.
+        assert_eq!(
+            localize_keys("Ctrl+Shift+Delete", "de"),
+            "Strg+Umschalt+Entf"
+        );
+        assert_eq!(localize_keys("Alt+Tab", "de-DE"), "Alt+Tab");
+        assert_eq!(localize_keys("Ctrl+Page Down", "de"), "Strg+Bild↓");
+        assert_eq!(localize_keys("Shift+Delete", "fr"), "Maj+Suppr");
+        assert_eq!(localize_keys("Shift+Delete", "es"), "Mayús+Supr");
+        assert_eq!(localize_keys("Shift+Delete", "it"), "Maiusc+Canc");
+        assert_eq!(localize_keys("Shift+Delete", "nl"), "Shift+Delete");
+        assert_eq!(localize_keys("Ctrl+S", "tr"), "Ctrl+S");
     }
 
     #[test]

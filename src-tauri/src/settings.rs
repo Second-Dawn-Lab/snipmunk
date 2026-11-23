@@ -53,8 +53,19 @@ pub struct Settings {
     pub doc_step_picture: String,
     /// Show the zoom area around the click by default.
     pub doc_zoom_default: bool,
-    /// The colour of the click marker (#RRGGBB).
+    /// The colour of the click marker for a left (and middle) click (#RRGGBB), and for a right click.
     pub doc_marker_color: String,
+    pub doc_marker_right: String,
+    /// "circle" | "ring" | "arrow" | "hand" | "box"
+    pub doc_marker_shape: String,
+    /// "small" | "medium" | "large"
+    pub doc_marker_size: String,
+    /// The step number badge: "circle" | "square" | "none".
+    pub doc_badge_style: String,
+    /// Keep the whole screenshot in guide files (else a step picture is cropped to what it shows).
+    pub doc_keep_full: bool,
+    /// Where guides are saved by default ("" = Documents\Snipmunk).
+    pub doc_guides_dir: String,
     /// Show the magnifier loupe while selecting.
     pub show_magnifier: bool,
     // The last colors and sizes picked in the annotation tool popovers (used by the tools from Phase 5).
@@ -176,6 +187,12 @@ impl Default for Settings {
             doc_step_picture: "window".into(),
             doc_zoom_default: false,
             doc_marker_color: "#FF5A36".into(),
+            doc_marker_right: "#3B82F6".into(),
+            doc_marker_shape: "circle".into(),
+            doc_marker_size: "medium".into(),
+            doc_badge_style: "circle".into(),
+            doc_keep_full: false,
+            doc_guides_dir: String::new(),
             show_magnifier: true,
             last_pen_color: "#E53935".into(),
             last_pen_size: 4,
@@ -329,6 +346,24 @@ impl Settings {
             .is_err()
         {
             self.doc_start_hotkey = d.doc_start_hotkey.clone();
+        }
+        one_of(
+            &mut self.doc_marker_shape,
+            &["circle", "ring", "arrow", "hand", "box"],
+            &d.doc_marker_shape,
+        );
+        one_of(
+            &mut self.doc_marker_size,
+            &["small", "medium", "large"],
+            &d.doc_marker_size,
+        );
+        one_of(
+            &mut self.doc_badge_style,
+            &["circle", "square", "none"],
+            &d.doc_badge_style,
+        );
+        if !is_hex_color(&self.doc_marker_right) {
+            self.doc_marker_right = d.doc_marker_right.clone();
         }
         if !is_hex_color(&self.doc_marker_color) {
             self.doc_marker_color = d.doc_marker_color.clone();

@@ -468,6 +468,7 @@ fn prepare_screen(app: &AppHandle, area: Rect) {
         "recframe",
         tauri::WebviewUrl::App("index.html".into()),
     )
+    .title("Snipmunk – Recording frame")
     .decorations(false)
     .transparent(true)
     .shadow(false)
@@ -539,6 +540,7 @@ fn show_bar(app: &AppHandle, area: Rect) {
         "recbar",
         tauri::WebviewUrl::App("index.html".into()),
     )
+    .title("Snipmunk – Recording bar")
     .decorations(false)
     .transparent(true)
     .background_color(tauri::window::Color(0, 0, 0, 0))

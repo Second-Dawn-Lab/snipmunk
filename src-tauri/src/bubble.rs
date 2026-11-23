@@ -191,6 +191,7 @@ fn ensure_window(app: &AppHandle) {
         "webcambubble",
         tauri::WebviewUrl::App("index.html".into()),
     )
+    .title("Snipmunk – Webcam bubble")
     .decorations(false)
     .transparent(true)
     .background_color(tauri::window::Color(0, 0, 0, 0))

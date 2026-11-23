@@ -31,6 +31,7 @@ mod render;
 mod scrollshot;
 mod sessions;
 mod settings;
+mod snpd;
 mod startup;
 mod steprec;
 mod steptext;
@@ -127,6 +128,7 @@ pub fn run() {
             projects::cancel_quit,
             projects::restart_app,
             projects::take_pending_open,
+            projects::take_pending_guide,
             projects::current_recording,
             projects::discard_current_recording,
             package::project_info,
@@ -155,6 +157,8 @@ pub fn run() {
             export::open_file,
             export::pick_project_save,
             export::pick_project_open,
+            export::pick_guide_save,
+            export::pick_guide_open,
             export::session_images_folder,
             export::share_supported,
             export::pictures_folder,
@@ -172,6 +176,7 @@ pub fn run() {
             ocr::open_os_settings,
             gallery::debug_seed_session,
             steprec::guide_start,
+            steprec::guide_record_more,
             steprec::guide_pause,
             steprec::guide_resume,
             steprec::guide_take_step,
@@ -183,7 +188,20 @@ pub fn run() {
             steprec::dev_guide_inject,
             steprec::dev_guide_hook_test,
             steprec::dev_guide_scenario,
+            steprec::dev_uia_probe,
             steprec::dev_guide_bar,
+            snpd::doc_state,
+            snpd::doc_read,
+            snpd::doc_write,
+            snpd::doc_close,
+            snpd::doc_new,
+            snpd::doc_open,
+            snpd::doc_save,
+            snpd::doc_recent,
+            snpd::doc_recent_remove,
+            snpd::doc_add_image,
+            snpd::doc_add_step_image,
+            snpd::doc_add_blank_step,
             guides::guides_list,
             guides::guide_get,
             guides::guide_steps,

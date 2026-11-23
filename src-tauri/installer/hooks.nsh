@@ -12,6 +12,14 @@
   WriteRegStr SHCTX "Software\Classes\Snipmunk.RecordingProject\shell" "" "open"
   WriteRegStr SHCTX "Software\Classes\Snipmunk.RecordingProject\shell\open" "" "Open with Snipmunk"
   WriteRegStr SHCTX "Software\Classes\Snipmunk.RecordingProject\shell\open\command" "" '"$INSTDIR\${MAINBINARYNAME}.exe" "%1"'
+  ; The guide files (.snpd): the app icon with a document badge, installed as snpd.ico.
+  WriteRegStr SHCTX "Software\Classes\.snpd" "" "Snipmunk.GuideDocument"
+  WriteRegStr SHCTX "Software\Classes\.snpd" "Content Type" "application/x-snipmunk-document"
+  WriteRegStr SHCTX "Software\Classes\Snipmunk.GuideDocument" "" "Snipmunk guide"
+  WriteRegStr SHCTX "Software\Classes\Snipmunk.GuideDocument\DefaultIcon" "" "$INSTDIR\snpd.ico"
+  WriteRegStr SHCTX "Software\Classes\Snipmunk.GuideDocument\shell" "" "open"
+  WriteRegStr SHCTX "Software\Classes\Snipmunk.GuideDocument\shell\open" "" "Open with Snipmunk"
+  WriteRegStr SHCTX "Software\Classes\Snipmunk.GuideDocument\shell\open\command" "" '"$INSTDIR\${MAINBINARYNAME}.exe" "%1"'
   System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'
 !macroend
 
@@ -22,6 +30,11 @@
   ReadRegStr $0 SHCTX "Software\Classes\.snpr" ""
   ${If} $0 == "Snipmunk.RecordingProject"
     DeleteRegKey SHCTX "Software\Classes\.snpr"
+  ${EndIf}
+  DeleteRegKey SHCTX "Software\Classes\Snipmunk.GuideDocument"
+  ReadRegStr $0 SHCTX "Software\Classes\.snpd" ""
+  ${If} $0 == "Snipmunk.GuideDocument"
+    DeleteRegKey SHCTX "Software\Classes\.snpd"
   ${EndIf}
   System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'
   ; Not when the uninstaller runs as part of an update, and not in silent mode.

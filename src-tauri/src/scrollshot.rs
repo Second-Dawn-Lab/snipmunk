@@ -326,6 +326,10 @@ fn overlay_window(
 ) {
     let built =
         tauri::WebviewWindowBuilder::new(app, label, tauri::WebviewUrl::App("index.html".into()))
+            .title(match label {
+                "scrollpill" => "Snipmunk – Scrolling pill",
+                _ => "Snipmunk – Scrolling frame",
+            })
             .decorations(false)
             .transparent(true)
             .background_color(tauri::window::Color(0, 0, 0, 0))

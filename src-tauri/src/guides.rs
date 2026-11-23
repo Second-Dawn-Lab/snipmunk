@@ -115,6 +115,10 @@ fn io(e: impl std::fmt::Display) -> CmdError {
 }
 
 pub fn dir_of(id: &str) -> PathBuf {
+    // The open guide ("current") lives in the working folder in temp; the old 7.5-A folders in the app data are not used any more.
+    if id == "current" && std::env::var_os("SNIPMUNK_GUIDES_DIR").is_none() {
+        return crate::projects::temp_base().join("guide-current");
+    }
     root().join(sanitize(id))
 }
 
@@ -137,7 +141,14 @@ pub fn now_ms() -> u64 {
 /// A new guide folder with its `guide.json` (state "recording").
 pub fn create(title: &str, settings: serde_json::Value) -> CmdResult<GuideInfo> {
     let created = now_ms();
-    let mut id = format!("g{created:x}");
+    // One guide is open at a time: its working folder is "current" (a caller has asked about unsaved changes first). The tests
+    // (SNIPMUNK_GUIDES_DIR) make several.
+    let mut id = if std::env::var_os("SNIPMUNK_GUIDES_DIR").is_none() {
+        let _ = std::fs::remove_dir_all(dir_of("current"));
+        "current".to_string()
+    } else {
+        format!("g{created:x}")
+    };
     while dir_of(&id).exists() {
         id.push('x');
     }
@@ -221,6 +232,15 @@ pub fn read_steps(id: &str) -> Vec<Step> {
     }
     steps.sort_by_key(|s| s.n);
     steps
+}
+
+/// Set the state of a guide ("recording" while steps are recorded, "done" otherwise).
+pub fn set_state(id: &str, state: &str) -> CmdResult<()> {
+    if let Some(mut info) = read_info(id) {
+        info.state = state.into();
+        write_info(&info)?;
+    }
+    Ok(())
 }
 
 pub fn finalize(id: &str) -> CmdResult<()> {

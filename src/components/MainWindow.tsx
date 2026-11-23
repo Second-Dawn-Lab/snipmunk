@@ -26,7 +26,8 @@ import { ipc, type Capture, type CmdError, type Group, type Session } from "../i
 import { hasRecordingGroup, mergeGroupOrder } from "../recordingGroups";
 import { SearchIndex } from "../search";
 import { stageAll } from "../share/exporter";
-import { DocumentsView } from "./DocumentsView";
+import { DocumentsMode } from "../docs/DocumentsMode";
+import { useGuide } from "../docs/useGuide";
 import { SaveDialog } from "./SaveDialog";
 import { Toasts, useToasts, type ToastAction } from "./Toasts";
 import { SearchResults, type SearchHit } from "./SearchResults";
@@ -88,13 +89,11 @@ export function MainWindow() {
   // independent: no screenshot appears among the recordings and no recording among the screenshots.
   const recMode = settings.captureKind === "video";
   const docMode = settings.captureKind === "documents";
-  // A guide that was just stopped opens in the list of guides.
-  const [guideToOpen, setGuideToOpen] = useState<string | null>(null);
+  // The open guide (one at a time); a guide that was just recorded is shown in Documents mode.
+  const guide = useGuide(settings);
   useEffect(() => {
     const p = ipc.onGuideFinished((id) => {
-      if (!id) return;
-      void patch({ captureKind: "documents" });
-      setGuideToOpen(id);
+      if (id) void patch({ captureKind: "documents" });
     });
     return () => void p.then((fn) => fn());
   }, []);
@@ -132,7 +131,7 @@ export function MainWindow() {
     [pushToast],
   );
   // The recording mode shows the current recording or one opened project (see useRecordingMode.tsx).
-  const rec = useRecordingMode({ rawSession, settings, recMode, setError, setNotice, errorText: messageOf });
+  const rec = useRecordingMode({ rawSession, settings, recMode, setError, setNotice, errorText: messageOf, guide: guide.quitInfo });
   const [query, setQuery] = useState("");
   const [applied, setApplied] = useState("");
   const [scope, setScope] = useState<"group" | "all">("group");
@@ -793,7 +792,7 @@ export function MainWindow() {
         onCapture={(mode) => void ipc.startCapture(mode).catch((e) => setError(messageOf(e)))}
         zoom={zoom}
         recording={recMode}
-        documents={{ onNew: () => void ipc.guideStart().catch((e) => setError(messageOf(e))), hotkey: settings.docStartHotkey }}
+        documents={{ onNew: guide.newGuide, hotkey: settings.docStartHotkey }}
         onRecord={(area) => rec.startRecording(area)}
         share={{
           hasCapture: capture !== null,
@@ -831,13 +830,15 @@ export function MainWindow() {
 
       {docMode ? (
         <main className="panels panels--single">
-          <DocumentsView
+          <DocumentsMode
+            guide={guide}
             settings={settings}
-            openId={guideToOpen}
-            onOpened={() => setGuideToOpen(null)}
-            hotkey={settings.docStartHotkey}
-            onNew={() => void ipc.guideStart().catch((e) => setError(messageOf(e)))}
+            session={rawSession}
+            captures={rawSession ? rawSession.groups.filter((g) => g.kind !== "recording").flatMap((g) => g.captures) : []}
+            onError={(m) => setError(m)}
           />
+          {rec.dialogs}
+          {guide.dialogs}
         </main>
       ) : (
       <main className={`panels${recMode ? " panels--single" : ""}`}>
@@ -947,6 +948,7 @@ export function MainWindow() {
           />}
         </div>
         {rec.dialogs}
+        {guide.dialogs}
         {dropGroup && (
           <div className={`dropoverlay${dropGroup.color ? ` gc-${dropGroup.color}` : ""}`} aria-hidden="true">
             <div className="dropoverlay__msg">

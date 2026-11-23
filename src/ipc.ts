@@ -194,7 +194,37 @@ export interface GuideStep {
   window: { rect: [number, number, number, number]; title: string; process: string } | null;
   zoom: [number, number, number, number] | null;
   text: { t: string; b?: boolean }[];
+  element?: { name: string; controlType: string; rect: [number, number, number, number] } | null;
+  typed?: string | null;
+  keys?: string | null;
   deleted: boolean;
+}
+
+/** What `doc_read` gives: the working copy of the open guide. */
+export interface DocAll {
+  info: { id: string; title: string; created: number; state: string } | null;
+  document: Record<string, unknown> | null;
+  steps: GuideStep[];
+  savedPath: string | null;
+  dirty: boolean;
+}
+
+export interface DocState {
+  open: boolean;
+  title?: string;
+  state?: string;
+  steps?: number;
+  savedPath?: string | null;
+  dirty?: boolean;
+}
+
+export interface DocRecent {
+  path: string;
+  name: string;
+  openedAt: number;
+  steps: number;
+  exists: boolean;
+  thumbnail: string | null;
 }
 
 export interface GuideState {
@@ -310,7 +340,7 @@ export const ipc = {
   recordingState: () => call<RecState>("recording_state"),
   onRecordingState: (cb: (s: RecState) => void) => on<RecState>("recording-state", cb),
   recordingsInfo: () => call<{ folder: string; toMove: number }>("recordings_info"),
-  defaultFolders: () => call<{ recordings: string; pictures: string }>("default_folders"),
+  defaultFolders: () => call<{ recordings: string; pictures: string; guides: string }>("default_folders"),
   refreshRecordings: () => call<Session>("refresh_recordings"),
   moveRecordings: () => call<number>("move_recordings"),
   onRecordingsMove: (cb: (p: { done: number; total: number }) => void) => on<{ done: number; total: number }>("recordings-move", cb),
@@ -352,6 +382,23 @@ export const ipc = {
   onCaptureAdded: (cb: (a: { captureId: string; groupId: string }) => void) =>
     on<{ captureId: string; groupId: string }>("capture-added", cb),
   onCaptureError: (cb: (message: string) => void) => on<string>("capture-error", cb),
+  docState: () => call<DocState>("doc_state"),
+  docRead: () => call<DocAll>("doc_read"),
+  docWrite: (document: unknown) => call<void>("doc_write", { document }),
+  docClose: () => call<void>("doc_close"),
+  docNew: (title?: string) => call<DocAll>("doc_new", { title: title ?? null }),
+  docOpen: (path: string) => call<DocAll>("doc_open", { path }),
+  docSave: (path: string | null, asNew: boolean, document: unknown) => call<{ path: string; how: string; ms: number }>("doc_save", { path, asNew, document }),
+  docRecent: () => call<DocRecent[]>("doc_recent"),
+  docRecentRemove: (path: string) => call<void>("doc_recent_remove", { path }),
+  docAddImage: (base64Data: string) => call<{ name: string; width: number; height: number }>("doc_add_image", { base64Data }),
+  docAddBlankStep: () => call<GuideStep>("doc_add_blank_step"),
+  docAddStepImage: (base64Data: string) => call<GuideStep>("doc_add_step_image", { base64Data }),
+  guideRecordMore: () => call<string>("guide_record_more"),
+  pickGuideOpen: (start: string | null) => call<string | null>("pick_guide_open", { start }),
+  pickGuideSave: (start: string | null, name: string) => call<string | null>("pick_guide_save", { start, name }),
+  takePendingGuide: () => call<string | null>("take_pending_guide"),
+  onOpenGuide: (cb: (path: string) => void) => on<string>("open-guide", cb),
   guidesList: () => call<GuideSummary[]>("guides_list"),
   guideGet: (id: string) => call<{ id: string; title: string } | null>("guide_get", { id }),
   guideSteps: (id: string) => call<GuideStep[]>("guide_steps", { id }),

@@ -96,7 +96,7 @@ fn stored() -> SimpleFileOptions {
         .large_file(true)
 }
 
-fn tail_path(path: &Path) -> PathBuf {
+pub(crate) fn tail_path(path: &Path) -> PathBuf {
     let mut s = path.as_os_str().to_os_string();
     s.push(".tail");
     PathBuf::from(s)

@@ -34,6 +34,12 @@ export interface Settings {
   docStepPicture: "window" | "screen";
   docZoomDefault: boolean;
   docMarkerColor: string;
+  docMarkerRight: string;
+  docMarkerShape: "circle" | "ring" | "arrow" | "hand" | "box";
+  docMarkerSize: "small" | "medium" | "large";
+  docBadgeStyle: "circle" | "square" | "none";
+  docKeepFull: boolean;
+  docGuidesDir: string;
   showMagnifier: boolean;
   // The last colors and sizes picked in the annotation tool popovers. Colors are "#rrggbb"; fill and outline
   // may also be "none". Opacities are 0 to 100.
@@ -146,6 +152,12 @@ export const defaultSettings: Settings = {
   docStepPicture: "window",
   docZoomDefault: false,
   docMarkerColor: "#FF5A36",
+  docMarkerRight: "#3B82F6",
+  docMarkerShape: "circle",
+  docMarkerSize: "medium",
+  docBadgeStyle: "circle",
+  docKeepFull: false,
+  docGuidesDir: "",
   showMagnifier: true,
   lastPenColor: "#E53935",
   lastPenSize: 4,

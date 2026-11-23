@@ -411,6 +411,7 @@ pub fn discard_current_recording(
 }
 
 static PENDING_OPEN: Mutex<Option<String>> = Mutex::new(None);
+static PENDING_GUIDE: Mutex<Option<String>> = Mutex::new(None);
 
 /// A `.snpr` file given on the command line (double-click in Explorer, "Open with Snipmunk"): the page opens it. Also called by the
 /// single-instance plugin with the arguments of a second launch.
@@ -424,6 +425,24 @@ pub fn handle_args(app: &tauri::AppHandle, args: &[String]) {
         *PENDING_OPEN.lock().unwrap_or_else(|e| e.into_inner()) = Some(path.clone());
         let _ = app.emit("open-project", path);
     }
+    // A guide file opens in Documents mode (the page asks about the guide that is open).
+    if let Some(path) = args
+        .iter()
+        .skip(1)
+        .find(|a| a.to_lowercase().ends_with(".snpd") && Path::new(a).is_file())
+    {
+        *PENDING_GUIDE.lock().unwrap_or_else(|e| e.into_inner()) = Some(path.clone());
+        let _ = app.emit("open-guide", path);
+    }
+}
+
+/// The guide file that was asked for before the page was ready (once).
+#[tauri::command]
+pub fn take_pending_guide() -> Option<String> {
+    PENDING_GUIDE
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .take()
 }
 
 /// The project file that was asked for before the page was ready (once).
@@ -457,6 +476,8 @@ pub static RESTART: AtomicBool = AtomicBool::new(false);
 
 /// Leave: quit, or restart when one was asked for.
 pub fn leave(app: &tauri::AppHandle) {
+    // A clean exit (saved, or "Don't save") removes the working copy of the open guide; a crash or a shutdown leaves it for recovery.
+    crate::snpd::discard_open();
     if RESTART.swap(false, Ordering::SeqCst) {
         app.restart();
     } else {
@@ -544,9 +565,9 @@ pub fn restart_app(app: tauri::AppHandle) {
     request_restart(&app);
 }
 
-/// Does Snipmunk hold anything that is not saved? (An unsaved current recording, unsaved edits of a project.) For Quit.
+/// Does Snipmunk hold anything that is not saved? (An unsaved current recording, unsaved edits of a project, an unsaved guide.) For Quit.
 pub fn has_unsaved(state: &crate::commands::AppState) -> bool {
-    any_dirty() || state.sessions.lock().unwrap().current_unsaved()
+    any_dirty() || state.sessions.lock().unwrap().current_unsaved() || crate::snpd::has_unsaved()
 }
 
 #[cfg(test)]

@@ -145,7 +145,7 @@ fn ensure_overlay(app: &AppHandle, label: &str) -> tauri::Result<WebviewWindow> 
         return Ok(w);
     }
     let window = WebviewWindowBuilder::new(app, label, WebviewUrl::default())
-        .title("Snipmunk capture")
+        .title("Snipmunk – Capture overlay")
         .decorations(false)
         .transparent(true)
         .always_on_top(true)

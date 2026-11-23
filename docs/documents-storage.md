@@ -1,7 +1,27 @@
 # Documents mode: how a guide is stored (internal, version 1)
 
-This is the storage of the step recorder (7.5-A). The file format for sharing and exporting (`.snpd`, on the package container of `.snpr`)
-comes with 7.5-C; it will be made from this folder. The format is versioned (`guide.json` → `version`), so a later reader can tell.
+This is the storage of the step recorder and of the open guide (7.5-A, 7.5-B). The file format for sharing (`.snpd`, on the package
+container of `.snpr`) is described in `docs/snpd-format.md`; it is made from the working folder below. The format is versioned
+(`guide.json` → `version`), so a later reader can tell.
+
+## 7.5-B: one open guide, in a working folder
+
+Since 7.5-B only **one guide is open at a time**, and it lives in a working folder in temp, not in the app data:
+`%TEMP%\Snipmunk\guide-current\` (`SNIPMUNK_TEMP_DIR` replaces `%TEMP%` in development builds). The layout is the one below plus:
+
+| file | meaning |
+|---|---|
+| `document.json` | the blocks and the edits (see `snpd-format.md`), written atomically after every change (350 ms after typing stops) |
+| `dirty` | exists while there are changes that are not in a `.snpd` |
+| `saved.txt` | the path of the `.snpd` the guide was opened from or saved to |
+| `m-<id>.png` | images pasted or inserted into text blocks |
+
+The web view addresses the working folder as `snipmunk-img://…/guide/current/<file>`; step pictures get `?g=<generation>` (changed at every load of the guide) because the file names repeat from guide to guide and the web view caches decoded images by address.
+
+A normal exit (Quit, after the question about unsaved changes) deletes the folder; closing the guide does too. **If the program dies or
+Windows shuts down, the folder stays** and the next start offers "Recover guide (N steps)" (a guide that was never saved, was being
+recorded, or had unsaved edits) or opens a saved, unchanged guide again. The step pictures here are the full monitor frames: the cropping
+and the burning-in of redactions happen when a `.snpd` is written. Guides of 7.5-A in `<app data>\documents\guides\` are not read any more.
 
 ## Where
 

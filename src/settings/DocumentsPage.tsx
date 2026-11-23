@@ -1,14 +1,19 @@
 import { Button, Section, Select, Switch } from "@seconddawn/ui";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { HotkeyNotice } from "../components/HotkeyNotice";
 import { useT } from "../i18n";
-import { Setting, type PageProps } from "./pages";
+import { ipc } from "../ipc";
+import { FolderSetting, Setting, type PageProps } from "./pages";
 import { Kbd, ShortcutDialog } from "./ShortcutDialog";
 
 /** Settings of Documents mode (the step recorder and the guide view). */
 export function DocumentsPage({ settings, set }: PageProps) {
   const { t } = useT();
   const [dialog, setDialog] = useState<"step" | "start" | null>(null);
+  const [guides, setGuides] = useState("");
+  useEffect(() => {
+    void ipc.defaultFolders().then((d) => setGuides(d.guides)).catch(() => undefined);
+  }, []);
   return (
     <>
       <HotkeyNotice />
@@ -63,6 +68,39 @@ export function DocumentsPage({ settings, set }: PageProps) {
             value={settings.docMarkerColor}
             onChange={(e) => set({ docMarkerColor: e.target.value.toUpperCase() })}
           />
+        </Setting>
+        <Setting id="docMarkerRight" title={t("guide.markerRight")}>
+          <input type="color" className="colorinput" aria-label={t("guide.markerRight")} value={settings.docMarkerRight} onChange={(e) => set({ docMarkerRight: e.target.value.toUpperCase() })} />
+        </Setting>
+        <Setting id="docMarkerShape" title={t("guide.markerShape")}>
+          <Select
+            label={t("guide.markerShape")}
+            value={settings.docMarkerShape}
+            onChange={(v) => set({ docMarkerShape: v as typeof settings.docMarkerShape })}
+            options={(["circle", "ring", "arrow", "hand", "box"] as const).map((s) => ({ value: s, label: t(`guide.shape.${s}`) }))}
+          />
+        </Setting>
+        <Setting id="docMarkerSize" title={t("guide.markerSize")}>
+          <Select
+            label={t("guide.markerSize")}
+            value={settings.docMarkerSize}
+            onChange={(v) => set({ docMarkerSize: v as typeof settings.docMarkerSize })}
+            options={(["small", "medium", "large"] as const).map((s) => ({ value: s, label: t(`guide.size.${s}`) }))}
+          />
+        </Setting>
+        <Setting id="docBadge" title={t("guide.badge")}>
+          <Select
+            label={t("guide.badge")}
+            value={settings.docBadgeStyle}
+            onChange={(v) => set({ docBadgeStyle: v as typeof settings.docBadgeStyle })}
+            options={(["circle", "square", "none"] as const).map((s) => ({ value: s, label: t(`guide.badge.${s}`) }))}
+          />
+        </Setting>
+        <Setting id="docKeepFull" title={t("settings.docKeepFull")} description={t("settings.docKeepFullDesc")}>
+          <Switch label={t("settings.docKeepFull")} checked={settings.docKeepFull} onChange={(docKeepFull) => set({ docKeepFull })} />
+        </Setting>
+        <Setting id="docGuidesDir" title={t("settings.docGuidesDir")} description={t("settings.docGuidesDirDesc")}>
+          <FolderSetting label={t("settings.docGuidesDir")} value={settings.docGuidesDir} fallback={guides} onChange={(docGuidesDir) => set({ docGuidesDir })} />
         </Setting>
         <Setting id="docCountdown" title={t("settings.docCountdown")} description={t("settings.docCountdownDesc")}>
           <span>{settings.recCountdown === 0 ? t("delay.none") : t("delay.seconds", { count: settings.recCountdown })}</span>

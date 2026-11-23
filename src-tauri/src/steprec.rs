@@ -232,6 +232,93 @@ mod pure_tests {
     }
 
     #[test]
+    fn the_shell_tells_the_taskbar_the_start_menu_the_tray_and_the_desktop_apart() {
+        use steptext::Area;
+        let none: Vec<String> = vec![];
+        assert_eq!(
+            classify_shell("Shell_TrayWnd", "MSTaskListWClass", "explorer", &none, ""),
+            Area::Taskbar
+        );
+        // Windows 11: the taskbar is one XAML window; the tray buttons are told by the class of the element
+        let tray = vec!["SystemTray.NormalButton".to_string()];
+        assert_eq!(
+            classify_shell(
+                "Shell_TrayWnd",
+                "Windows.UI.Composition.DesktopWindowContentBridge",
+                "explorer",
+                &tray,
+                ""
+            ),
+            Area::Tray
+        );
+        let task = vec!["Taskbar.TaskListButtonAutomationPeer".to_string()];
+        assert_eq!(
+            classify_shell(
+                "Shell_SecondaryTrayWnd",
+                "Windows.UI.Composition.DesktopWindowContentBridge",
+                "explorer",
+                &task,
+                "Appid:Chrome"
+            ),
+            Area::Taskbar
+        );
+        assert_eq!(
+            classify_shell("Shell_TrayWnd", "TrayClockWClass", "explorer", &none, ""),
+            Area::Tray
+        );
+        assert_eq!(
+            classify_shell("NotifyIconOverflowWindow", "", "explorer", &none, ""),
+            Area::Tray
+        );
+        assert_eq!(
+            classify_shell(
+                "Windows.UI.Core.CoreWindow",
+                "",
+                "StartMenuExperienceHost",
+                &none,
+                ""
+            ),
+            Area::StartMenu
+        );
+        assert_eq!(
+            classify_shell("Windows.UI.Core.CoreWindow", "", "SearchHost", &none, ""),
+            Area::StartMenu
+        );
+        assert_eq!(
+            classify_shell("Progman", "SysListView32", "explorer", &none, ""),
+            Area::Desktop
+        );
+        assert_eq!(
+            classify_shell("WorkerW", "SysListView32", "explorer", &none, ""),
+            Area::Desktop
+        );
+        assert_eq!(
+            classify_shell("CabinetWClass", "DirectUIHWND", "explorer", &none, ""),
+            Area::None
+        );
+    }
+
+    #[test]
+    fn the_title_of_a_page_is_the_window_title_without_the_browser() {
+        assert_eq!(
+            page_title("Inbox (3) - Mail - Google Chrome", "Google Chrome"),
+            "Inbox (3) - Mail"
+        );
+        assert_eq!(
+            page_title("New tab - Google Chrome", "Google Chrome"),
+            "New tab"
+        );
+        assert_eq!(
+            page_title(
+                "Docs and 2 more pages - Personal - Microsoft Edge",
+                "Microsoft Edge"
+            ),
+            "Docs and 2 more pages - Personal"
+        );
+        assert_eq!(page_title("Something else", "Google Chrome"), "");
+    }
+
+    #[test]
     fn typed_characters_group_and_backspace_removes_the_last() {
         let t0 = Instant::now();
         let mut g = TypeGroup::default();
@@ -453,6 +540,8 @@ pub struct RecSettings {
     pub lang: String,
     /// Development tests: clicks inside Snipmunk's own (test) windows count.
     pub allow_own: bool,
+    /// The shortcuts of Snipmunk itself (start guide, step, capture, record): pressing them never makes a step.
+    pub own_shortcuts: Vec<dawn_hotkeys::shortcut::Shortcut>,
 }
 
 impl RecSettings {
@@ -471,6 +560,15 @@ impl RecSettings {
             zoom_default: s.doc_zoom_default,
             lang: crate::language::resolve(&s.language).to_string(),
             allow_own: false,
+            own_shortcuts: [
+                &s.doc_start_hotkey,
+                &s.doc_step_hotkey,
+                &s.capture_hotkey,
+                &s.record_hotkey,
+            ]
+            .iter()
+            .filter_map(|t| t.parse().ok())
+            .collect(),
         }
     }
 }
@@ -479,6 +577,9 @@ impl RecSettings {
 
 struct Active {
     id: String,
+    /// More steps recorded into a guide that was open: Cancel only takes those steps away.
+    append: bool,
+    start_n: u32,
     tx: Sender<Raw>,
     paused: Arc<AtomicBool>,
     count: Arc<AtomicU32>,
@@ -557,10 +658,37 @@ fn default_title() -> String {
     "Guide".into()
 }
 
+/// A start is under way (the countdown runs): a second press of the shortcut does not start another guide.
+static STARTING: AtomicBool = AtomicBool::new(false);
+
 /// Start recording a guide (after the countdown, from its own thread): the live pictures, the pipeline, the hooks, the bar.
+/// Every way of failing is told to the page (`capture-error`), also when the shortcut or the tray started it.
 #[tauri::command]
 pub async fn guide_start(app: AppHandle) -> CmdResult<String> {
-    start_with(app, FrameSource::Monitors, false, true).await
+    start_command(app, false).await
+}
+
+/// "Record more steps" into the open guide: the new steps are appended to it.
+#[tauri::command]
+pub async fn guide_record_more(app: AppHandle) -> CmdResult<String> {
+    if !crate::snpd::is_open() {
+        return Err(CmdError::new("not_found", "no guide is open"));
+    }
+    start_command(app, true).await
+}
+
+async fn start_command(app: AppHandle, append: bool) -> CmdResult<String> {
+    if STARTING.swap(true, Ordering::SeqCst) {
+        return Err(CmdError::new("busy", "a guide is starting already"));
+    }
+    let r = start_with(app.clone(), FrameSource::Monitors, false, true, append).await;
+    STARTING.store(false, Ordering::SeqCst);
+    if let Err(e) = &r {
+        if e.code != "cancelled" {
+            let _ = app.emit("capture-error", e.message.clone());
+        }
+    }
+    r
 }
 
 /// The common start. `real_hooks`: install the hooks (never in the tests). `with_ui`: hide the window and show the bar.
@@ -569,6 +697,7 @@ pub async fn start_with(
     src: FrameSource,
     dev: bool,
     real_hooks: bool,
+    append: bool,
 ) -> CmdResult<String> {
     if app.state::<GuideRec>().active.lock().unwrap().is_some()
         || crate::recording::is_recording(&app)
@@ -583,31 +712,45 @@ pub async fn start_with(
     let app2 = app.clone();
     let id = tauri::async_runtime::spawn_blocking(move || -> CmdResult<String> {
         let app = app2;
-        // The countdown of the recording is used (Settings → Recording); the dev tests have none.
+        // The countdown of the recording is used (Settings → Recording), shown on the screen like the recording's; Esc cancels it.
         if real_hooks {
             let n = app.state::<crate::commands::AppState>().settings.lock().unwrap().rec_countdown;
-            for left in (1..=n).rev() {
-                let _ = app.emit("guide-countdown", left);
-                std::thread::sleep(Duration::from_secs(1));
+            if n > 0 {
+                // Snipmunk's window is out of the way while it counts.
+                if let Some(w) = app.get_webview_window("main") {
+                    if w.is_visible().unwrap_or(false) && !w.is_minimized().unwrap_or(false) {
+                        let _ = w.minimize();
+                    }
+                }
+                if !crate::popups::countdown(&app, n) {
+                    crate::tray::show_main(&app);
+                    return Err(CmdError::new("cancelled", "the countdown was cancelled"));
+                }
             }
-            let _ = app.emit("guide-countdown", 0);
         }
         let frames = Arc::new(start_frames(src).map_err(|e| CmdError::new("capture", e))?);
-        let info = guides::create(&default_title(), serde_json::json!({
+        let info = if append {
+            // The open guide goes on: it is "recording" again and its numbering continues.
+            guides::set_state("current", "recording")?;
+            guides::read_info("current").ok_or_else(|| CmdError::new("not_found", "no guide is open"))?
+        } else { guides::create(&default_title(), serde_json::json!({
             "stepMode": if settings.auto { "auto" } else { "manual" }, "typing": settings.typing,
             "shortcuts": settings.shortcuts, "enterTab": settings.enter_tab, "zoom": settings.zoom_default, "lang": settings.lang,
-        }))?;
+        }))? };
+        let start_n = guides::read_steps(&info.id).iter().map(|s| s.n).max().unwrap_or(0);
         let (tx, rx) = std::sync::mpsc::channel::<Raw>();
         let paused = Arc::new(AtomicBool::new(false));
         let count = Arc::new(AtomicU32::new(0));
         let thread = {
             let (app, frames, paused, count, id) = (app.clone(), frames.clone(), paused.clone(), count.clone(), info.id.clone());
-            std::thread::spawn(move || pipeline(app, id, rx, frames, settings, paused, count))
+            std::thread::spawn(move || pipeline(app, id, rx, frames, settings, paused, count, start_n))
         };
         #[cfg(windows)]
         let hooks = if real_hooks { hooks::Hooks::install(tx.clone(), paused.clone()).ok() } else { None };
         let active = Active {
             id: info.id.clone(),
+            append,
+            start_n,
             tx,
             paused,
             count,
@@ -651,6 +794,7 @@ fn show_bar(app: &AppHandle) {
         "guidebar",
         tauri::WebviewUrl::App("index.html".into()),
     )
+    .title("Snipmunk – Guide bar")
     .decorations(false)
     .transparent(true)
     .background_color(tauri::window::Color(0, 0, 0, 0))
@@ -769,6 +913,17 @@ fn end(app: &AppHandle, keep: bool) -> Option<String> {
     let id = a.id.clone();
     if keep {
         let _ = guides::finalize(&id);
+    } else if a.append {
+        // The steps of this recording are taken away (appended delete lines); the guide goes back to "done".
+        let last = guides::read_steps(&id)
+            .iter()
+            .map(|s| s.n)
+            .max()
+            .unwrap_or(0);
+        for n in a.start_n + 1..=last {
+            let _ = guides::guide_step_delete(id.clone(), n, None);
+        }
+        let _ = guides::finalize(&id);
     } else {
         let _ = guides::guide_delete(id.clone());
     }
@@ -816,12 +971,17 @@ struct Snapshot {
 #[derive(Debug, Clone, Default)]
 pub struct WinFacts {
     pub hwnd: isize,
+    /// The name of the app for people ("Google Chrome"); the title of the window is in `title`.
+    pub app: String,
     /// Screen coordinates.
     pub rect: [i32; 4],
     pub title: String,
     pub process: String,
     #[allow(dead_code)]
     pub pid: u32,
+    /// The window class of the top window and of the (child) window under the point.
+    pub class: String,
+    pub point_class: String,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -836,6 +996,75 @@ pub struct UiaFacts {
     pub rect: [i32; 4],
     pub parents: Vec<String>,
     pub menu_path: Vec<String>,
+    /// The class names of the element and of its nearest parents (the shell tells its parts apart by them).
+    pub classes: Vec<String>,
+}
+
+/// Which part of the Windows shell a click was in (the taskbar and the Start menu are not "File Explorer"). Pure; tested.
+pub fn classify_shell(
+    root_class: &str,
+    point_class: &str,
+    process: &str,
+    uia_classes: &[String],
+    automation_id: &str,
+) -> steptext::Area {
+    use steptext::Area;
+    let proc = process.to_ascii_lowercase();
+    if matches!(
+        proc.as_str(),
+        "startmenuexperiencehost" | "searchhost" | "searchapp" | "searchui" | "startmenu"
+    ) {
+        return Area::StartMenu;
+    }
+    if proc == "shellexperiencehost" {
+        return Area::Tray;
+    }
+    let tray_class = |c: &str| {
+        matches!(
+            c,
+            "TrayNotifyWnd"
+                | "SysPager"
+                | "TrayClockWClass"
+                | "TrayShowDesktopButtonWClass"
+                | "NotifyIconOverflowWindow"
+                | "TopLevelWindowForOverflowXamlIsland"
+        )
+    };
+    match root_class {
+        "Shell_TrayWnd" | "Shell_SecondaryTrayWnd" => {
+            if tray_class(point_class)
+                || (point_class == "ToolbarWindow32")
+                || uia_classes
+                    .iter()
+                    .any(|c| c.starts_with("SystemTray") || c.starts_with("NotificationArea"))
+                || automation_id.contains("SystemTray")
+                || automation_id.contains("NotificationArea")
+            {
+                Area::Tray
+            } else {
+                Area::Taskbar
+            }
+        }
+        c if tray_class(c) => Area::Tray,
+        "Progman" | "WorkerW" => Area::Desktop,
+        _ => Area::None,
+    }
+}
+
+/// The title of a page without the name of the browser: "Inbox - Mail - Google Chrome" is "Inbox - Mail".
+pub fn page_title(window_title: &str, app: &str) -> String {
+    let t = window_title.trim();
+    for sep in [" - ", " – ", " — "] {
+        let suffix = format!("{sep}{app}");
+        if let Some(head) = t.strip_suffix(&suffix) {
+            return head.trim().to_string();
+        }
+        // Edge: "Title - Profile - Microsoft Edge": cut at the app name wherever it stands.
+        if let Some(i) = t.rfind(&suffix) {
+            return t[..i].trim().to_string();
+        }
+    }
+    String::new()
 }
 
 struct Pipe {
@@ -868,6 +1097,7 @@ fn pipeline(
     settings: RecSettings,
     paused: Arc<AtomicBool>,
     count: Arc<AtomicU32>,
+    start_n: u32,
 ) {
     let mut p = Pipe {
         app,
@@ -877,7 +1107,7 @@ fn pipeline(
         paused,
         count,
         uia: facts::Uia::start(),
-        n: 0,
+        n: start_n,
         pending: None,
         typing: TypeGroup::default(),
         typing_facts: None,
@@ -886,7 +1116,9 @@ fn pipeline(
         own_pid: std::process::id(),
         dev_pointer: (0, 0),
     };
-    let mut last_poll = Instant::now();
+    // (one second ago: the first look at the foreground window is at once)
+    let mut last_poll = Instant::now() - Duration::from_secs(2);
+    let mut last_foreground = 0isize;
     loop {
         match rx.recv_timeout(Duration::from_millis(50)) {
             Ok(Raw::Stop) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
@@ -913,6 +1145,15 @@ fn pipeline(
             if !p.hint_sent && !p.settings.allow_own && facts::foreground_is_elevated() {
                 p.hint_sent = true;
                 let _ = p.app.emit("guide-hint", "elevated");
+            }
+            // A Chromium window that comes to the front is asked for its accessibility tree now, so the first click in it has names.
+            // (Not in the tests: the foreground window of the real desktop is never looked at there.)
+            if !p.settings.allow_own {
+                let fg = facts::foreground_root();
+                if fg != 0 && fg != last_foreground {
+                    last_foreground = fg;
+                    p.uia.prime(fg, None);
+                }
             }
         }
     }
@@ -984,12 +1225,32 @@ impl Pipe {
         }
     }
 
+    /// Clicks on Snipmunk's own windows never become steps (in every build; only the test injection may bypass it).
     fn is_own(&self, x: i32, y: i32) -> bool {
-        !self.settings.allow_own && facts::point_belongs_to(x, y, self.own_pid)
+        if self.settings.allow_own {
+            return false;
+        }
+        let own: Vec<isize> = self
+            .app
+            .webview_windows()
+            .values()
+            .filter_map(|w| w.hwnd().ok().map(|h| h.0 as isize))
+            .collect();
+        facts::point_belongs_to(x, y, self.own_pid, &own)
     }
 
     fn key(&mut self, vk: u32, scan: u32, mods: Mods, hkl: isize, at: Instant) {
         if is_modifier(vk) {
+            return;
+        }
+        // Snipmunk's own shortcuts (start guide, take step, ...) are not steps.
+        if self.settings.own_shortcuts.iter().any(|s| {
+            s.key.0 == vk
+                && s.ctrl == mods.ctrl
+                && s.alt == mods.alt
+                && s.shift == mods.shift
+                && s.win == mods.win
+        }) {
             return;
         }
         let ctrl_only = mods.ctrl && !mods.alt;
@@ -1070,6 +1331,10 @@ impl Pipe {
         let monitor = self.frames.monitor_for(pt.0, pt.1);
         let frame = self.frames.monitors.get(monitor).and_then(|m| m.at(at));
         let win = facts::window_at(pt.0, pt.1);
+        // A Chromium window that was not asked yet (a click before the poll saw it): ask now, a moment is worth the names.
+        if let Some(w) = win.as_ref() {
+            self.uia.prime(w.hwnd, Some(Duration::from_millis(400)));
+        }
         let uia = self.uia.at_point(pt.0, pt.1, Duration::from_millis(300));
         Snapshot {
             at,
@@ -1110,12 +1375,24 @@ impl Pipe {
             px.swap(0, 2);
             px[3] = 255;
         }
-        if let Some(img) = image::RgbaImage::from_raw(fw as u32, fh as u32, rgba) {
-            if let Ok(png) =
-                crate::thumbs::png_bytes(&img, image::codecs::png::CompressionType::Fast)
-            {
-                let _ = guides::write_image(&self.id, &image, &png);
+        // Every failure is logged: a step without a picture must never be silent (it shows "Picture missing" in the editor).
+        match image::RgbaImage::from_raw(fw as u32, fh as u32, rgba) {
+            Some(img) => {
+                match crate::thumbs::png_bytes(&img, image::codecs::png::CompressionType::Fast) {
+                    Ok(png) => {
+                        if let Err(e) = guides::write_image(&self.id, &image, &png) {
+                            eprintln!(
+                                "[guide] step {n}: the picture {image} was not written: {e:?}"
+                            );
+                        }
+                    }
+                    Err(e) => eprintln!("[guide] step {n}: the picture could not be encoded: {e}"),
+                }
             }
+            None => eprintln!(
+                "[guide] step {n}: the frame has {} bytes, not {fw} x {fh} x 4",
+                bgra.len()
+            ),
         }
         let click = matches!(kind, Kind::Click | Kind::RightClick | Kind::DoubleClick)
             .then(|| [snap.pt.0 - origin.0, snap.pt.1 - origin.1]);
@@ -1135,6 +1412,26 @@ impl Pipe {
             parents: u.parents.clone(),
         });
         let hwnd = snap.win.as_ref().map_or(0, |w| w.hwnd);
+        let area = snap.win.as_ref().map_or(steptext::Area::None, |w| {
+            classify_shell(
+                &w.class,
+                &w.point_class,
+                &w.process,
+                snap.uia.as_ref().map_or(&[][..], |u| &u.classes[..]),
+                snap.uia.as_ref().map_or("", |u| &u.automation_id),
+            )
+        });
+        let caption = snap
+            .uia
+            .as_ref()
+            .and_then(|u| steptext::caption_of(&u.control, &u.automation_id, &u.name));
+        // Chromium (Chrome, Edge, Electron): when the page gave no element name, the title of the page tells where the click was.
+        let page = snap
+            .win
+            .as_ref()
+            .filter(|w| w.class.starts_with("Chrome_WidgetWin"))
+            .map(|w| page_title(&w.title, &w.app))
+            .unwrap_or_default();
         let new_window = hwnd != 0 && hwnd != self.last_hwnd;
         if hwnd != 0 {
             self.last_hwnd = hwnd;
@@ -1143,10 +1440,10 @@ impl Pipe {
             .win
             .as_ref()
             .map(|w| {
-                if w.title.trim().is_empty() {
-                    w.process.clone()
+                if !w.app.trim().is_empty() {
+                    w.app.clone()
                 } else {
-                    w.title.clone()
+                    w.process.clone()
                 }
             })
             .unwrap_or_default();
@@ -1171,6 +1468,9 @@ impl Pipe {
             new_window,
             typed: typed.clone().unwrap_or_default(),
             keys: keys.clone().unwrap_or_default(),
+            area,
+            caption,
+            page,
         };
         let text = steptext::step_text(kind, &meta, &self.settings.lang);
         let zoom = click.map(|c| {
@@ -1246,7 +1546,7 @@ pub async fn dev_guide_start(
         (None, Some(r)) => FrameSource::Synthetic(Rect::new(r[0], r[1], r[2] as u32, r[3] as u32)),
         _ => FrameSource::Synthetic(Rect::new(0, 0, 640, 360)),
     };
-    start_with(app, src, true, false).await
+    start_with(app, src, true, false, false).await
 }
 
 #[cfg(debug_assertions)]
@@ -1520,7 +1820,7 @@ mod facts {
     use std::sync::mpsc::{channel, Sender};
     use std::time::Duration;
     use windows::core::Interface;
-    use windows::Win32::Foundation::{CloseHandle, HWND, POINT, RECT};
+    use windows::Win32::Foundation::{CloseHandle, HWND, LPARAM, POINT, RECT, WPARAM};
     use windows::Win32::Security::{
         GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY,
     };
@@ -1541,15 +1841,17 @@ mod facts {
         KLF_NOTELLSHELL, MAPVK_VK_TO_VSC,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
-        GetAncestor, GetForegroundWindow, GetWindowRect, GetWindowTextW, GetWindowThreadProcessId,
-        WindowFromPoint, GA_ROOT,
+        EnumChildWindows, GetAncestor, GetClassNameW, GetForegroundWindow, GetWindowRect,
+        GetWindowTextW, GetWindowThreadProcessId, SendMessageTimeoutW, WindowFromPoint, GA_ROOT,
+        SMTO_ABORTIFHUNG, WM_GETOBJECT,
     };
 
-    fn process_of(hwnd: HWND) -> (u32, String) {
+    /// (process id, exe name without ".exe", full path of the exe).
+    fn process_of(hwnd: HWND) -> (u32, String, String) {
         let mut pid = 0u32;
         // SAFETY: a window handle and a valid out pointer.
         unsafe { GetWindowThreadProcessId(hwnd, Some(&mut pid)) };
-        let mut name = String::new();
+        let (mut name, mut full) = (String::new(), String::new());
         // SAFETY: the process handle is closed again; the buffer has the length it says.
         unsafe {
             if let Ok(h) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) {
@@ -1563,7 +1865,7 @@ mod facts {
                 )
                 .is_ok()
                 {
-                    let full = String::from_utf16_lossy(&buf[..len as usize]);
+                    full = String::from_utf16_lossy(&buf[..len as usize]);
                     name = std::path::Path::new(&full)
                         .file_stem()
                         .map(|s| s.to_string_lossy().into_owned())
@@ -1572,20 +1874,221 @@ mod facts {
                 let _ = CloseHandle(h);
             }
         }
-        (pid, name)
+        (pid, name, full)
     }
 
-    pub fn point_belongs_to(x: i32, y: i32, pid: u32) -> bool {
+    /// The name of an app for people, looked up once per exe: the display name of the package (Microsoft Store and MSIX apps:
+    /// "Snipping Tool"), else FileDescription, else ProductName of the exe's version info ("Google Chrome", "Notepad"); then the
+    /// (short) title of the window, then the exe name without ".exe". Store apps often have the exe name as FileDescription
+    /// ("SnippingTool.exe"), which is not a name for people and is skipped.
+    pub fn app_name(pid: u32, path: &str, stem: &str, title: &str) -> String {
+        static CACHE: std::sync::Mutex<Option<std::collections::HashMap<String, String>>> =
+            std::sync::Mutex::new(None);
+        let key = path.to_lowercase();
+        let cached = CACHE
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .and_then(|m| m.get(&key).cloned());
+        let from_exe = match cached {
+            Some(v) => v,
+            None => {
+                let found = if stem.eq_ignore_ascii_case("explorer") {
+                    "File Explorer".to_string()
+                } else if stem.eq_ignore_ascii_case("ApplicationFrameHost") {
+                    // The frame of a UWP app: the app is the window (its title is the name of the app).
+                    String::new()
+                } else {
+                    package_display_name(pid)
+                        .or_else(|| good(version_string(path, "FileDescription"), stem))
+                        .or_else(|| good(version_string(path, "ProductName"), stem))
+                        .unwrap_or_default()
+                };
+                // Only a name that belongs to the exe is cached (the title of a window changes).
+                CACHE
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .get_or_insert_with(Default::default)
+                    .insert(key, found.clone());
+                found
+            }
+        };
+        if !from_exe.is_empty() {
+            return from_exe;
+        }
+        let t = title.trim();
+        if !t.is_empty() && t.chars().count() <= 40 {
+            return t.to_string();
+        }
+        stem.to_string()
+    }
+
+    /// A version-info string that is a name for people (not empty, not the exe name).
+    pub(super) fn good(v: Option<String>, stem: &str) -> Option<String> {
+        let v = v?.trim().to_string();
+        let low = v.to_lowercase();
+        let st = stem.to_lowercase();
+        (!v.is_empty() && low != st && low != format!("{st}.exe") && !low.ends_with(".exe"))
+            .then_some(v)
+    }
+
+    /// The display name of the package of a process (Microsoft Store / MSIX apps), the way the Start menu shows it: the name of the
+    /// app's entry in `shell:AppsFolder\<AppUserModelId>`. `None` for a process without package identity.
+    pub fn package_display_name(pid: u32) -> Option<String> {
+        use windows::core::{PCWSTR, PWSTR};
+        use windows::Win32::Foundation::ERROR_INSUFFICIENT_BUFFER;
+        use windows::Win32::Storage::Packaging::Appx::GetApplicationUserModelId;
+        use windows::Win32::System::Com::{
+            CoInitializeEx, CoTaskMemFree, CoUninitialize, IBindCtx, COINIT_APARTMENTTHREADED,
+        };
+        use windows::Win32::UI::Shell::{
+            IShellItem, SHCreateItemFromParsingName, SIGDN_NORMALDISPLAY,
+        };
+        // The shell wants a single-threaded apartment: a short-lived thread of its own (the result is cached per exe).
+        let worker = std::thread::spawn(move || -> Option<String> {
+            // SAFETY: the process handle is closed again; the buffers have the sizes the functions are told; COM is initialised
+            // and uninitialised on this thread.
+            unsafe {
+                let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
+                let mut len = 0u32;
+                let first = GetApplicationUserModelId(h, &mut len, None);
+                if first != ERROR_INSUFFICIENT_BUFFER || len == 0 {
+                    let _ = CloseHandle(h);
+                    return None; // no package identity
+                }
+                let mut buf = vec![0u16; len as usize];
+                let r = GetApplicationUserModelId(h, &mut len, Some(PWSTR(buf.as_mut_ptr())));
+                let _ = CloseHandle(h);
+                if r.0 != 0 {
+                    return None;
+                }
+                let aumid = String::from_utf16_lossy(&buf[..(len as usize).saturating_sub(1)]);
+                let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+                let path: Vec<u16> = format!("shell:AppsFolder\\{aumid}")
+                    .encode_utf16()
+                    .chain(Some(0))
+                    .collect();
+                let name = SHCreateItemFromParsingName::<_, _, IShellItem>(
+                    PCWSTR(path.as_ptr()),
+                    None::<&IBindCtx>,
+                )
+                .ok()
+                .and_then(|item| {
+                    let p = item.GetDisplayName(SIGDN_NORMALDISPLAY).ok()?;
+                    let s = p.to_string().ok();
+                    CoTaskMemFree(Some(p.0 as *const _));
+                    s
+                })
+                .filter(|s| !s.trim().is_empty());
+                CoUninitialize();
+                name
+            }
+        });
+        // Never wait for the shell for long: a step without the name is better than a late step.
+        let start = std::time::Instant::now();
+        while !worker.is_finished() {
+            if start.elapsed() > Duration::from_millis(800) {
+                return None;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        worker.join().ok().flatten()
+    }
+
+    fn version_string(path: &str, field: &str) -> Option<String> {
+        use windows::core::PCWSTR;
+        use windows::Win32::Storage::FileSystem::{
+            GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW,
+        };
+        if path.is_empty() {
+            return None;
+        }
+        let wide: Vec<u16> = path.encode_utf16().chain(Some(0)).collect();
+        // SAFETY: the buffers have the sizes the functions are told; the pointers VerQueryValueW returns point into `data`.
+        unsafe {
+            let size = GetFileVersionInfoSizeW(PCWSTR(wide.as_ptr()), None);
+            if size == 0 {
+                return None;
+            }
+            let mut data = vec![0u8; size as usize];
+            GetFileVersionInfoW(
+                PCWSTR(wide.as_ptr()),
+                None,
+                size,
+                data.as_mut_ptr() as *mut _,
+            )
+            .ok()?;
+            // The language and code page of the first translation, else US English.
+            let mut tp: *mut std::ffi::c_void = std::ptr::null_mut();
+            let mut tl = 0u32;
+            let tr: Vec<u16> = "\\VarFileInfo\\Translation"
+                .encode_utf16()
+                .chain(Some(0))
+                .collect();
+            let lang = if VerQueryValueW(
+                data.as_ptr() as *const _,
+                PCWSTR(tr.as_ptr()),
+                &mut tp,
+                &mut tl,
+            )
+            .as_bool()
+                && tl >= 4
+            {
+                let p = tp as *const u16;
+                (*p, *p.add(1))
+            } else {
+                (0x0409, 0x04B0)
+            };
+            for (l, c) in [lang, (0x0409, 0x04B0), (0x0409, 0x04E4)] {
+                let q: Vec<u16> = format!("\\StringFileInfo\\{l:04x}{c:04x}\\{field}")
+                    .encode_utf16()
+                    .chain(Some(0))
+                    .collect();
+                let mut vp: *mut std::ffi::c_void = std::ptr::null_mut();
+                let mut vl = 0u32;
+                if VerQueryValueW(
+                    data.as_ptr() as *const _,
+                    PCWSTR(q.as_ptr()),
+                    &mut vp,
+                    &mut vl,
+                )
+                .as_bool()
+                    && vl > 1
+                {
+                    let s = std::slice::from_raw_parts(vp as *const u16, vl as usize - 1);
+                    return Some(String::from_utf16_lossy(s));
+                }
+            }
+            None
+        }
+    }
+
+    /// Is the window at this point one of Snipmunk's own? The window under the point is often a child that belongs to the web view's
+    /// own process, so the TOP window is looked at: it is Snipmunk's when its handle is one of `own` or it belongs to our process.
+    pub fn point_belongs_to(x: i32, y: i32, pid: u32, own: &[isize]) -> bool {
         // SAFETY: plain window queries.
         unsafe {
             let h = WindowFromPoint(POINT { x, y });
             if h.0.is_null() {
                 return false;
             }
+            let root = GetAncestor(h, GA_ROOT);
+            let root = if root.0.is_null() { h } else { root };
+            if own.contains(&(root.0 as isize)) || own.contains(&(h.0 as isize)) {
+                return true;
+            }
             let mut p = 0u32;
-            GetWindowThreadProcessId(h, Some(&mut p));
+            GetWindowThreadProcessId(root, Some(&mut p));
             p == pid
         }
+    }
+
+    /// The window class of a window.
+    fn class_of(h: HWND) -> String {
+        let mut b = [0u16; 128];
+        // SAFETY: a window handle and a buffer of the length it says.
+        let n = unsafe { GetClassNameW(h, &mut b) };
+        String::from_utf16_lossy(&b[..n.max(0) as usize])
     }
 
     pub fn window_at(x: i32, y: i32) -> Option<WinFacts> {
@@ -1601,13 +2104,18 @@ mod facts {
             let _ = GetWindowRect(root, &mut r);
             let mut buf = [0u16; 256];
             let n = GetWindowTextW(root, &mut buf);
-            let (pid, process) = process_of(root);
+            let (pid, process, full) = process_of(root);
+            let title = String::from_utf16_lossy(&buf[..n.max(0) as usize]);
+            let app = app_name(pid, &full, &process, &title);
             Some(WinFacts {
+                app,
                 hwnd: root.0 as isize,
                 rect: [r.left, r.top, r.right - r.left, r.bottom - r.top],
-                title: String::from_utf16_lossy(&buf[..n.max(0) as usize]),
+                title,
                 process,
                 pid,
+                class: class_of(root),
+                point_class: class_of(h),
             })
         }
     }
@@ -1620,7 +2128,7 @@ mod facts {
             if fg.0.is_null() {
                 return false;
             }
-            let (pid, _) = process_of(fg);
+            let (pid, _, _) = process_of(fg);
             let elevated = |pid: u32| -> bool {
                 let Ok(h) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) else {
                     return false;
@@ -1710,6 +2218,9 @@ mod facts {
     enum Req {
         Point(i32, i32, Sender<Option<UiaFacts>>),
         Focused(Sender<Option<UiaFacts>>),
+        /// Make a Chromium window (Chrome, Edge, Electron, a web view) build its accessibility tree: the top window handle and,
+        /// when someone waits, the number of render hosts that were asked.
+        Prime(isize, Option<Sender<usize>>),
     }
 
     pub struct Uia {
@@ -1767,6 +2278,9 @@ mod facts {
                 rect: [r.left, r.top, r.right - r.left, r.bottom - r.top],
                 ..Default::default()
             };
+            if let Ok(c) = el.CurrentClassName() {
+                f.classes.push(c.to_string());
+            }
             if let Ok(p) = el.GetCurrentPattern(UIA_TogglePatternId) {
                 if let Ok(t) = p.cast::<IUIAutomationTogglePattern>() {
                     f.toggle = t.CurrentToggleState().ok().map(|s| s == ToggleState_On);
@@ -1806,10 +2320,88 @@ mod facts {
                     if control_word(pct) == "Window" {
                         break;
                     }
+                    if f.classes.len() < 4 {
+                        if let Ok(c) = parent.CurrentClassName() {
+                            f.classes.push(c.to_string());
+                        }
+                    }
                     cur = parent;
                 }
             }
             Some(f)
+        }
+    }
+
+    /// The render hosts of a Chromium window ("Chrome_RenderWidgetHostHWND", also inside the window of a web view app).
+    fn render_hosts(root: HWND) -> Vec<isize> {
+        use windows::core::BOOL;
+        unsafe extern "system" fn each(h: HWND, l: LPARAM) -> BOOL {
+            // SAFETY: `l` is the address of the Vec that `render_hosts` passes and that outlives the enumeration.
+            let out = unsafe { &mut *(l.0 as *mut Vec<isize>) };
+            if class_of(h).starts_with("Chrome_RenderWidgetHostHWND") {
+                out.push(h.0 as isize);
+            }
+            true.into()
+        }
+        let mut out: Vec<isize> = Vec::new();
+        if class_of(root).starts_with("Chrome_RenderWidgetHostHWND") {
+            out.push(root.0 as isize);
+        }
+        // SAFETY: the callback only pushes into `out`, which lives until the call returns.
+        unsafe {
+            let _ = EnumChildWindows(Some(root), Some(each), LPARAM(&mut out as *mut _ as isize));
+        }
+        out
+    }
+
+    /// Chromium builds its accessibility tree only when a client asks for it: the first answer of a page that nobody asked about
+    /// before has no names. So the render hosts of the window are asked once, early (WM_GETOBJECT with UiaRootObjectId, which Chromium
+    /// takes as "a UI Automation client is here"), and the root and its first child are read, which makes the renderer build the tree.
+    fn prime_chromium(
+        auto: &IUIAutomation,
+        root: isize,
+        primed: &mut std::collections::HashSet<isize>,
+    ) -> usize {
+        let mut asked = 0;
+        for h in render_hosts(HWND(root as *mut _)) {
+            if !primed.insert(h) {
+                continue;
+            }
+            let hwnd = HWND(h as *mut _);
+            let mut res = 0usize;
+            // SAFETY: a window handle; UiaRootObjectId is -25; the result goes to a local.
+            unsafe {
+                let _ = SendMessageTimeoutW(
+                    hwnd,
+                    WM_GETOBJECT,
+                    WPARAM(0),
+                    LPARAM(-25),
+                    SMTO_ABORTIFHUNG,
+                    300,
+                    Some(&mut res),
+                );
+                if let Ok(el) = auto.ElementFromHandle(hwnd) {
+                    let _ = el.CurrentName();
+                    if let Ok(w) = auto.ControlViewWalker() {
+                        let _ = w.GetFirstChildElement(&el);
+                    }
+                }
+            }
+            asked += 1;
+        }
+        asked
+    }
+
+    /// The top window that has the focus (0 when none).
+    pub fn foreground_root() -> isize {
+        // SAFETY: plain queries.
+        unsafe {
+            let fg = GetForegroundWindow();
+            if fg.0.is_null() {
+                return 0;
+            }
+            let root = GetAncestor(fg, GA_ROOT);
+            (if root.0.is_null() { fg } else { root }).0 as isize
         }
     }
 
@@ -1830,10 +2422,16 @@ mod facts {
                                 Req::Point(.., s) | Req::Focused(s) => {
                                     let _ = s.send(None);
                                 }
+                                Req::Prime(_, s) => {
+                                    if let Some(s) = s {
+                                        let _ = s.send(0);
+                                    }
+                                }
                             }
                         }
                         return;
                     };
+                    let mut primed: std::collections::HashSet<isize> = Default::default();
                     for r in rx {
                         match r {
                             Req::Point(x, y, s) => {
@@ -1849,6 +2447,12 @@ mod facts {
                                     .ok()
                                     .and_then(|e| describe(&auto, &e));
                                 let _ = s.send(f);
+                            }
+                            Req::Prime(root, s) => {
+                                let n = prime_chromium(&auto, root, &mut primed);
+                                if let Some(s) = s {
+                                    let _ = s.send(n);
+                                }
                             }
                         }
                     }
@@ -1869,6 +2473,24 @@ mod facts {
             self.tx.send(Req::Focused(s)).ok()?;
             r.recv_timeout(limit).ok().flatten()
         }
+
+        /// Ask a Chromium window to build its accessibility tree (once per window); `wait`: how long to wait for the answer. Returns
+        /// the number of render hosts that were asked (0 when the window has none, or on a timeout).
+        pub fn prime(&self, root: isize, wait: Option<Duration>) -> usize {
+            match wait {
+                Some(limit) => {
+                    let (s, r) = channel();
+                    if self.tx.send(Req::Prime(root, Some(s))).is_err() {
+                        return 0;
+                    }
+                    r.recv_timeout(limit).unwrap_or(0)
+                }
+                None => {
+                    let _ = self.tx.send(Req::Prime(root, None));
+                    0
+                }
+            }
+        }
     }
 }
 
@@ -1884,11 +2506,14 @@ mod facts {
         pub fn at_point(&self, _: i32, _: i32, _: Duration) -> Option<UiaFacts> {
             None
         }
+        pub fn prime(&self, _: isize, _: Option<Duration>) -> usize {
+            0
+        }
         pub fn focused(&self, _: Duration) -> Option<UiaFacts> {
             None
         }
     }
-    pub fn point_belongs_to(_: i32, _: i32, _: u32) -> bool {
+    pub fn point_belongs_to(_: i32, _: i32, _: u32, _: &[isize]) -> bool {
         false
     }
     pub fn window_at(_: i32, _: i32) -> Option<WinFacts> {
@@ -1896,6 +2521,9 @@ mod facts {
     }
     pub fn foreground_is_elevated() -> bool {
         false
+    }
+    pub fn foreground_root() -> isize {
+        0
     }
     pub fn layout_handle(_: &str) -> isize {
         0
@@ -2149,7 +2777,7 @@ button,input,select{font:inherit} [role=tab]{padding:4px 10px;border:1px solid #
     }
 
     async fn run_events(app: &AppHandle, hwnd: isize, events: Vec<Inject>) -> CmdResult<String> {
-        let id = start_with(app.clone(), FrameSource::Window(hwnd), true, false).await?;
+        let id = start_with(app.clone(), FrameSource::Window(hwnd), true, false, false).await?;
         // The live pictures need a moment to start.
         pause(900).await;
         dev_guide_inject(app.clone(), events).await?;
@@ -2165,6 +2793,55 @@ button,input,select{font:inherit} [role=tab]{padding:4px 10px;border:1px solid #
     }
 
     /// Scenario "native" / "web" / "manual": see the report of the session. Returns the steps that were written.
+    /// See `dev_uia_probe`.
+    pub async fn uia_probe(app: AppHandle) -> CmdResult<serde_json::Value> {
+        let file = std::env::temp_dir().join("snipmunk-guide-probe.html");
+        std::fs::write(&file, PAGE).map_err(|e| CmdError::new("io", e.to_string()))?;
+        let url = format!(
+            "file:///{}",
+            file.to_string_lossy()
+                .replace(std::path::MAIN_SEPARATOR, "/")
+        )
+        .parse::<tauri::Url>()
+        .map_err(|e| CmdError::new("io", e.to_string()))?;
+        let win =
+            tauri::WebviewWindowBuilder::new(&app, "uiaprobe", tauri::WebviewUrl::External(url))
+                .title("UIA probe page")
+                .inner_size(640.0, 480.0)
+                .position(60.0, 60.0)
+                .always_on_top(true)
+                .focused(false)
+                .decorations(false)
+                .build()
+                .map_err(|e| CmdError::new("io", e.to_string()))?;
+        pause(1200).await;
+        let dpr = win.scale_factor().unwrap_or(1.0);
+        let pos = win.inner_position().map(|p| (p.x, p.y)).unwrap_or((60, 60));
+        let hwnd = win
+            .hwnd()
+            .map_err(|e| CmdError::new("io", e.to_string()))?
+            .0 as isize;
+        let (x, y) = page_targets(pos, dpr)["save"];
+        let a2 = app.clone();
+        let out = tauri::async_runtime::spawn_blocking(move || {
+            let _ = &a2;
+            let uia = facts::Uia::start();
+            let show = |f: Option<UiaFacts>| match f {
+                Some(f) => serde_json::json!({ "name": f.name, "control": f.control }),
+                None => serde_json::Value::Null,
+            };
+            let before = show(uia.at_point(x, y, Duration::from_millis(1500)));
+            let asked = uia.prime(hwnd, Some(Duration::from_millis(3000)));
+            std::thread::sleep(Duration::from_millis(800));
+            let after = show(uia.at_point(x, y, Duration::from_millis(1500)));
+            serde_json::json!({ "before": before, "renderHostsAsked": asked, "after": after })
+        })
+        .await
+        .map_err(|e| CmdError::new("io", e.to_string()))?;
+        let _ = win.close();
+        Ok(out)
+    }
+
     pub async fn scenario(
         app: AppHandle,
         kind: String,
@@ -2333,6 +3010,20 @@ button,input,select{font:inherit} [role=tab]{padding:4px 10px;border:1px solid #
     }
 }
 
+/// Development only: what UI Automation says about a button of an OWN WebView2 test window (generated page) before and after the
+/// window was asked to build its accessibility tree (the Chromium priming of `facts::Uia::prime`). Nothing else is looked at.
+#[cfg(all(windows, debug_assertions))]
+#[tauri::command]
+pub async fn dev_uia_probe(app: AppHandle) -> CmdResult<serde_json::Value> {
+    devtest::uia_probe(app).await
+}
+
+#[cfg(not(all(windows, debug_assertions)))]
+#[tauri::command]
+pub fn dev_uia_probe() -> CmdResult<()> {
+    Err(CmdError::new("unavailable", "development builds only"))
+}
+
 /// Development only: run a scenario against a test window ("native", "web" or "manual"); returns the steps that were written.
 #[cfg(all(windows, debug_assertions))]
 #[tauri::command]
@@ -2348,4 +3039,60 @@ pub async fn dev_guide_scenario(
 #[tauri::command]
 pub fn dev_guide_scenario() -> CmdResult<()> {
     Err(CmdError::new("unavailable", "development builds only"))
+}
+
+#[cfg(all(test, windows))]
+mod app_name_tests {
+    use super::facts;
+
+    #[test]
+    fn the_name_of_an_app_falls_back_from_the_package_to_the_title_to_the_exe_name() {
+        // This test program has no package identity: no package name, and no lookup of any other process.
+        assert_eq!(facts::package_display_name(std::process::id()), None);
+        let exe = std::env::current_exe().unwrap();
+        let stem = exe.file_stem().unwrap().to_string_lossy().into_owned();
+        let name = facts::app_name(
+            std::process::id(),
+            &exe.to_string_lossy(),
+            &stem,
+            "A window title",
+        );
+        assert!(
+            !name.is_empty() && !name.to_lowercase().ends_with(".exe"),
+            "{name}"
+        );
+        // An exe that does not exist: the short title of the window, else the exe name without ".exe".
+        assert_eq!(
+            facts::app_name(0, r"C:\nowhere\Foo.exe", "Foo", "Calculator"),
+            "Calculator"
+        );
+        assert_eq!(facts::app_name(0, r"C:\nowhere\Foo.exe", "Foo", ""), "Foo");
+        assert_eq!(
+            facts::app_name(0, r"C:\nowhere\Foo.exe", "Foo", &"x".repeat(80)),
+            "Foo"
+        );
+        // The frame of a UWP app is named by its window.
+        assert_eq!(
+            facts::app_name(
+                0,
+                r"C:\nowhere\ApplicationFrameHost.exe",
+                "ApplicationFrameHost",
+                "Calculator"
+            ),
+            "Calculator"
+        );
+        // The file description of Store apps is the exe name: not a name for people.
+        assert_eq!(
+            facts::good(Some("SnippingTool.exe".into()), "SnippingTool"),
+            None
+        );
+        assert_eq!(
+            facts::good(Some("SnippingTool".into()), "SnippingTool"),
+            None
+        );
+        assert_eq!(
+            facts::good(Some(" Snipping Tool ".into()), "SnippingTool"),
+            Some("Snipping Tool".into())
+        );
+    }
 }

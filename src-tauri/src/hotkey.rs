@@ -108,27 +108,31 @@ fn run(app: &AppHandle, name: &str) {
 /// Make the keyboard hook follow the settings (called at startup and whenever a shortcut changes). Installs the hook when needed;
 /// an unusable capture shortcut leaves the hook without it and reports why. A recording shortcut that is the same key combination as
 /// the capture shortcut is not used (the capture shortcut wins), and one that cannot be parsed is left out.
-pub fn apply(app: &AppHandle, capture: &str, record: &str, extra: &[(&str, &str)]) {
-    let manager = app.state::<HotkeyManager>();
-    let cap = parse(capture);
-    let rec = parse(record)
-        .ok()
-        .filter(|r| cap.as_ref().map(|c| !c.same_combo(r)).unwrap_or(true));
+/// The shortcuts the hook is given: capture, record, then the extra ones (Documents: "guide", "guidestep"). One that cannot be parsed
+/// or is the same key combination as an earlier one is left out (the earlier wins).
+pub fn shortcut_list(
+    capture: &str,
+    record: &str,
+    extra: &[(&str, &str)],
+) -> Vec<(String, Shortcut)> {
     let mut list: Vec<(String, Shortcut)> = Vec::new();
-    if let Ok(c) = &cap {
-        list.push(("capture".into(), *c));
-    }
-    if let Some(r) = rec {
-        list.push(("record".into(), r));
-    }
-    // The shortcuts of Documents mode; one that is the same combination as an earlier one is left out.
-    for (name, text) in extra {
+    for (name, text) in [("capture", capture), ("record", record)]
+        .into_iter()
+        .chain(extra.iter().copied())
+    {
         if let Ok(sc) = parse(text) {
             if !list.iter().any(|(_, o)| o.same_combo(&sc)) {
                 list.push((name.to_string(), sc));
             }
         }
     }
+    list
+}
+
+pub fn apply(app: &AppHandle, capture: &str, record: &str, extra: &[(&str, &str)]) {
+    let manager = app.state::<HotkeyManager>();
+    let cap = parse(capture);
+    let list = shortcut_list(capture, record, extra);
     let status = {
         let mut hook = manager.hook.lock().unwrap();
         if let Some(h) = hook.as_ref() {
@@ -325,5 +329,32 @@ mod tests {
         assert!(m.claim_fire("record", t0 + Duration::from_millis(910)));
         assert!(!m.claim_fire("record", t0 + Duration::from_millis(920)));
         assert!(fire_is_new(None, t0));
+    }
+
+    #[test]
+    fn the_documents_shortcuts_are_registered_with_the_hook_and_a_clash_leaves_the_later_one_out() {
+        let l = shortcut_list(
+            "Ctrl+Alt+PrintScreen",
+            "Ctrl+Alt+R",
+            &[("guide", "Ctrl+Alt+G"), ("guidestep", "Ctrl+Alt+S")],
+        );
+        let names: Vec<&str> = l.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(names, ["capture", "record", "guide", "guidestep"]);
+        // The same combination twice: the first keeps it.
+        let l = shortcut_list("Ctrl+Alt+G", "Ctrl+Alt+R", &[("guide", "Ctrl+Alt+G")]);
+        assert_eq!(
+            l.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(),
+            ["capture", "record"]
+        );
+        // One that does not parse is left out.
+        let l = shortcut_list(
+            "Ctrl+Alt+PrintScreen",
+            "nonsense",
+            &[("guide", "Ctrl+Alt+G")],
+        );
+        assert_eq!(
+            l.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(),
+            ["capture", "guide"]
+        );
     }
 }
