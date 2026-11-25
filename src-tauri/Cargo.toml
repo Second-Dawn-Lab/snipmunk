@@ -19,6 +19,8 @@ tauri-plugin-single-instance = "2"
 # Update checks against the latest GitHub release, and the restart after installing one.
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
+# Pixel loops that are optimized in development builds too.
+snipmunk-pixels = { path = "../crates/pixels" }
 serde.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true

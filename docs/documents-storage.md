@@ -15,6 +15,7 @@ Since 7.5-B only **one guide is open at a time**, and it lives in a working fold
 | `dirty` | exists while there are changes that are not in a `.snpd` |
 | `saved.txt` | the path of the `.snpd` the guide was opened from or saved to |
 | `m-<id>.png` | images pasted or inserted into text blocks |
+| `ocr\<picture>.json` | the text Windows read on a step picture for Quick redact, kept while the picture and the area stay the same (7.5-C2; since 7.5-C3 with the pieces that were read a second time); never part of a `.snpd`, gone with the folder |
 
 The web view addresses the working folder as `snipmunk-img://…/guide/current/<file>`; step pictures get `?g=<generation>` (changed at every load of the guide) because the file names repeat from guide to guide and the web view caches decoded images by address.
 

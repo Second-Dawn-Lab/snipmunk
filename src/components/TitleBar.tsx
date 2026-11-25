@@ -1,10 +1,8 @@
-import { IconButton } from "@seconddawn/ui";
 import { useT } from "../i18n";
-import { ipc } from "../ipc";
 import logo from "../assets/snipmunk.png";
 import { WindowControls } from "./WindowControls";
 
-/** The custom title bar of the main window: icon, name, tagline, settings and the window buttons. */
+/** The custom title bar of the main window: icon, name, tagline and the window buttons. */
 export function TitleBar() {
   const { t } = useT();
   return (
@@ -18,9 +16,6 @@ export function TitleBar() {
         <span className="titlebar__tagline" data-tauri-drag-region>
           {t("app.tagline")}
         </span>
-      </div>
-      <div className="titlebar__actions">
-        <IconButton icon="settings" label={t("titlebar.settings")} onClick={() => void ipc.openSettings()} />
       </div>
       </div>
       <WindowControls />

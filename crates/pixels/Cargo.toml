@@ -1,0 +1,9 @@
+[package]
+name = "snipmunk-pixels"
+description = "Pixel loops that must be fast in development builds too (this crate is always optimized)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+image = { version = "0.25", default-features = false }

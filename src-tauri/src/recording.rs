@@ -344,6 +344,12 @@ pub async fn start_recording(
         }
         return start_now(&app, Source::DevWindow(label), false);
     }
+    if crate::capture::real_capture_blocked() {
+        return Err(CmdError::new(
+            "unavailable",
+            "this test instance records nothing real",
+        ));
+    }
     if mode == "fullscreen" {
         // The monitor under the pointer, after the countdown.
         let area = monitor_under_pointer()
@@ -370,6 +376,9 @@ enum Source {
 
 /// The area is chosen: the countdown (Esc cancels), the red frame, Snipmunk's windows out of the picture, then recording.
 pub fn begin_area(app: &AppHandle, area: Rect, hwnd: Option<usize>) {
+    if crate::capture::real_capture_blocked() {
+        return;
+    }
     begin_source(app, area, Source::Area { area, hwnd });
 }
 

@@ -6,8 +6,8 @@ export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
-    // Release scripts run in Node.
+    // Release scripts and the end-to-end scripts of a development test instance run in Node.
     files: ["scripts/**/*.mjs"],
-    languageOptions: { globals: { process: "readonly", console: "readonly" } },
+    languageOptions: { globals: { process: "readonly", console: "readonly", fetch: "readonly", WebSocket: "readonly", setTimeout: "readonly", Buffer: "readonly" } },
   },
 );

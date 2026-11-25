@@ -8,6 +8,8 @@ import { RecordControls } from "./RecordControls";
 
 type CaptureSettings = Settings;
 import { AppIcon, type AppIconName } from "./AppIcons";
+import { FileMenu } from "./FileMenu";
+import type { FileEntry } from "./fileEntries";
 import { hotkeyLabel } from "./hotkeyLabel";
 import { MenuItem } from "./MenuItem";
 import { SubmenuItem } from "./SubmenuItem";
@@ -18,12 +20,8 @@ export interface ShareApi {
   busy: boolean;
   canShare: boolean;
   onPaint: () => void;
-  onSave: () => void;
-  onCopy: () => void;
   onShare: () => void;
   onOpenFile: () => void;
-  onOpenFolder: () => void;
-  onPrint: () => void;
 }
 
 export interface ZoomApi {
@@ -44,12 +42,10 @@ const ALL_MODES: { id: CaptureMode; icon: AppIconName }[] = [
 ];
 const DELAYS: CaptureDelay[] = [0, 3, 5, 10];
 
-const isWindows = typeof navigator !== "undefined" && /Windows/i.test(navigator.userAgent);
-
 /**
- * The top bar, like the Snipping Tool's: Add capture with its mode menu, the delay, screenshot/recording, New
- * session on the left; Edit in Paint, Save, Copy, Share, Zoom and More on the right. Those on the right act on the
- * capture shown in the preview. Everything that needs capture, export or sharing is a placeholder for now.
+ * The top bar, like the Snipping Tool's: the File menu, then (behind a divider) the main button of the mode and its options;
+ * the mode switch in the middle; Edit in Paint, Share and Zoom (Screenshots mode, for the capture shown in the preview), then
+ * More at the end.
  */
 export function TopBar(props: {
   settings: Settings;
@@ -58,25 +54,25 @@ export function TopBar(props: {
   /** Start a capture, optionally in this mode (picked from the mode menu). */
   onCapture: (mode?: CaptureMode) => void;
   zoom: ZoomApi;
-  /** The recording mode: no Edit in Paint, Open file or Print; Save, Copy and Share wait for the rendered video. */
+  /** The recording mode: no Edit in Paint, Share, Zoom or Open file here. */
   recording?: boolean;
   /** Start a recording of an area (the recording mode). */
   onRecord: (area: CaptureSettings["recMode"]) => void;
   /** What the buttons on the right do with the capture shown in the preview. */
   share: ShareApi;
-  /** Documents mode: "New guide" instead of the capture controls, nothing on the right. */
+  /** The File menu of the mode on show. */
+  file: readonly FileEntry[];
+  /** Documents mode: "New guide" instead of the capture controls. */
   documents?: { onNew: (area?: string) => void; hotkey: string };
 }) {
   const { t, locale } = useT();
   const { settings, zoom, share } = props;
   const video = settings.captureKind === "video";
   const docs = settings.captureKind === "documents";
-  // Recording and Documents mode: only the ⋯ menu (Settings) on the right; the screenshot actions belong to Screenshots mode.
+  // Recording and Documents mode: only ⋯ (Settings) on the right; the screenshot actions belong to Screenshots.
   const limited = !!props.recording || docs;
-  const off = !share.hasCapture || share.busy || !!props.recording;
-  // Save, Copy and Share work for recordings too (they use the rendered video); Edit in Paint does not.
   const offShare = !share.hasCapture || share.busy;
-  const soonTip: string | undefined = undefined;
+  const paintLabel = /Windows/i.test(navigator.userAgent) ? t("actions.editPaint") : t("actions.openEditor");
   const scrollOn = useExperimentalScroll();
   const MODES = ALL_MODES.filter((m) => m.id !== "scrolling" || scrollOn);
   const [modeOpen, setModeOpen] = useState(false);
@@ -105,6 +101,8 @@ export function TopBar(props: {
   return (
     <div className="topbar" role="toolbar" aria-label={t("app.name")}>
       <div className="topbar__group">
+        <FileMenu entries={props.file} />
+        <span className="topbar__divider" aria-hidden="true" />
         {docs && props.documents ? (
           <DocControls settings={settings} onPatch={props.onPatch} onNew={props.documents.onNew} />
         ) : video ? (
@@ -207,27 +205,14 @@ export function TopBar(props: {
       </div>
 
       <div className="topbar__group topbar__group--end">
-        {!limited && (
-        <button
-          type="button"
-          className="editbtn"
-          disabled={off}
-          onClick={share.onPaint}
-          title={isWindows ? t("actions.editPaintTip") : t("actions.openEditorTip")}
-        >
-          <AppIcon name="paint" size={17} />
-          <span>{isWindows ? t("actions.editPaint") : t("actions.openEditor")}</span>
-        </button>
-        )}
-        {/* Recording mode: Export, Copy and Share are at the bottom right; Save, Copy, Share and Zoom here are for screenshots. */}
+        {/* For screenshots only: the other modes have their actions in their bottom bars (Copy is in every bottom bar). */}
         {!limited && (
           <>
-        <ActionButton icon="save" label={t("actions.save")} tip={soonTip ?? t("actions.saveTip")} disabled={offShare} onClick={share.onSave} />
-        <ActionButton icon="copy" label={t("actions.copy")} tip={soonTip ?? t("actions.copyTip")} disabled={offShare} onClick={share.onCopy} />
+        <ActionButton icon="paint" label={paintLabel} tip={paintLabel} disabled={offShare} onClick={share.onPaint} />
         <ActionButton
           icon="share"
           label={t("actions.share")}
-          tip={soonTip ?? (share.canShare ? t("actions.shareTip") : t("share.unsupported"))}
+          tip={share.canShare ? t("actions.shareTip") : t("share.unsupported")}
           disabled={offShare || !share.canShare}
           onClick={share.onShare}
         />
@@ -282,8 +267,6 @@ export function TopBar(props: {
             </SubmenuItem>
           )}
           {!limited && <MenuItem label={t("menu.openFile")} icon="openfile" hint={key("Ctrl+O")} disabled={share.busy} onSelect={() => { setMoreOpen(false); share.onOpenFile(); }} />}
-          {!limited && <MenuItem label={t("menu.openFolder")} icon="window" onSelect={() => { setMoreOpen(false); share.onOpenFolder(); }} />}
-          {!limited && <MenuItem label={t("menu.print")} icon="print" hint={key("Ctrl+P")} disabled={off} onSelect={() => { setMoreOpen(false); share.onPrint(); }} />}
           <MenuItem
             label={t("menu.settings")}
             icon="settings"

@@ -6,6 +6,7 @@ mod capture;
 mod commands;
 mod compose;
 mod cursor;
+mod docexport;
 mod effects;
 mod error;
 mod export;
@@ -36,6 +37,7 @@ mod startup;
 mod steprec;
 mod steptext;
 mod stitch;
+mod templates;
 mod thumbs;
 mod titlebar;
 mod tray;
@@ -202,6 +204,22 @@ pub fn run() {
             snpd::doc_add_image,
             snpd::doc_add_step_image,
             snpd::doc_add_blank_step,
+            docexport::doc_export_picture,
+            docexport::export_write,
+            docexport::pick_export_save,
+            docexport::export_pdf,
+            docexport::export_cancel,
+            docexport::doc_ocr,
+            docexport::doc_ink,
+            templates::templates_list,
+            templates::templates_save,
+            templates::templates_use,
+            templates::templates_rename,
+            templates::templates_delete,
+            templates::templates_export,
+            templates::templates_import,
+            templates::templates_export_many,
+            templates::pick_templates_open,
             guides::guides_list,
             guides::guide_get,
             guides::guide_steps,
@@ -219,6 +237,7 @@ pub fn run() {
             scrollshot::dev_scroll_test,
             titlebar::set_maximize_rect,
             capture::start_capture,
+            capture::dev_capture_guard,
             capture::capture_overlay_info,
             capture::capture_overlay_ready,
             capture::capture_cancel,

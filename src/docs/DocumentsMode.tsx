@@ -1,21 +1,25 @@
 import { Button } from "@seconddawn/ui";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { AppIcon } from "../components/AppIcons";
 import { MenuItem } from "../components/MenuItem";
 import { Pop } from "../components/Pop";
 import { useT } from "../i18n";
-import { imageUrl, ipc, type Capture, type Session } from "../ipc";
+import { imageUrl, type Capture, type Session } from "../ipc";
 import type { Settings } from "../settings/defaults";
 import { GuideEditor, type ScreenshotChoice } from "./GuideEditor";
+import { ExportDialog, useCopyAs, type CopyKind } from "./export/ExportDialog";
+import { editorSelection } from "./selection";
+import { RedactDialog } from "./RedactTools";
 import type { GuideApi } from "./useGuide";
 
-/** The header of the open guide, like the recording project's: File ▾ and the main button on the left; name, status and steps on the right. */
-function GuideHeader({ guide, onError }: { guide: GuideApi; onError: (m: string) => void }) {
+/** Start renaming the open guide: its name in the header becomes a field (F2 and the File menu). */
+export const renameGuide = () => document.querySelector<HTMLButtonElement>(".recheader__name")?.click();
+
+/** The heading of the open guide, like the recording's: icon, name, status and steps. It begins the row above the pages. */
+function GuideHeading({ guide }: { guide: GuideApi }) {
   const { t } = useT();
-  const [menu, setMenu] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState("");
-  const close = () => setMenu(false);
   const steps = guide.doc ? guide.doc.blocks.filter((b) => b.type === "step").length : 0;
   const start = () => (setDraft(guide.title), setRenaming(true));
   const commit = () => {
@@ -24,46 +28,6 @@ function GuideHeader({ guide, onError }: { guide: GuideApi; onError: (m: string)
   };
   return (
     <div className="recheader" role="group" aria-label={t("guide.header")}>
-      <Pop
-        open={menu}
-        onClose={close}
-        kind="menu"
-        label={t("proj.file")}
-        align="start"
-        trigger={
-          <button type="button" className="recheader__file" aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu((o) => !o)}>
-            {t("proj.file")}
-            <AppIcon name="chevron" size={13} />
-          </button>
-        }
-      >
-        <MenuItem label={t("docs.new")} onSelect={() => (close(), guide.newGuide())} />
-        <MenuItem label={t("guide.open")} hint="Ctrl+O" onSelect={() => (close(), guide.open())} />
-        <MenuItem label={t("guide.saveAs")} hint="Ctrl+Shift+S" disabled={guide.busy} onSelect={() => (close(), void guide.saveAs())} />
-        <MenuItem label={t("guide.recordMore")} onSelect={() => (close(), guide.recordMore())} />
-        {guide.savedPath && <MenuItem label={t("ctx.showInExplorer")} onSelect={() => (close(), void ipc.openFolder(guide.savedPath!).catch((e) => onError(String(e?.message ?? e))))} />}
-        <MenuItem label={t("guide.close")} onSelect={() => (close(), guide.close())} />
-        {guide.recent.length > 0 && (
-          <>
-            <div className="menuitem__heading">{t("guide.recent")}</div>
-            {guide.recent.slice(0, 6).map((r) => (
-              <MenuItem key={r.path} label={r.name} disabled={!r.exists} onSelect={() => (close(), guide.openRecent(r.path))} />
-            ))}
-          </>
-        )}
-      </Pop>
-      {!guide.savedPath ? (
-        <Button variant="primary" disabled={guide.busy} onClick={() => void guide.saveAs()}>
-          {t("guide.saveAs")}
-        </Button>
-      ) : guide.dirty ? (
-        <Button variant="primary" disabled={guide.busy} onClick={() => void guide.save()} title="Ctrl+S">
-          {t("guide.save")}
-        </Button>
-      ) : (
-        <Button disabled>{t("proj.statusSaved")}</Button>
-      )}
-      <span className="recheader__spacer" />
       <AppIcon name="documents" size={18} />
       {renaming ? (
         <input
@@ -91,6 +55,41 @@ function GuideHeader({ guide, onError }: { guide: GuideApi; onError: (m: string)
       </span>
       <span className="recheader__size">{t("docs.steps", { count: steps })}</span>
     </div>
+  );
+}
+
+/** The bottom bar of an open guide, like the recording's: what can be done with the selected blocks at the start (like the
+ * screenshot selection), "Copy as" and Export at the end. */
+function GuideBottomBar({ selection, onExport, onCopy }: { selection: (el: HTMLElement | null) => void; onExport: () => void; onCopy: (k: CopyKind) => void }) {
+  const { t } = useT();
+  const [copy, setCopy] = useState(false);
+  return (
+    <footer className="bottombar">
+      <span className="bottombar__sel" ref={selection} />
+      <span className="bottombar__spacer" />
+      <Pop
+        open={copy}
+        onClose={() => setCopy(false)}
+        kind="menu"
+        label={t("export.copyAs")}
+        align="end"
+        trigger={
+          <button type="button" className="dw-btn bottombar__copyas" aria-haspopup="menu" aria-expanded={copy} onClick={() => setCopy((o) => !o)}>
+            <AppIcon name="copy" size={16} />
+            {t("export.copyAs")}
+            <AppIcon name="chevron" size={13} />
+          </button>
+        }
+      >
+        {(["rich", "markdown", "markdownPictures", "text"] as const).map((k) => (
+          <MenuItem key={k} label={t(`export.copy.${k}`)} onSelect={() => (setCopy(false), onCopy(k))} />
+        ))}
+      </Pop>
+      <button type="button" className="dw-btn dw-btn--primary bottombar__export" title={`${t("export.button")} (Ctrl+E)`} onClick={onExport}>
+        <AppIcon name="save" size={16} />
+        {t("export.button")}
+      </button>
+    </footer>
   );
 }
 
@@ -137,7 +136,7 @@ function useF2(guide: GuideApi) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "F2" || !guide.doc) return;
-      document.querySelector<HTMLButtonElement>(".recheader__name")?.click();
+      renameGuide();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -188,8 +187,8 @@ function GuideHome({ guide, hotkey }: { guide: GuideApi; hotkey: string }) {
   );
 }
 
-/** Documents mode: the home page, or the open guide with its header and the editor. */
-export function DocumentsMode(props: { guide: GuideApi; settings: Settings; session: Session | null; captures: Capture[]; onError: (m: string) => void }) {
+/** Documents mode: the home page, or the open guide (its row, tab and editor) with its bottom bar. */
+export function DocumentsMode(props: { guide: GuideApi; settings: Settings; onPatch: (c: Partial<Settings>) => void; session: Session | null; captures: Capture[]; children?: ReactNode }) {
   const { guide, settings } = props;
   useF2(guide);
   useCloseKey(guide);
@@ -203,12 +202,49 @@ export function DocumentsMode(props: { guide: GuideApi; settings: Settings; sess
       load: async () => (await fetch(imageUrl(s, c))).blob(),
     }));
   }, [props.session, props.captures]);
-  if (!guide.doc) return <GuideHome guide={guide} hotkey={settings.docStartHotkey} />;
+  const [exporting, setExporting] = useState(false);
+  const [redacting, setRedacting] = useState(false);
+  // Where the editor puts the actions of the selected blocks: in the bottom bar.
+  const [selectionSlot, setSelectionSlot] = useState<HTMLElement | null>(null);
+  const exportSource = useCallback(() => (guide.doc ? { doc: guide.doc, steps: guide.steps } : null), [guide.doc, guide.steps]);
+  const selected = useCallback(() => editorSelection.ids, []);
+  const copyAs = useCopyAs(exportSource, selected);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() !== "e" || !(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey || !guide.doc) return;
+      e.preventDefault();
+      setExporting(true);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [guide.doc]);
   return (
-    <div className="guide guide--doc">
-      <GuideHeader guide={guide} onError={props.onError} />
-      <GuideTabs guide={guide} />
-      <GuideEditor guide={guide} screenshots={choices} />
-    </div>
+    <>
+      <main className="panels panels--single">
+        {!guide.doc ? (
+          <div className="panel panel--right">
+            <GuideHome guide={guide} hotkey={settings.docStartHotkey} />
+          </div>
+        ) : (
+          <div className="panel panel--right guide guide--doc">
+            <RedactDialog open={redacting} onClose={() => setRedacting(false)} doc={guide.doc} steps={guide.steps} settings={settings} onPatch={props.onPatch} change={guide.change} />
+            <ExportDialog open={exporting} onClose={() => setExporting(false)} source={exportSource} defaultFolder={settings.docGuidesDir} />
+            <GuideEditor
+              guide={guide}
+              screenshots={choices}
+              view={{ width: settings.docPageWidth, zoom: settings.docZoom, fit: settings.docFit }}
+              settings={settings}
+              onPatch={props.onPatch}
+              onRedactGuide={() => setRedacting(true)}
+              heading={<GuideHeading guide={guide} />}
+              tabs={<GuideTabs guide={guide} />}
+              selectionSlot={selectionSlot}
+            />
+          </div>
+        )}
+        {props.children}
+      </main>
+      {guide.doc && <GuideBottomBar selection={setSelectionSlot} onExport={() => setExporting(true)} onCopy={(k) => void copyAs(k)} />}
+    </>
   );
 }

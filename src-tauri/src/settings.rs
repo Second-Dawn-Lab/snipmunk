@@ -55,6 +55,11 @@ pub struct Settings {
     pub doc_zoom_default: bool,
     /// What a new guide records: "active" (the active app), "screen", "window" (a chosen window) or "region" (a chosen area).
     pub doc_area: String,
+    /// The editor's column: "narrow", "normal", "wide" or "fit", and its zoom in percent (50 to 200). A view setting, not part of a guide.
+    pub doc_page_width: String,
+    pub doc_zoom: u32,
+    /// How the editor's pages are sized: "auto" (100%, smaller where a page does not fit), "width", "page", or "none" (the zoom).
+    pub doc_fit: String,
     /// The colour of the click marker for a left (and middle) click (#RRGGBB), and for a right click.
     pub doc_marker_color: String,
     pub doc_marker_right: String,
@@ -68,6 +73,11 @@ pub struct Settings {
     pub doc_keep_full: bool,
     /// Where guides are saved by default ("" = Documents\Snipmunk).
     pub doc_guides_dir: String,
+    /// The template a new guide starts with (the id of a built-in or an own one).
+    pub doc_template: String,
+    /// The sidebar of the guide editor: its width in pixels (240 to 560) and whether it is folded to its tabs.
+    pub doc_panel_width: u32,
+    pub doc_panel_collapsed: bool,
     /// Show the magnifier loupe while selecting.
     pub show_magnifier: bool,
     // The last colors and sizes picked in the annotation tool popovers (used by the tools from Phase 5).
@@ -189,6 +199,9 @@ impl Default for Settings {
             doc_step_picture: "window".into(),
             doc_zoom_default: false,
             doc_area: "active".into(),
+            doc_page_width: "normal".into(),
+            doc_zoom: 100,
+            doc_fit: "auto".into(),
             doc_marker_color: "#FF5A36".into(),
             doc_marker_right: "#3B82F6".into(),
             doc_marker_shape: "circle".into(),
@@ -196,6 +209,9 @@ impl Default for Settings {
             doc_badge_style: "circle".into(),
             doc_keep_full: false,
             doc_guides_dir: String::new(),
+            doc_template: "basic".into(),
+            doc_panel_width: 300,
+            doc_panel_collapsed: false,
             show_magnifier: true,
             last_pen_color: "#E53935".into(),
             last_pen_size: 4,
@@ -331,6 +347,21 @@ impl Settings {
             &["auto", "manual"],
             &d.doc_step_mode,
         );
+        one_of(
+            &mut self.doc_page_width,
+            &["narrow", "normal", "wide", "fit"],
+            &d.doc_page_width,
+        );
+        self.doc_zoom = self.doc_zoom.clamp(50, 200);
+        one_of(
+            &mut self.doc_fit,
+            &["auto", "width", "page", "none"],
+            &d.doc_fit,
+        );
+        self.doc_panel_width = self.doc_panel_width.clamp(240, 560);
+        if self.doc_template.is_empty() || self.doc_template.len() > 100 {
+            self.doc_template = d.doc_template.clone();
+        }
         one_of(
             &mut self.doc_area,
             &["active", "screen", "window", "region"],

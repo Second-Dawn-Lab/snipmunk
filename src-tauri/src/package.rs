@@ -63,6 +63,56 @@ pub fn minor_needed(recording_json: &[u8]) -> u32 {
     }
 }
 
+/// Does a guide's template use something that came with minor version 2 (7.5-C2): own number colours, a custom text or the
+/// author in the header or footer, a formatted or dated cover, a table of contents, or a background picture placed in
+/// another way than behind the cover?
+fn template_needs_2(t: &serde_json::Value) -> bool {
+    let places = ["header", "footer"].iter().any(|bar| {
+        ["left", "center", "right"]
+            .iter()
+            .any(|side| matches!(t[bar][side].as_str(), Some("text" | "author")))
+    });
+    let numbers = t["steps"]["badgeBg"].is_string() || t["steps"]["badgeText"].is_string();
+    let cover = t["cover"]["rich"]
+        .as_object()
+        .is_some_and(|r| !r.is_empty())
+        || t["cover"]["dateText"]
+            .as_str()
+            .is_some_and(|d| !d.is_empty());
+    let b = &t["background"];
+    let background = t["cover"]["image"].is_string()
+        && (b["apply"].as_str().is_some_and(|a| a != "cover")
+            || b["size"].as_str().is_some_and(|a| a != "fill")
+            || b["x"].as_str().is_some_and(|a| a != "center")
+            || b["y"].as_str().is_some_and(|a| a != "center")
+            || b["opacity"].as_f64().is_some_and(|o| o < 100.0)
+            || b["grey"].as_bool() == Some(true));
+    places || numbers || cover || background || t["contents"].as_bool() == Some(true)
+}
+
+/// The minor version an entry needs. A recording: see `minor_needed`. A guide (`document.json`): 2 when its template uses what
+/// came with 7.5-C2, 1 (added in 7.5-C) when it carries a template or a step placed in a picture frame, which an older reader
+/// would not show; else 0.
+fn minor_for(name: &str, bytes: &[u8]) -> u32 {
+    match name {
+        "recording.json" => minor_needed(bytes),
+        "document.json" => {
+            let Ok(v) = serde_json::from_slice::<serde_json::Value>(bytes) else {
+                return 0;
+            };
+            let framed = v["blocks"]
+                .as_array()
+                .is_some_and(|a| a.iter().any(|b| b["frame"].is_object()));
+            if template_needs_2(&v["template"]) {
+                2
+            } else {
+                u32::from(v["template"].is_object() || framed)
+            }
+        }
+        _ => 0,
+    }
+}
+
 /// A manifest for a new package (the lowest minor version: `create` and `append_meta` raise it when the content needs it).
 pub fn new_manifest(kind: &str, version: u32) -> Manifest {
     Manifest {
@@ -107,8 +157,8 @@ pub(crate) fn tail_path(path: &Path) -> PathBuf {
 pub fn create(path: &Path, kind: &str, version: u32, sources: &[Source]) -> io::Result<()> {
     let mut manifest = new_manifest(kind, version);
     for s in sources {
-        if let (true, Data::Bytes(b)) = (s.name == "recording.json", &s.data) {
-            manifest.minor = manifest.minor.max(minor_needed(b));
+        if let Data::Bytes(b) = &s.data {
+            manifest.minor = manifest.minor.max(minor_for(&s.name, b));
         }
     }
     create_streaming(path, &manifest, sources)
@@ -241,8 +291,7 @@ pub fn append_meta(path: &Path, kind: &str, items: &[(String, Vec<u8>)]) -> io::
     // Effects that need a newer minor version raise it: a new manifest is saved the same way (the first entry stays as it was).
     let needed = items
         .iter()
-        .filter(|(n, _)| n == "recording.json")
-        .map(|(_, b)| minor_needed(b))
+        .map(|(n, b)| minor_for(n, b))
         .max()
         .unwrap_or(0);
     if needed > pkg.manifest.minor {
@@ -290,11 +339,22 @@ pub fn append_meta(path: &Path, kind: &str, items: &[(String, Vec<u8>)]) -> io::
 
 /// Write the current content of a package as a new, compact package (the stale versions of small items are left out): "Save as".
 pub fn compact(from: &Path, to: &Path, kind: &str) -> io::Result<()> {
+    compact_keeping(from, to, kind, |_| true)
+}
+
+/// `compact`, leaving out the entries whose name `keep` refuses. `to` may be `from`: the new package is written beside it and
+/// renamed over it.
+pub fn compact_keeping(
+    from: &Path,
+    to: &Path,
+    kind: &str,
+    keep: impl Fn(&str) -> bool,
+) -> io::Result<()> {
     let pkg = open(from, kind)?;
     let mut names: Vec<&String> = pkg
         .entries
         .keys()
-        .filter(|n| n.as_str() != MANIFEST && !n.starts_with("meta/"))
+        .filter(|n| n.as_str() != MANIFEST && !n.starts_with("meta/") && keep(n))
         .collect();
     names.sort();
     let mut sources: Vec<Source> = Vec::new();
@@ -308,7 +368,7 @@ pub fn compact(from: &Path, to: &Path, kind: &str) -> io::Result<()> {
                 .map(|(n, _)| n.to_string())
         })
         .collect();
-    metas.retain(|n| n != "manifest.json");
+    metas.retain(|n| n != "manifest.json" && keep(n));
     metas.sort();
     metas.dedup();
     for n in names {

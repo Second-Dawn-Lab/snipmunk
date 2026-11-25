@@ -243,6 +243,20 @@ pub fn set_state(id: &str, state: &str) -> CmdResult<()> {
     Ok(())
 }
 
+/// Change some of the settings a guide keeps (the others stay).
+pub fn set_settings(id: &str, changed: &serde_json::Value) -> CmdResult<()> {
+    if let Some(mut info) = read_info(id) {
+        if !info.settings.is_object() {
+            info.settings = serde_json::json!({});
+        }
+        if let (Some(all), Some(new)) = (info.settings.as_object_mut(), changed.as_object()) {
+            all.extend(new.clone());
+        }
+        write_info(&info)?;
+    }
+    Ok(())
+}
+
 pub fn finalize(id: &str) -> CmdResult<()> {
     if let Some(mut info) = read_info(id) {
         info.state = "done".into();

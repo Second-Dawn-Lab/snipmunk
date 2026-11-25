@@ -70,6 +70,87 @@ pub struct Meta {
     pub caption: Option<Caption>,
     /// The title of the page or tab (Chrome, Edge, Electron, web view apps) for a click without an element name.
     pub page: String,
+    /// The element holds text that is written (an editor, a text field): without a name of its own it is called that.
+    pub surface: Surface,
+}
+
+/// A control that holds written text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Surface {
+    #[default]
+    None,
+    /// A large text area: a text editor, a document.
+    Editor,
+    /// A text field of a form.
+    Field,
+}
+
+/// What kind of text control an element is, from its control type and its window class.
+pub fn surface_of(control: &str, class: &str) -> Surface {
+    let class = class.to_ascii_lowercase();
+    if class.starts_with("scintilla") || class.contains("richedit") || control == "Document" {
+        Surface::Editor
+    } else if control == "Edit" {
+        Surface::Field
+    } else {
+        Surface::None
+    }
+}
+
+/// A name longer than this is not the name of a control: it is what the control holds.
+const CONTENT_LENGTH: usize = 60;
+
+fn flat(s: &str) -> String {
+    s.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
+}
+
+/// Is `candidate` (a name of an element) really what the element holds? `content` are the pieces of its value and text.
+fn is_content(candidate: &str, content: &[String]) -> bool {
+    if candidate.trim().contains(['\n', '\r']) || candidate.chars().count() > CONTENT_LENGTH {
+        return true;
+    }
+    let name = flat(candidate);
+    content.iter().map(|c| flat(c)).any(|c| {
+        !c.is_empty()
+            && !name.is_empty()
+            && (c == name
+                || (name.chars().count() >= 4 && c.starts_with(&name))
+                || (c.chars().count() >= 8 && name.starts_with(&c)))
+    })
+}
+
+/// The name a step may use for an element, and what to call it without one. What a text control HOLDS is never a name:
+/// for a text control its label wins, then its own name when that is not its content; a Scintilla editor reports its whole
+/// text as its name. `content` is only compared with, never kept.
+pub fn safe_name(
+    control: &str,
+    class: &str,
+    name: &str,
+    label: &str,
+    content: &[String],
+) -> (String, Surface) {
+    let mut surface = surface_of(control, class);
+    if surface == Surface::None {
+        if !is_content(name, content) {
+            return (name.to_string(), Surface::None);
+        }
+        // Some other control whose name is its own text: a text area under another type.
+        if content.iter().any(|c| !c.trim().is_empty()) {
+            surface = Surface::Editor;
+        }
+        return (String::new(), surface);
+    }
+    let label = label.trim();
+    if !label.is_empty() && !is_content(label, content) {
+        return (label.to_string(), surface);
+    }
+    if !class.to_ascii_lowercase().starts_with("scintilla") && !is_content(name, content) {
+        return (name.to_string(), surface);
+    }
+    (String::new(), surface)
 }
 
 /// A part of the Windows shell.
@@ -162,7 +243,10 @@ pub fn clean_taskbar_name(raw: &str) -> String {
     clean_name(&s)
 }
 
-/// A name for people: trimmed, spaces collapsed, no trailing ":" "…" "...", at most 60 characters; "" for a raw id.
+/// The most characters of a name in a step text.
+const NAME_LENGTH: usize = 40;
+
+/// A name for people: trimmed, spaces collapsed, no trailing ":" "…" "...", at most 40 characters; "" for a raw id.
 pub fn clean_name(raw: &str) -> String {
     let collapsed = raw.split_whitespace().collect::<Vec<_>>().join(" ");
     let mut s = collapsed.trim().to_string();
@@ -180,10 +264,10 @@ pub fn clean_name(raw: &str) -> String {
     if looks_like_id(&s) {
         return String::new();
     }
-    if s.chars().count() > 60 {
+    if s.chars().count() > NAME_LENGTH {
         s = s
             .chars()
-            .take(59)
+            .take(NAME_LENGTH - 1)
             .collect::<String>()
             .trim_end()
             .to_string()
@@ -239,6 +323,10 @@ struct T {
     cap_max: &'static str,
     cap_restore: &'static str,
     cap_close: &'static str,
+    click_editor: &'static str,
+    click_textfield: &'static str,
+    type_editor: &'static str,
+    type_textfield: &'static str,
 }
 
 fn templates(lang: &str) -> T {
@@ -269,6 +357,10 @@ fn templates(lang: &str) -> T {
             cap_max: "Maximieren",
             cap_restore: "Wiederherstellen",
             cap_close: "Schließen",
+            click_editor: "Klicken Sie in den Editor",
+            click_textfield: "Klicken Sie in das Textfeld",
+            type_editor: "Geben Sie „{p0}“ in den Editor ein",
+            type_textfield: "Geben Sie „{p0}“ in das Textfeld ein",
         },
         "es" => T {
             click: "Haz clic en {b0}",
@@ -296,6 +388,10 @@ fn templates(lang: &str) -> T {
             cap_max: "Maximizar",
             cap_restore: "Restaurar",
             cap_close: "Cerrar",
+            click_editor: "Haz clic en el editor",
+            click_textfield: "Haz clic en el campo de texto",
+            type_editor: "Escribe «{p0}» en el editor",
+            type_textfield: "Escribe «{p0}» en el campo de texto",
         },
         "fr" => T {
             click: "Cliquez sur {b0}",
@@ -323,6 +419,10 @@ fn templates(lang: &str) -> T {
             cap_max: "Agrandir",
             cap_restore: "Restaurer",
             cap_close: "Fermer",
+            click_editor: "Cliquez dans l’éditeur",
+            click_textfield: "Cliquez dans le champ de texte",
+            type_editor: "Saisissez « {p0} » dans l’éditeur",
+            type_textfield: "Saisissez « {p0} » dans le champ de texte",
         },
         "it" => T {
             click: "Fai clic su {b0}",
@@ -350,6 +450,10 @@ fn templates(lang: &str) -> T {
             cap_max: "Ingrandisci",
             cap_restore: "Ripristina",
             cap_close: "Chiudi",
+            click_editor: "Fai clic nell’editor",
+            click_textfield: "Fai clic nel campo di testo",
+            type_editor: "Digita \"{p0}\" nell’editor",
+            type_textfield: "Digita \"{p0}\" nel campo di testo",
         },
         "nl" => T {
             click: "Klik op {b0}",
@@ -377,6 +481,10 @@ fn templates(lang: &str) -> T {
             cap_max: "Maximaliseren",
             cap_restore: "Herstellen",
             cap_close: "Sluiten",
+            click_editor: "Klik in de editor",
+            click_textfield: "Klik in het tekstveld",
+            type_editor: "Typ \"{p0}\" in de editor",
+            type_textfield: "Typ \"{p0}\" in het tekstveld",
         },
         "pl" => T {
             click: "Kliknij {b0}",
@@ -404,6 +512,10 @@ fn templates(lang: &str) -> T {
             cap_max: "Maksymalizuj",
             cap_restore: "Przywróć",
             cap_close: "Zamknij",
+            click_editor: "Kliknij w edytorze",
+            click_textfield: "Kliknij pole tekstowe",
+            type_editor: "Wpisz „{p0}” w edytorze",
+            type_textfield: "Wpisz „{p0}” w polu tekstowym",
         },
         "tr" => T {
             click: "{b0} öğesine tıklayın",
@@ -431,6 +543,10 @@ fn templates(lang: &str) -> T {
             cap_max: "Ekranı kapla",
             cap_restore: "Önceki boyut",
             cap_close: "Kapat",
+            click_editor: "Düzenleyicide tıklayın",
+            click_textfield: "Metin alanına tıklayın",
+            type_editor: "Düzenleyiciye “{p0}” yazın",
+            type_textfield: "Metin alanına “{p0}” yazın",
         },
         "zh" => {
             if lang.contains("Hant") || lang.ends_with("TW") || lang.ends_with("HK") {
@@ -460,6 +576,10 @@ fn templates(lang: &str) -> T {
                     cap_max: "最大化",
                     cap_restore: "還原",
                     cap_close: "關閉",
+                    click_editor: "在編輯器中點選",
+                    click_textfield: "點選文字欄位",
+                    type_editor: "在編輯器中輸入「{p0}」",
+                    type_textfield: "在文字欄位中輸入「{p0}」",
                 }
             } else {
                 T {
@@ -488,6 +608,10 @@ fn templates(lang: &str) -> T {
                     cap_max: "最大化",
                     cap_restore: "还原",
                     cap_close: "关闭",
+                    click_editor: "在编辑器中点击",
+                    click_textfield: "点击文本框",
+                    type_editor: "在编辑器中输入“{p0}”",
+                    type_textfield: "在文本框中输入“{p0}”",
                 }
             }
         }
@@ -517,6 +641,10 @@ fn templates(lang: &str) -> T {
             cap_max: "تكبير",
             cap_restore: "استعادة",
             cap_close: "إغلاق",
+            click_editor: "انقر في المحرر",
+            click_textfield: "انقر في حقل النص",
+            type_editor: "اكتب «{p0}» في المحرر",
+            type_textfield: "اكتب «{p0}» في حقل النص",
         },
         "ur" => T {
             click: "{b0} پر کلک کریں",
@@ -544,6 +672,10 @@ fn templates(lang: &str) -> T {
             cap_max: "بڑا کریں",
             cap_restore: "بحال کریں",
             cap_close: "بند کریں",
+            click_editor: "ایڈیٹر میں کلک کریں",
+            click_textfield: "متن کے خانے میں کلک کریں",
+            type_editor: "ایڈیٹر میں «{p0}» لکھیں",
+            type_textfield: "متن کے خانے میں «{p0}» لکھیں",
         },
         _ => T {
             click: "Click {b0}",
@@ -571,6 +703,10 @@ fn templates(lang: &str) -> T {
             cap_max: "Maximize",
             cap_restore: "Restore",
             cap_close: "Close",
+            click_editor: "Click in the editor",
+            click_textfield: "Click in the text field",
+            type_editor: "Type '{p0}' in the editor",
+            type_textfield: "Type '{p0}' in the text field",
         },
     }
 }
@@ -679,7 +815,11 @@ pub fn step_text(kind: Kind, m: &Meta, lang: &str) -> Vec<Part> {
         Kind::Type => {
             let text = m.typed.as_str();
             if name.is_empty() {
-                render(t.type_plain, &[text])
+                match m.surface {
+                    Surface::Editor => render(t.type_editor, &[text]),
+                    Surface::Field => render(t.type_textfield, &[text]),
+                    Surface::None => render(t.type_plain, &[text]),
+                }
             } else {
                 render(t.type_in, &[text, &name])
             }
@@ -700,7 +840,16 @@ pub fn step_text(kind: Kind, m: &Meta, lang: &str) -> Vec<Part> {
             }
         }
         Kind::Click => {
-            if name.is_empty() {
+            if name.is_empty() && m.surface != Surface::None {
+                render(
+                    if m.surface == Surface::Editor {
+                        t.click_editor
+                    } else {
+                        t.click_textfield
+                    },
+                    &[],
+                )
+            } else if name.is_empty() {
                 if window.is_empty() {
                     render(t.click_here, &[])
                 } else if !page.is_empty() && page != window {
@@ -753,6 +902,7 @@ pub fn step_text(kind: Kind, m: &Meta, lang: &str) -> Vec<Part> {
     // (a click that named the page already said where it was)
     let page_used = kind == Kind::Click
         && name.is_empty()
+        && m.surface == Surface::None
         && !window.is_empty()
         && !page.is_empty()
         && page != window;
@@ -1057,6 +1207,91 @@ mod tests {
     }
 
     #[test]
+    fn what_a_text_control_holds_is_never_its_name() {
+        let held =
+            "Name : Sam\r\nemail : k@qmail.com\r\npassword: 7741kqz558w\r\nIban: DE89 3704 0044";
+        let content = vec![held.to_string()];
+        // Notepad++: a Scintilla pane that gives its whole text as its name.
+        assert_eq!(
+            safe_name("Pane", "Scintilla", held, "", &content),
+            (String::new(), Surface::Editor)
+        );
+        // Scintilla's name is its text even when nothing else says so.
+        assert_eq!(
+            safe_name("Pane", "Scintilla", "secret", "", &[]),
+            (String::new(), Surface::Editor)
+        );
+        // An edit box named by its value; one with a label; one with a name of its own.
+        let value = vec!["7741kqz558w".to_string()];
+        assert_eq!(
+            safe_name("Edit", "Edit", "7741kqz558w", "", &value),
+            (String::new(), Surface::Field)
+        );
+        assert_eq!(
+            safe_name("Edit", "Edit", "7741kqz558w", "Password", &value),
+            ("Password".into(), Surface::Field)
+        );
+        assert_eq!(
+            safe_name("Edit", "", "City", "", &["Hamburg".into()]),
+            ("City".into(), Surface::Field)
+        );
+        // A browser textarea or contenteditable area whose name is the beginning of what was written.
+        assert_eq!(
+            safe_name(
+                "Group",
+                "",
+                "Dear Ali, your code is",
+                "",
+                &["Dear Ali, your code is 4711".into()]
+            ),
+            (String::new(), Surface::Editor)
+        );
+        // A rich edit with the name of the app's editor.
+        assert_eq!(
+            safe_name("Document", "RichEditD2DPT", "Text editor", "", &content),
+            ("Text editor".into(), Surface::Editor)
+        );
+        // A long text on a page is not a name; a button keeps its name.
+        assert_eq!(
+            safe_name("Text", "", &"word ".repeat(30), "", &[]),
+            (String::new(), Surface::None)
+        );
+        assert_eq!(
+            safe_name("Button", "", "Save", "", &[]),
+            ("Save".into(), Surface::None)
+        );
+    }
+
+    #[test]
+    fn an_unnamed_text_control_is_called_the_editor_or_the_text_field() {
+        let m = Meta {
+            control: "Pane".into(),
+            window: "Notepad++".into(),
+            new_window: true,
+            surface: Surface::Editor,
+            ..Default::default()
+        };
+        assert_eq!(
+            plain(&step_text(Kind::Click, &m, "en")),
+            "Click in the editor in Notepad++"
+        );
+        let m = Meta {
+            surface: Surface::Field,
+            typed: "abc".into(),
+            window: "App".into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            plain(&step_text(Kind::Type, &m, "en")),
+            "Type 'abc' in the text field"
+        );
+        assert_eq!(
+            plain(&step_text(Kind::Click, &m, "de")),
+            "Klicken Sie in das Textfeld"
+        );
+    }
+
+    #[test]
     fn names_are_cleaned_and_raw_ids_are_never_shown() {
         assert_eq!(clean_name("  Save   as…  "), "Save as");
         assert_eq!(clean_name("City:"), "City");
@@ -1067,7 +1302,7 @@ mod tests {
         assert_eq!(clean_name("Save"), "Save");
         assert_eq!(clean_name("Sparkasse Hamburg"), "Sparkasse Hamburg");
         let long = "x ".repeat(80);
-        assert!(clean_name(&long).chars().count() <= 60);
+        assert!(clean_name(&long).chars().count() <= 40);
         // An id as the name falls back to the window.
         assert_eq!(
             plain(&step_text(Kind::Click, &meta("Button", "btnSave_1"), "en")),

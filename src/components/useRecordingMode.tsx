@@ -6,8 +6,7 @@ import { formatTime } from "../recording/timeline";
 import { sessionStore } from "../sessionStore";
 import type { Settings } from "../settings/defaults";
 import { AppIcon } from "./AppIcons";
-import { MenuItem } from "./MenuItem";
-import { Pop } from "./Pop";
+import { recordingEntries, type FileEntry } from "./fileEntries";
 
 const LAST_FOLDER = "snipmunk.projectFolder";
 /** The key of the tab of the current recording; project tabs have the id of their project. */
@@ -280,12 +279,27 @@ export function useRecordingMode(args: {
     void ipc.projectJournal().then((list) => list.length > 0 && setRestore(list)).catch(() => undefined);
   }, []);
 
+  // Rename (click on the name, F2 or the File menu).
+  const name = project ? project.name : current?.name ?? "";
+  const [renaming, setRenaming] = useState(false);
+  const [draft, setDraft] = useState("");
+  const startRename = () => {
+    setDraft(name);
+    setRenaming(true);
+  };
+
   // Keys: Ctrl+S saves the active project, Ctrl+O opens one, Ctrl+W closes the active project tab, Ctrl+Tab switches tabs.
   const keys = [...(current ? [CURRENT] : []), ...tabs.map((p) => p.id)];
   const activeNow = project ? project.id : CURRENT;
   useEffect(() => {
     if (!recMode) return;
     const onKey = (e: KeyboardEvent) => {
+      // F2 renames what is on show (while the header has no focus too).
+      if (e.key === "F2" && shown && !renaming && !(e.target as HTMLElement | null)?.closest?.("input,textarea,select")) {
+        e.preventDefault();
+        startRename();
+        return;
+      }
       if (!e.ctrlKey || e.altKey) return;
       const k = e.key.toLowerCase();
       if (k === "tab" && keys.length > 1) {
@@ -312,18 +326,9 @@ export function useRecordingMode(args: {
 
   // --- what the window shows -------------------------------------------------------------------------------------------------
 
-  const name = project ? project.name : current?.name ?? "";
-
-  // Rename (click on the name or F2): the current recording is renamed in temp (it is the default file name of a project and of
-  // exports); a project's display name inside the package changes (the file on disk keeps its name; saved with the next save).
-  const [renaming, setRenaming] = useState(false);
-  const [draft, setDraft] = useState("");
-  const [menuOpen, setMenuOpen] = useState(false);
+  // A new name: the current recording is renamed in temp (it is the default file name of a project and of exports); a project's
+  // display name inside the package changes (the file on disk keeps its name; saved with the next save).
   const [discardAsk, setDiscardAsk] = useState(false);
-  const startRename = () => {
-    setDraft(name);
-    setRenaming(true);
-  };
   const commitRename = () => {
     setRenaming(false);
     const next = draft.trim();
@@ -346,56 +351,26 @@ export function useRecordingMode(args: {
 
   const status = project ? (dirty ? "edited" : "saved") : currentUnsaved ? "notSaved" : "saved";
   const sizeText = shown ? `${shown.width} × ${shown.height}${shown.durationMs ? ` · ${formatTime(shown.durationMs / 1000)}` : ""}` : "";
-  const close = () => setMenuOpen(false);
 
-  // The header: the File menu and the main button on the left, the name, status and size on the right (mirrored in right-to-left).
+  // The File menu of the top bar in this mode.
+  const fileEntries: FileEntry[] = recordingEntries(
+    t,
+    { shown: !!shown, project: !!project, dirty, busy, recent },
+    {
+      open,
+      save: () => void (project ? saveEdits() : saveCurrent()),
+      saveAs: () => void saveAs(),
+      rename: startRename,
+      explorer: () => project && void ipc.openFolder(project.path).catch((e) => setError(errorText(e))),
+      close: () => project && closeTab(project.id),
+      discard: () => setDiscardAsk(true),
+      openRecent: (path) => void openPath(path),
+    },
+  );
+
+  // The header: the name, status and size (what can be done with the file is in the File menu).
   const header: ReactNode = shown && (
     <div className="recheader" role="group" aria-label={t("proj.header")}>
-      <Pop
-        open={menuOpen}
-        onClose={close}
-        kind="menu"
-        label={t("proj.file")}
-        align="start"
-        trigger={
-          <button type="button" className="recheader__file" aria-haspopup="menu" aria-expanded={menuOpen} onClick={() => setMenuOpen((o) => !o)}>
-            {t("proj.file")}
-            <AppIcon name="chevron" size={13} />
-          </button>
-        }
-      >
-        <MenuItem label={t("proj.open")} hint="Ctrl+O" onSelect={() => (close(), open())} />
-        <MenuItem
-          label={project ? t("proj.saveAsCopy") : t("proj.saveAs")}
-          disabled={busy}
-          onSelect={() => (close(), void (project ? saveAs() : saveCurrent()))}
-        />
-        {project && <MenuItem label={t("ctx.showInExplorer")} onSelect={() => (close(), void ipc.openFolder(project.path).catch((e) => setError(errorText(e))))} />}
-        {project && <MenuItem label={t("proj.close")} hint="Ctrl+W" onSelect={() => (close(), closeTab(project.id))} />}
-        {!project && current && <MenuItem label={t("proj.discard")} danger onSelect={() => (close(), setDiscardAsk(true))} />}
-        {recent.length > 0 && (
-          <>
-            <div className="menuitem__heading">{t("proj.recent")}</div>
-            {recent.slice(0, 6).map((r) => (
-              <MenuItem key={r.path} label={r.name} disabled={!r.exists} onSelect={() => (close(), void openPath(r.path))} />
-            ))}
-          </>
-        )}
-      </Pop>
-      {project ? (
-        dirty ? (
-          <Button variant="primary" disabled={busy} onClick={() => void saveEdits()} title="Ctrl+S">
-            {t("proj.save")}
-          </Button>
-        ) : (
-          <Button disabled>{t("proj.statusSaved")}</Button>
-        )
-      ) : (
-        <Button variant="primary" disabled={busy} onClick={() => void saveCurrent()}>
-          {t("proj.saveAs")}
-        </Button>
-      )}
-      <span className="recheader__spacer" />
       <AppIcon name="video" size={18} />
       {renaming ? (
         <input
@@ -771,5 +746,5 @@ export function useRecordingMode(args: {
     </>
   );
 
-  return { shown, project, dirty, header, tabsBar, empty, dialogs, edited, startRecording, open, folder };
+  return { shown, project, dirty, header, tabsBar, empty, dialogs, edited, startRecording, open, folder, fileEntries };
 }

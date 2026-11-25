@@ -5,6 +5,7 @@ import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { NodeViewWrapper, ReactNodeViewRenderer, type NodeViewProps } from "@tiptap/react";
 import { useRef, useState, type PointerEvent as RPointerEvent } from "react";
 import { useT } from "../i18n";
+import { columnWidths, tableWidth, type PmNode as PmJson } from "./export/html";
 
 /** A crop of an image: x, y, width, height as fractions (0..1) of the original. The original stays in the guide. */
 export type ImgCrop = [number, number, number, number];
@@ -87,14 +88,16 @@ function ImageView(props: NodeViewProps) {
     if (!el) return;
     const r = el.getBoundingClientRect();
     const max = (el.closest(".ProseMirror") as HTMLElement | null)?.clientWidth ?? 900;
-    const start = { x: e.clientX, y: e.clientY, w: r.width, h: r.height };
+    // (the page may be shown smaller or larger: the pointer moves on the screen, the width is the page's)
+    const zoom = r.width / Math.max(1, el.offsetWidth) || 1;
+    const start = { x: e.clientX, y: e.clientY, w: r.width / zoom, h: r.height / zoom };
     const sx = corner.endsWith("e") ? 1 : -1;
     const sy = corner.startsWith("s") ? 1 : -1;
     const target = e.currentTarget as Element;
     target.setPointerCapture(e.pointerId);
     const move = (ev: PointerEvent) => {
-      const w = clamp(start.w + sx * (ev.clientX - start.x), 40, max);
-      if (ev.shiftKey) update({ width: Math.round(w), height: Math.round(clamp(start.h + sy * (ev.clientY - start.y), 24, 4000)), align: a.align === "full" ? "start" : a.align });
+      const w = clamp(start.w + (sx * (ev.clientX - start.x)) / zoom, 40, max);
+      if (ev.shiftKey) update({ width: Math.round(w), height: Math.round(clamp(start.h + (sy * (ev.clientY - start.y)) / zoom, 24, 4000)), align: a.align === "full" ? "start" : a.align });
       else update({ width: Math.round(w), height: null, align: a.align === "full" ? "start" : a.align });
     };
     const up = () => {
@@ -247,7 +250,17 @@ export const GuideTable = Table.extend({
             state.doc.descendants((node, pos) => {
               if (node.type.name === "table") {
                 const al = (node.attrs.align as TableAlign | undefined) ?? "start";
-                if (al !== "start") out.push(Decoration.node(pos, pos + node.nodeSize, { class: `tbl-${al}` }));
+                const widths = columnWidths(node.toJSON() as PmJson);
+                // A table whose columns have no widths of their own is as wide here as it is printed.
+                const free = widths.some((w) => !w);
+                const classes = [al !== "start" ? `tbl-${al}` : "", free ? "tbl-auto" : ""].filter(Boolean).join(" ");
+                if (classes) out.push(Decoration.node(pos, pos + node.nodeSize, { class: classes, ...(free ? { style: `--tbl-width:${tableWidth(widths, al)}` } : {}) }));
+                // Every other row is marked: stripes that stay right when rows are added between two pages.
+                let at = pos + 1;
+                node.forEach((row, _offset, i) => {
+                  if (i % 2 === 1) out.push(Decoration.node(at, at + row.nodeSize, { class: "z" }));
+                  at += row.nodeSize;
+                });
                 return false;
               }
               return true;

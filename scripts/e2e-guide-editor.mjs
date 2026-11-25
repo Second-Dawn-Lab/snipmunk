@@ -38,6 +38,8 @@ const ev = (expression) =>
   });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const invoke = (cmd, args = {}) => ev(`window.__TAURI_INTERNALS__.invoke(${JSON.stringify(cmd)}, ${JSON.stringify(args)})`);
+// (a test instance must never be able to capture the real desktop: asked before anything is clicked)
+if ((await ev("window.__TAURI_INTERNALS__.invoke('dev_capture_guard').catch(() => false)")) !== true) throw new Error("STOP: the test instance has no no-real-capture guard");
 let failed = 0;
 const check = (ok, what, extra = "") => {
   console.log(`${ok ? "PASS" : "FAIL"}  ${what}${extra ? "  " + extra : ""}`);
@@ -152,7 +154,7 @@ const mvStep = await ev(`(async () => {
   const r = el.getBoundingClientRect(), v = list.getBoundingClientRect();
   const visible = r.bottom > v.top && r.top < v.bottom;
   const centred = Math.abs((r.top + r.bottom) / 2 - (v.top + v.bottom) / 2) < 10;
-  return { visible, centred, flushWithEdge: Math.abs(r.top - v.top) < 3 || Math.abs(r.bottom - v.bottom) < 3 };
+  return { visible, centred, flushWithEdge: Math.abs(r.top - v.top) < 3 || Math.abs(r.bottom - v.bottom) < 3, block: [Math.round(r.top), Math.round(r.bottom)], view: [Math.round(v.top), Math.round(v.bottom)] };
 })()`);
 check(mvStep.visible && !mvStep.centred && mvStep.flushWithEdge, "a moved step that left the view is brought back to the nearest edge, not centred", JSON.stringify(mvStep));
 

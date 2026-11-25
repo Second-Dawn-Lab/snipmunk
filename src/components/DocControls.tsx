@@ -33,7 +33,8 @@ export function DocControls(props: { settings: Settings; onPatch: (change: Parti
         kind="menu"
         label={t("guide.area")}
         trigger={
-          <span className="splitbtn splitbtn--doc">
+          // (the red of "Add capture" and "Record": the one button that starts something new)
+          <span className="splitbtn">
             <button type="button" className="splitbtn__main" title={t("docs.newTip", { hotkey: settings.docStartHotkey })} onClick={() => props.onNew()}>
               <AppIcon name="documents" size={17} />
               <span>{t("docs.new")}</span>

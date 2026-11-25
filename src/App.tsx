@@ -4,6 +4,7 @@ import { applyTheme } from "@seconddawn/ui";
 import { useEffect, useState } from "react";
 import { MainWindow } from "./components/MainWindow";
 import { GuideBar } from "./components/GuideBar";
+import { GuideFrame } from "./components/GuideFrame";
 import { ScrollPill } from "./components/ScrollPill";
 import { WebcamBubble } from "./components/WebcamBubble";
 import { RecBar } from "./components/RecBar";
@@ -84,6 +85,7 @@ function Root({ label }: { label: string }) {
   if (label === "toast") return <Toast />;
   if (label === "countdown") return <Countdown />;
   if (label === "recframe") return <div className="recframe" />;
+  if (label === "guideframe") return <GuideFrame />;
   if (label === "recbar") return <RecBar />;
   if (label === "webcambubble") return <WebcamBubble />;
   if (label === "scrollpill") return <ScrollPill />;

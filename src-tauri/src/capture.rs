@@ -49,11 +49,24 @@ pub struct Capture {
     run: Mutex<Option<Run>>,
     /// The running selection is for a screen recording, not for a screenshot.
     recording: AtomicBool,
-    /// The recording overlay was opened to choose the window or region of a new guide.
-    guide_pick: AtomicBool,
+    /// The recording overlay was opened to choose the window or region of a new guide: the mode the overlay shows. It is kept here
+    /// (never written to the settings: choosing a guide's area changes no recording setting).
+    guide_mode: Mutex<Option<String>>,
+    /// What is chosen for the guide besides the area: whether the steps join the open guide, and the countdown chosen on
+    /// the overlay (for this start only; the recording's countdown setting is not changed).
+    guide_pick: Mutex<GuidePick>,
     /// A capture is in progress (countdown, overlays, or saving).
     busy: AtomicBool,
     next_id: AtomicU64,
+}
+
+/// The choices of a guide's area pick besides the area.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct GuidePick {
+    /// "Record more steps": the steps join the open guide.
+    pub append: bool,
+    /// The countdown chosen on the overlay; `None`: the one of the settings.
+    pub countdown: Option<u32>,
 }
 
 impl Capture {
@@ -61,7 +74,8 @@ impl Capture {
         Self {
             run: Mutex::new(None),
             recording: AtomicBool::new(false),
-            guide_pick: AtomicBool::new(false),
+            guide_mode: Mutex::new(None),
+            guide_pick: Mutex::new(GuidePick::default()),
             busy: AtomicBool::new(false),
             next_id: AtomicU64::new(1),
         }
@@ -184,7 +198,8 @@ fn finish_run(app: &AppHandle) {
     release_own_windows(app);
     let capture = app.state::<Capture>();
     capture.recording.store(false, Ordering::SeqCst);
-    capture.guide_pick.store(false, Ordering::SeqCst);
+    *capture.guide_mode.lock().unwrap() = None;
+    *capture.guide_pick.lock().unwrap() = GuidePick::default();
     *capture.run.lock().unwrap() = None;
     capture.busy.store(false, Ordering::SeqCst);
 }
@@ -198,9 +213,25 @@ fn fail(app: &AppHandle, message: &str) {
     crate::tray::show_main(app);
 }
 
+/// A test instance (a development build started with `SNIPMUNK_NO_REAL_CAPTURE` set) never grabs the desktop, records it or
+/// hooks the input, whatever a test script clicks. Every start of a real capture or recording asks this first.
+pub fn real_capture_blocked() -> bool {
+    let blocked = cfg!(debug_assertions) && std::env::var_os("SNIPMUNK_NO_REAL_CAPTURE").is_some();
+    if blocked {
+        eprintln!("[test] a real capture was asked for and refused (SNIPMUNK_NO_REAL_CAPTURE)");
+    }
+    blocked
+}
+
+/// Is the guard of a test instance active? A test script asks this before it clicks anything; it grabs nothing.
+#[tauri::command]
+pub fn dev_capture_guard() -> bool {
+    cfg!(debug_assertions) && std::env::var_os("SNIPMUNK_NO_REAL_CAPTURE").is_some()
+}
+
 /// Start a capture (from the shortcut, the button or the tray). Does nothing while another capture is running.
 pub fn trigger(app: &AppHandle) {
-    if app.state::<Capture>().busy.swap(true, Ordering::SeqCst) {
+    if real_capture_blocked() || app.state::<Capture>().busy.swap(true, Ordering::SeqCst) {
         return;
     }
     run_flow(app);
@@ -210,7 +241,7 @@ pub fn trigger(app: &AppHandle) {
 /// recording countdown. Does nothing while another capture is running.
 pub fn trigger_recording(app: &AppHandle) {
     let capture = app.state::<Capture>();
-    if capture.busy.swap(true, Ordering::SeqCst) {
+    if real_capture_blocked() || capture.busy.swap(true, Ordering::SeqCst) {
         return;
     }
     capture.recording.store(true, Ordering::SeqCst);
@@ -218,8 +249,9 @@ pub fn trigger_recording(app: &AppHandle) {
     std::thread::spawn(move || begin(&app));
 }
 
-/// Choose the window ("window") or the region ("region") of a new guide on the selection overlay. `false` while another capture runs.
-pub fn pick_guide_area(app: &AppHandle, word: &str) -> bool {
+/// Choose the window ("window") or the region ("region") of a new guide, or (`append`) of more steps of the open one, on
+/// the selection overlay. `false` while another capture runs.
+pub fn pick_guide_area(app: &AppHandle, word: &str, append: bool) -> bool {
     let capture = app.state::<Capture>();
     if capture.busy.load(Ordering::SeqCst) {
         return false;
@@ -229,10 +261,11 @@ pub fn pick_guide_area(app: &AppHandle, word: &str) -> bool {
     } else {
         "rectangle"
     };
-    if crate::commands::patch_settings(app, serde_json::json!({ "recMode": mode })).is_err() {
-        return false;
-    }
-    capture.guide_pick.store(true, Ordering::SeqCst);
+    *capture.guide_mode.lock().unwrap() = Some(mode.to_string());
+    *capture.guide_pick.lock().unwrap() = GuidePick {
+        append,
+        countdown: None,
+    };
     trigger_recording(app);
     true
 }
@@ -412,6 +445,28 @@ pub struct OverlayInfo {
     height: u32,
 }
 
+/// The mode an overlay shows: the one of a guide's area pick when there is one, else the recording's or the screenshot's setting.
+pub fn overlay_mode(
+    recording: bool,
+    guide: Option<&str>,
+    rec_mode: &str,
+    capture_mode: &str,
+) -> String {
+    match (recording, guide) {
+        (true, Some(g)) => g.to_string(),
+        (true, None) => rec_mode.to_string(),
+        (false, _) => capture_mode.to_string(),
+    }
+}
+
+/// The countdown an overlay of a recording shows: for a guide's pick the one chosen there, else the recording's setting.
+pub fn overlay_countdown(guide: bool, chosen: Option<u32>, setting: u32) -> u32 {
+    match chosen {
+        Some(seconds) if guide => seconds,
+        _ => setting,
+    }
+}
+
 /// An overlay page asks what to display; `None` when no capture is running (a stale or idle overlay).
 #[tauri::command]
 pub fn capture_overlay_info(
@@ -434,13 +489,16 @@ pub fn capture_overlay_info(
         index,
         count: run.screens.len(),
         focus: index == run.focus,
-        mode: if recording {
-            settings.rec_mode.clone()
-        } else {
-            settings.capture_mode.clone()
-        },
+        mode: overlay_mode(
+            recording,
+            capture.guide_mode.lock().unwrap().as_deref(),
+            &settings.rec_mode,
+            &settings.capture_mode,
+        ),
         delay: if recording {
-            settings.rec_countdown
+            let guide = capture.guide_mode.lock().unwrap().is_some();
+            let chosen = capture.guide_pick.lock().unwrap().countdown;
+            overlay_countdown(guide, chosen, settings.rec_countdown)
         } else {
             settings.capture_delay
         },
@@ -499,7 +557,19 @@ pub fn capture_set_mode(app: AppHandle, mode: String) -> CmdResult<()> {
                 "a recording has no freeform area",
             ));
         }
-        crate::commands::patch_settings(&app, serde_json::json!({ "recMode": mode }))?;
+        let capture = app.state::<Capture>();
+        let guide = {
+            let mut g = capture.guide_mode.lock().unwrap();
+            if g.is_some() {
+                *g = Some(mode.clone());
+                true
+            } else {
+                false
+            }
+        };
+        if !guide {
+            crate::commands::patch_settings(&app, serde_json::json!({ "recMode": mode }))?;
+        }
         let _ = app.emit("capture-mode", &mode);
         return Ok(());
     }
@@ -517,6 +587,12 @@ pub fn capture_set_delay(app: AppHandle, delay: u32) -> CmdResult<()> {
         return Err(CmdError::new("bad_request", "unknown delay"));
     }
     if app.state::<Capture>().recording.load(Ordering::SeqCst) {
+        // A guide's pick keeps its countdown to itself: the recording setting stays as it is.
+        let capture = app.state::<Capture>();
+        if capture.guide_mode.lock().unwrap().is_some() {
+            capture.guide_pick.lock().unwrap().countdown = Some(delay);
+            return Ok(());
+        }
         // The recording countdown runs after the area is chosen: only the setting changes.
         crate::commands::patch_settings(&app, serde_json::json!({ "recCountdown": delay }))?;
         return Ok(());
@@ -673,14 +749,15 @@ pub fn capture_finish(app: AppHandle, args: FinishArgs) -> CmdResult<()> {
             .window_hwnd
             .filter(|_| args.mode == "window")
             .map(|h| h as usize);
-        if capture.guide_pick.swap(false, Ordering::SeqCst) {
+        if capture.guide_mode.lock().unwrap().take().is_some() {
             // The window or region of a new guide: the guide starts now (after its countdown).
             let target = match hwnd {
                 Some(h) => crate::steprec::AreaMode::Window(h as isize),
                 None => crate::steprec::AreaMode::Region(area),
             };
+            let pick = std::mem::take(&mut *capture.guide_pick.lock().unwrap());
             capture.busy.store(false, Ordering::SeqCst);
-            crate::steprec::area_picked(&app, target);
+            crate::steprec::area_picked(&app, target, pick);
             return Ok(());
         }
         std::thread::spawn(move || {
@@ -746,6 +823,32 @@ pub fn capture_finish(app: AppHandle, args: FinishArgs) -> CmdResult<()> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn choosing_a_guides_area_shows_its_mode_without_touching_the_recording_mode() {
+        assert_eq!(
+            overlay_mode(true, Some("window"), "fullscreen", "rectangle"),
+            "window"
+        );
+        assert_eq!(
+            overlay_mode(true, Some("rectangle"), "window", "freeform"),
+            "rectangle"
+        );
+        // Without a guide pick the overlay shows the recording's own mode (which the pick never writes).
+        assert_eq!(
+            overlay_mode(true, None, "fullscreen", "rectangle"),
+            "fullscreen"
+        );
+        assert_eq!(
+            overlay_mode(false, Some("window"), "fullscreen", "freeform"),
+            "freeform"
+        );
+        // The pick function does not write the settings at all.
+        let src = include_str!("capture.rs");
+        let from = src.find("pub fn pick_guide_area").unwrap();
+        let body = &src[from..from + src[from..].find("\n}").unwrap()];
+        assert!(!body.contains("patch_settings"), "{body}");
+    }
+
     use super::*;
     use dawn_capture::Frame;
 
@@ -903,5 +1006,14 @@ mod tests {
         for d in [1, 2, 4, 7, 60, u32::MAX] {
             assert!(!is_delay(d), "{d}");
         }
+    }
+
+    #[test]
+    fn the_countdown_chosen_for_a_guide_is_only_its_own() {
+        assert_eq!(overlay_countdown(true, Some(10), 3), 10);
+        assert_eq!(overlay_countdown(true, Some(0), 3), 0);
+        assert_eq!(overlay_countdown(true, None, 3), 3);
+        // A screen recording shows its setting, whatever a guide's pick chose.
+        assert_eq!(overlay_countdown(false, Some(10), 3), 3);
     }
 }

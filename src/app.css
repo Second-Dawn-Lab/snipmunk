@@ -114,7 +114,6 @@ html[lang="ur"] body {
 }
 html[lang="ur"] .dw-btn,
 html[lang="ur"] .splitbtn__main,
-html[lang="ur"] .editbtn,
 html[lang="ur"] .tool--labelled {
   line-height: 1.5;
 }
@@ -189,11 +188,6 @@ html[lang="ur"] .tool--labelled {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.titlebar__actions {
-  display: flex;
-  align-items: center;
-}
-
 /* Window buttons of the custom title bar */
 .winctl {
   display: flex;
@@ -250,6 +244,8 @@ html[lang="ur"] .tool--labelled {
   margin-inline-start: auto;
   gap: 4px;
 }
+/* Between the File menu and the main button of the mode. */
+.topbar__divider { align-self: stretch; width: 1px; margin-block: 6px; margin-inline: 2px; background: var(--dw-border-strong, rgba(128,128,128,.4)); }
 
 /* A button that opens a popover next to it: the wrapper takes the size of the trigger. */
 .pop {
@@ -351,24 +347,6 @@ html[lang="ur"] .tool--labelled {
   cursor: default;
 }
 
-.editbtn {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  height: 34px;
-  padding-inline: 10px 12px;
-  border: 1px solid transparent;
-  border-radius: var(--dw-radius-sm);
-  background: transparent;
-  color: var(--dw-text);
-  font-weight: 600;
-  white-space: nowrap;
-  cursor: pointer;
-}
-.editbtn:hover {
-  background: var(--dw-surface-2);
-}
-.editbtn[aria-disabled="true"],
 .dw-iconbtn[aria-disabled="true"] {
   opacity: 0.55;
   cursor: default;
@@ -1434,9 +1412,6 @@ body.is-dragging * {
   .titlebar__tagline {
     display: none;
   }
-  .editbtn span {
-    display: none;
-  }
 }
 
 /* The editor: the picture on a canvas that fills the stage (see Editor.tsx). */
@@ -1668,6 +1643,8 @@ html[data-window="recbar"], html[data-window="recbar"] body, html[data-window="r
 
 /* B1/B2: the bar window is transparent; the capsule is as big as its content and nothing grows on hover. */
 html[data-window="recbar"], html[data-window="recbar"] body, html[data-window="recbar"] #root, html[data-window="recframe"] #root { background: transparent !important; }
+html[data-window="guideframe"], html[data-window="guideframe"] body, html[data-window="guideframe"] #root { background: transparent !important; overflow: hidden; }
+.recframe--paused { opacity: .35; border-style: dashed; }
 .floatbar { width: max-content; height: 48px; box-sizing: border-box; white-space: nowrap; display: inline-flex; align-items: center; gap: 10px; padding: 0 8px 0 14px; border-radius: 24px; background: var(--dw-surface, #fff); color: var(--dw-text, #111); border: 1px solid var(--dw-border-strong, rgba(128,128,128,.5)); box-shadow: none; }
 .floatbar__count { font-size: 30px; font-weight: 700; min-width: 32px; text-align: center; font-variant-numeric: tabular-nums; }
 .floatbar__ask { font-size: 13px; }
@@ -1792,7 +1769,6 @@ html[data-window="recbar"], html[data-window="recbar"] body, html[data-window="r
 .recheader__state { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; padding: 2px 8px; border-radius: 10px; background: rgba(128,128,128,.18); }
 .recheader__state--warn { background: rgba(245, 158, 11, .22); }
 .recheader__dot { width: 9px; height: 9px; border-radius: 50%; background: var(--dw-accent, #e5484d); display: inline-block; }
-.recheader__spacer { flex: 1; }
 .recempty { margin: auto; max-width: 560px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 24px; }
 .recempty h2 { margin: 4px 0 0; }
 .recempty p { margin: 0; opacity: .8; }
@@ -1820,8 +1796,6 @@ html[data-window="recbar"], html[data-window="recbar"] body, html[data-window="r
 .recheader__chip--notSaved { background: rgba(245, 158, 11, .22); }
 .recheader__chip--edited { background: rgba(59, 130, 246, .2); }
 .recheader__size { font-size: 12px; opacity: .65; }
-.recheader__file { display: inline-flex; align-items: center; gap: 5px; height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--dw-border-strong, rgba(128,128,128,.5)); background: transparent; color: inherit; font: inherit; cursor: pointer; }
-.recheader__file:hover { background: var(--dw-hover, rgba(128,128,128,.15)); }
 .menuitem__heading { padding: 6px 12px 2px; font-size: 11px; opacity: .6; text-transform: uppercase; letter-spacing: .04em; }
 
 /* The live webcam bubble window: transparent around a picture of the chosen shape. */
@@ -1927,13 +1901,8 @@ html[data-window="scrollframe"], html[data-window="scrollframe"] body, html[data
 .guide__count { opacity: .7; white-space: nowrap; }
 .guide__list { flex: 1; min-height: 0; overflow-y: auto; scroll-behavior: smooth; display: flex; flex-direction: column; gap: 18px; padding: 4px 4px 40px; outline: none; }
 .guide__none { opacity: .7; }
-.gstep { display: flex; flex-direction: column; gap: 8px; max-width: 920px; width: 100%; margin: 0 auto; outline: none; contain: layout; }
-.gstep:focus-visible .gstep__pic { box-shadow: 0 0 0 3px var(--dw-brand, #3b82f6); }
-.gstep__head { display: flex; align-items: flex-start; gap: 10px; }
-.gstep__badge { flex: none; min-width: 26px; height: 26px; padding: 0 6px; border-radius: 13px; display: inline-grid; place-items: center; background: var(--dw-brand, #3b82f6); color: #fff; font-weight: 700; font-size: 13px; }
-.gstep__text { flex: 1; margin: 2px 0 0; font-size: 15px; line-height: 1.4; }
-.gstep__actions { display: flex; gap: 4px; opacity: 0; }
-.gstep:hover .gstep__actions, .gstep:focus-within .gstep__actions { opacity: 1; }
+.gstep { outline: none; }
+.step__text { flex: 1; min-width: 0; }
 .gstep__pic { position: relative; width: 100%; overflow: hidden; border-radius: 8px; border: 1px solid var(--dw-border, rgba(128,128,128,.35)); background: rgba(128,128,128,.12); }
 .gstep__pic img { position: absolute; height: auto; max-width: none; display: block; user-select: none; }
 .gstep__marker { position: absolute; width: 34px; height: 34px; margin: -17px 0 0 -17px; border: 4px solid #ff5a36; border-radius: 50%; box-shadow: 0 0 0 2px rgba(255,255,255,.85), 0 0 8px rgba(0,0,0,.35); pointer-events: none; }
@@ -1953,12 +1922,9 @@ html[data-window="guidebar"], html[data-window="guidebar"] body, html[data-windo
 
 /* --- Documents mode: the guide editor (7.5-B) --- */
 .guide--doc { padding: 0; gap: 0; overflow: hidden; }
-.guide--doc > .recheader { margin: 10px 18px 6px; }
 .geditor { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
-.gbar { display: flex; align-items: center; gap: 6px; padding: 6px 18px; border-bottom: 1px solid var(--dw-border, rgba(128,128,128,.3)); }
-.gbar__grow { flex: 1; }
-.gbar__sep, .gtools__sep, .rich__sep { width: 1px; align-self: stretch; margin: 2px 4px; background: rgba(128,128,128,.35); }
-.gbar__sel { display: inline-flex; align-items: center; gap: 4px; opacity: .85; }
+.gtools__sep, .rich__sep { width: 1px; align-self: stretch; margin: 2px 4px; background: rgba(128,128,128,.35); }
+.gbar__sel { display: inline-flex; align-items: center; gap: 4px; }
 .gbar__btn, .gtools__btn, .rich__btn { min-width: 28px; height: 28px; padding: 0 8px; display: inline-grid; place-items: center; border: 1px solid transparent; border-radius: 6px; background: none; color: inherit; font: inherit; cursor: pointer; }
 .gbar__btn:hover:not(:disabled), .gtools__btn:hover, .rich__btn:hover { background: rgba(128,128,128,.18); }
 .gbar__btn:disabled { opacity: .35; cursor: default; }
@@ -1975,22 +1941,62 @@ html[data-window="guidebar"], html[data-window="guidebar"] body, html[data-windo
 .ginsert__menu--up { top: auto; bottom: 100%; }
 .ginsert__item { text-align: start; padding: 6px 10px; border: 0; border-radius: 5px; background: none; color: inherit; font: inherit; cursor: pointer; }
 .ginsert__item:hover, .ginsert__item:focus-visible { background: rgba(128,128,128,.2); }
-.gblock { position: relative; border-radius: 10px; outline: none; }
-.gblock--sel { box-shadow: inset 0 0 0 2px var(--dw-brand, #3b82f6); }
-.gstep, .gcontent { padding: 8px; box-sizing: border-box; }
+.gblock { position: relative; border-radius: 4px; outline: none; }
+.gblock--sel { outline: 2px solid var(--dw-brand, #3b82f6); outline-offset: 5px; }
 .gblock__handle { flex: none; width: 22px; height: 26px; padding: 0; border: 0; border-radius: 5px; background: none; color: inherit; font-size: 13px; letter-spacing: -2px; cursor: grab; opacity: .45; }
 .gblock__handle:hover { opacity: 1; background: rgba(128,128,128,.2); }
-.gstep__badge--square { border-radius: 5px; }
-.gstep__btn--on { background: var(--dw-brand, #3b82f6); }
-.gstep__adddesc { align-self: flex-start; border: 0; background: none; color: inherit; font: inherit; opacity: .55; cursor: pointer; padding: 2px 4px; border-radius: 4px; }
-.gstep__adddesc:hover { opacity: 1; background: rgba(128,128,128,.15); }
+.gstep__adddesc { border: 0; border-radius: 4px; color: inherit; font: inherit; cursor: pointer; }
 .gstep__blank { display: grid; place-items: center; height: 120px; border: 2px dashed rgba(128,128,128,.4); border-radius: 8px; opacity: .6; }
-.gtools { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 4px; border: 1px solid var(--dw-border, rgba(128,128,128,.3)); border-radius: 8px; }
 .gtools__btn { border-color: rgba(128,128,128,.25); }
 .gtools__btn--on { background: var(--dw-brand, #3b82f6); color: #fff; }
 .gtools__swatch { width: 20px; height: 20px; padding: 0; border: 1px solid rgba(128,128,128,.6); border-radius: 50%; cursor: pointer; }
 .gtools__swatch--on { box-shadow: 0 0 0 2px var(--dw-brand, #3b82f6); }
-.gpic { position: relative; width: 100%; overflow: hidden; border-radius: 8px; border: 1px solid var(--dw-border, rgba(128,128,128,.35)); background: rgba(128,128,128,.12); user-select: none; touch-action: none; }
+.gpic { position: relative; width: 100%; border-radius: 8px; border: 1px solid var(--dw-border, rgba(128,128,128,.35)); background: rgba(128,128,128,.12); user-select: none; touch-action: none; }
+.gpic__clip { position: absolute; inset: 0; overflow: hidden; border-radius: inherit; }
+/* callouts and magnifiers: over the picture, and beyond it */
+.gover { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+.gover .gann { pointer-events: auto; }
+.gover .gmagnify { pointer-events: none; }
+.gover .gmagnify__bubble { cursor: pointer; }
+.gover .gmagnify__source { pointer-events: auto; cursor: move; }
+.gcallout { cursor: pointer; }
+/* the handles of the selected callout, spotlight or magnifier */
+.ghandles { position: absolute; z-index: 3; border: 1px dashed var(--dw-brand, #3b82f6); pointer-events: none; }
+.ghandles--move { pointer-events: auto; cursor: move; }
+.ghandle { position: absolute; z-index: 4; width: calc(11px * var(--inv, 1)); height: calc(11px * var(--inv, 1)); margin: calc(-5.5px * var(--inv, 1)); background: #fff; border: 2px solid var(--dw-brand, #3b82f6); border-radius: 3px; box-sizing: border-box; pointer-events: auto; touch-action: none; }
+.ghandle--n { left: 50%; top: 0; cursor: ns-resize; } .ghandle--s { left: 50%; top: 100%; cursor: ns-resize; }
+.ghandle--w { left: 0; top: 50%; cursor: ew-resize; } .ghandle--e { left: 100%; top: 50%; cursor: ew-resize; }
+.ghandle--nw { left: 0; top: 0; cursor: nwse-resize; } .ghandle--se { left: 100%; top: 100%; cursor: nwse-resize; }
+.ghandle--ne { left: 100%; top: 0; cursor: nesw-resize; } .ghandle--sw { left: 0; top: 100%; cursor: nesw-resize; }
+.ghandle--tip { border-radius: 50%; cursor: crosshair; }
+.ghandle--source { left: 0; top: 0; cursor: move; }
+.ghandle--sourceSize, .ghandle--bubbleSize { left: 100%; top: 100%; cursor: nwse-resize; }
+/* the tools of the Step tab: groups of square buttons, as a drawing program's tool panel */
+.steptools { display: flex; flex-direction: column; gap: 10px; }
+.toolgrid { display: flex; flex-direction: column; gap: 8px; padding-bottom: 8px; border-bottom: 1px solid var(--dw-border, rgba(128,128,128,.3)); }
+.toolgrid__group h4 { margin: 0 0 4px; font-size: 11px; font-weight: 600; opacity: .65; text-transform: uppercase; letter-spacing: .04em; }
+.toolgrid__buttons { display: grid; grid-template-columns: repeat(6, minmax(0, 40px)); gap: 4px; }
+.toolgrid__btn { aspect-ratio: 1; min-width: 0; width: 100%; max-width: 40px; display: grid; place-items: center; padding: 0; border: 1px solid transparent; border-radius: 8px; background: var(--dw-surface-2, rgba(128,128,128,.1)); color: inherit; cursor: pointer; }
+.toolgrid__btn:hover:not(:disabled) { border-color: var(--dw-border-strong, rgba(128,128,128,.5)); }
+.toolgrid__btn[aria-pressed="true"], .toolgrid__btn[aria-expanded="true"] { border-color: var(--dw-brand, #3b82f6); background: color-mix(in srgb, var(--dw-brand, #3b82f6) 18%, transparent); color: var(--dw-brand-text, inherit); }
+.toolgrid__btn:disabled, .toolgrid__btn[aria-disabled="true"] { opacity: .4; cursor: default; }
+.toolgrid__style { display: flex; align-items: center; gap: 8px; }
+.toolgrid__style .toolgrid__btn { width: 36px; flex: none; }
+.toolgrid__size { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; }
+.toolgrid__size input { flex: 1; min-width: 0; }
+.toolgrid__quick { display: flex; flex-wrap: wrap; gap: 4px; }
+/* the options of the callout, spotlight and magnifier */
+.markopt__shapes { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 4px; }
+.markopt__shape { min-width: 0; height: 36px; display: grid; place-items: center; padding: 2px; border: 1px solid transparent; border-radius: 8px; background: var(--dw-surface-2, rgba(128,128,128,.1)); color: inherit; cursor: pointer; }
+.markopt__shape[aria-checked="true"] { border-color: var(--dw-brand, #3b82f6); background: color-mix(in srgb, var(--dw-brand, #3b82f6) 18%, transparent); }
+.markopt__shape svg { width: 100%; height: 100%; fill: none; stroke: currentColor; stroke-width: 3.5; stroke-linejoin: round; }
+.markopt__shape svg .markopt__head { fill: currentColor; }
+.markopt__range { display: inline-flex; align-items: center; gap: 8px; }
+.markopt__range input { width: 110px; }
+.markopt__range output { min-width: 34px; font-size: 12px; font-variant-numeric: tabular-nums; }
+/* typing the text of a callout or a text mark, in place */
+.gtype { position: absolute; z-index: 5; box-sizing: border-box; margin: 0; padding: 0; border: 0; outline: 1px dashed var(--dw-brand, #3b82f6); background: transparent; resize: none; overflow: hidden; white-space: pre-wrap; overflow-wrap: break-word; user-select: text; }
+.gtype--text { white-space: pre; background: rgba(255,255,255,.85); }
 .gpic--tool { cursor: crosshair; }
 .gpic img { position: absolute; height: auto; max-width: none; display: block; }
 .gann-layer { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
@@ -2004,10 +2010,9 @@ html[data-window="guidebar"], html[data-window="guidebar"] body, html[data-windo
 .gmarker--ring, .gmarker--box { box-sizing: border-box; border-style: solid; border-radius: 50%; display: grid; place-items: center; box-shadow: 0 0 0 2px rgba(255,255,255,.85), 0 0 8px rgba(0,0,0,.4); }
 .gmarker--box { border-radius: 6px; }
 .gmarker--ring i { display: block; border-radius: 50%; }
-.gcontent { display: flex; gap: 8px; max-width: 920px; width: 100%; margin: 0 auto; padding: 4px; }
-.gcontent__side { flex: none; display: flex; flex-direction: column; gap: 4px; align-items: center; opacity: 0; }
+.gcontent__side { display: flex; flex-direction: column; gap: 4px; align-items: center; opacity: 0; }
 .gcontent:hover .gcontent__side, .gcontent:focus-within .gcontent__side, .gblock--sel .gcontent__side { opacity: 1; }
-.gcontent__body { flex: 1; min-width: 0; }
+.gcontent__body { min-width: 0; }
 .gpick { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; max-height: 60vh; overflow: auto; }
 .gpick__item { display: flex; flex-direction: column; gap: 4px; padding: 4px; border: 1px solid var(--dw-border, rgba(128,128,128,.35)); border-radius: 8px; background: none; color: inherit; font: inherit; cursor: pointer; text-align: start; }
 .gpick__item:hover { background: rgba(128,128,128,.15); }
@@ -2037,6 +2042,7 @@ html[data-window="guidebar"], html[data-window="guidebar"] body, html[data-windo
 .rich__bar { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; padding: 4px; border: 1px solid var(--dw-border-strong, rgba(128,128,128,.35)); border-radius: 8px; background: var(--dw-surface, #fff); position: absolute; bottom: calc(100% + 4px); inset-inline-start: 0; z-index: 8; box-shadow: none; }
 .rich__btn--on { background: rgba(59,130,246,.3); border-color: var(--dw-brand, #3b82f6); }
 .rich__sel { height: 28px; max-width: 130px; font: inherit; }
+.rich__link { flex: 1; min-width: 180px; height: 28px; box-sizing: border-box; padding-inline: 6px; border: 1px solid var(--dw-border-strong, rgba(128,128,128,.5)); border-radius: 6px; background: var(--dw-surface, #fff); color: inherit; font: inherit; }
 .rich__sel--narrow { max-width: 64px; }
 .rich__colors { position: relative; display: inline-flex; }
 .rich__pop { position: absolute; z-index: 30; top: 100%; inset-inline-start: 0; display: flex; flex-wrap: wrap; gap: 4px; width: 150px; padding: 6px; border: 1px solid var(--dw-border-strong, rgba(128,128,128,.5)); border-radius: 8px; background: var(--dw-surface, #fff); box-shadow: 0 8px 24px rgba(0,0,0,.25); }
@@ -2046,13 +2052,10 @@ html[data-window="guidebar"], html[data-window="guidebar"] body, html[data-windo
 .gpic__missing { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; padding: 8px; font-size: 13px; opacity: .75; background: repeating-linear-gradient(45deg, rgba(128,128,128,.14) 0 10px, rgba(128,128,128,.07) 10px 20px); }
 
 /* Documents mode: the editor and its sidebar (the same panel as the Effects of a recording) */
-.geditor--side { flex-direction: row; gap: 12px; padding: 0 18px 12px; }
+.geditor--side { flex-direction: row; gap: 12px; padding: 0 12px 12px; }
 .geditor__main { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
 .geditor--side .glist { padding-inline: 0 8px; }
-.geditor--side .gbar { padding-inline: 0; }
-.gsidebar { align-self: stretch; }
-.guide--doc .rectabs { margin: 0 18px 4px; }
-@media (max-width: 900px) { .geditor--side { flex-direction: column; } .gsidebar { width: auto; max-height: 40%; } }
+@media (max-width: 760px) { .geditor--side { flex-direction: column; } .geditor--side > .gpanel { width: auto !important; max-width: none; max-height: 45%; } .gpanel__edge { display: none; } }
 
 /* images and tables in text blocks */
 .gimg { position: relative; margin: 6px 0; }
@@ -2082,14 +2085,11 @@ html[data-window="guidebar"], html[data-window="guidebar"] body, html[data-windo
 .rich__editor td, .rich__editor th { position: relative; }
 .rich__editor .selectedCell::after { content: ""; position: absolute; inset: 0; background: rgba(59,130,246,.18); pointer-events: none; }
 
-/* the step toolbar (same look as the screenshot annotator's) and the expand-area frame */
-.gtoolbar { position: absolute; z-index: 12; top: 40px; inset-inline: 8px; margin: 0; width: auto; box-shadow: none; background: var(--dw-surface, #fff); }
-.gtoolbar .annobar__row { flex-wrap: wrap; }
+/* the step picture, the colour and size of its marks, and the expand-area frame */
+.gstep__media { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .gtoolbar__swatch { display: block; width: 18px; height: 18px; border-radius: 50%; border: 1px solid rgba(128,128,128,.6); }
 .gtoolbar__stroke { display: block; width: 18px; border-radius: 2px; background: currentColor; }
-.gtoolbar__custom, .gtoolbar__range { display: flex; align-items: center; gap: 8px; font-size: 12px; margin-top: 6px; }
-.gtoolbar__area { height: 30px; font: inherit; font-size: 12px; max-width: 150px; }
-.gtoolbar__quick { display: flex; flex-direction: column; gap: 4px; padding: 4px; }
+.gtoolbar__custom { display: flex; align-items: center; gap: 8px; font-size: 12px; margin-top: 6px; }
 .gpic__expand { position: absolute; border: 2px solid var(--dw-brand, #3b82f6); box-shadow: 0 0 0 9999px rgba(0,0,0,.45); pointer-events: none; }
 .gpic__eh { position: absolute; width: 12px; height: 12px; margin: -6px; background: #fff; border: 2px solid var(--dw-brand, #3b82f6); border-radius: 3px; pointer-events: auto; }
 .gpic__eh--n { left: 50%; top: 0; cursor: ns-resize; } .gpic__eh--s { left: 50%; top: 100%; cursor: ns-resize; }
@@ -2097,6 +2097,236 @@ html[data-window="guidebar"], html[data-window="guidebar"] body, html[data-windo
 .gpic__eh--nw { left: 0; top: 0; cursor: nwse-resize; } .gpic__eh--se { left: 100%; top: 100%; cursor: nwse-resize; }
 .gpic__eh--ne { left: 100%; top: 0; cursor: nesw-resize; } .gpic__eh--sw { left: 0; top: 100%; cursor: nesw-resize; }
 .gstep { position: relative; }
-.gstep__area { font-size: 11px; opacity: .65; align-self: center; white-space: nowrap; }
 
-.splitbtn--doc { background: var(--dw-brand, #a0522d); }
+
+/* the page column of the editor (its width and zoom) and the zoom control in the corner */
+.gpage { width: 100%; margin: 0 auto; display: flex; flex-direction: column; flex: none; }
+.geditor__main { position: relative; }
+.gzoom { display: flex; align-items: center; gap: 2px; height: 34px; box-sizing: border-box; padding: 0 6px; border: 1px solid var(--dw-border-strong, rgba(128,128,128,.4)); border-radius: var(--dw-radius-sm); background: var(--dw-surface, #fff); font-size: 12px; }
+/* the one row above the pages: the guide at the start, its tools at the end; narrow windows wrap, nothing overlaps */
+.gdoc { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+/* The header of what is on show, the same in Recording and Documents mode: a row, then the tabs. */
+.modehead { flex: none; display: flex; flex-direction: column; min-width: 0; }
+.headrow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; min-height: 34px; margin: 8px 12px 6px; }
+.headrow > .recheader { flex: 1 1 auto; flex-wrap: nowrap; min-width: 0; padding: 0; }
+.headrow .recheader__name { min-width: 0; max-width: 280px; }
+.headrow .recheader__chip, .headrow .recheader__size { white-space: nowrap; }
+.headrow__tools { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; margin-inline-start: auto; min-width: 0; }
+.headrow__history { display: inline-flex; align-items: center; }
+.modehead > .rectabs { padding-inline: 12px; }
+/* the selected blocks and what to do with them, at the start of the bottom bar */
+.bottombar__sel { display: inline-flex; align-items: center; }
+.gzoom__width { border: 0; background: transparent; color: inherit; font: inherit; max-width: 110px; }
+.gzoom__value { border: 0; background: none; color: inherit; font: inherit; min-width: 44px; cursor: pointer; font-variant-numeric: tabular-nums; }
+
+/* the picture frame can be dragged */
+.gpic--move { cursor: grab; }
+.gpic--move:active { cursor: grabbing; }
+
+/* the template editor of the sidebar and the gallery */
+.tpl { display: flex; flex-direction: column; gap: 2px; }
+.tpl__group summary { cursor: pointer; font-size: 12px; font-weight: 600; padding: 5px 0; }
+.tpl__rows { display: flex; flex-direction: column; gap: 8px; padding: 4px 0 8px; }
+.tpl__num { width: 70px; font: inherit; padding: 3px 6px; }
+.tpl__text { width: 150px; max-width: 100%; font: inherit; padding: 3px 6px; }
+.tpl__presets { display: flex; flex-wrap: wrap; gap: 5px; }
+.tpl__image { display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; }
+.tplgallery { max-height: 62vh; overflow: auto; }
+.dw-dialog:has(.tplgallery) { width: min(700px, 92vw); max-width: none; }
+.tplgallery h4 { margin: 8px 0 6px; font-size: 12px; opacity: .7; text-transform: uppercase; }
+.tplgallery__list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 10px; }
+.tplgallery__name { display: flex; gap: 8px; align-items: end; margin-bottom: 8px; }
+.tplgallery__name label { display: flex; flex-direction: column; gap: 3px; flex: 1; font-size: 12px; }
+.tplgallery__name input { font: inherit; padding: 4px 8px; }
+.tplcard { position: relative; display: flex; flex-direction: column; gap: 4px; }
+.tplcard__delete { position: absolute; inset-block-start: 9px; inset-inline-end: 9px; width: 28px; height: 28px; display: grid; place-items: center; padding: 0; border: 1px solid var(--dw-border-strong, rgba(128,128,128,.5)); border-radius: 7px; background: var(--dw-surface, #fff); color: var(--dw-danger, #b91c1c); cursor: pointer; opacity: 0; }
+.tplcard:hover .tplcard__delete, .tplcard:focus-within .tplcard__delete { opacity: 1; }
+.tplcard__use { display: flex; flex-direction: column; align-items: stretch; gap: 5px; padding: 5px; border: 2px solid transparent; border-radius: 9px; background: none; color: inherit; font: inherit; font-size: 12px; cursor: pointer; }
+.tplcard__use:hover { background: rgba(128,128,128,.12); }
+.tplcard--on .tplcard__use { border-color: var(--dw-brand, #3b82f6); }
+.tplcard__page { display: flex; flex-direction: column; gap: 6px; aspect-ratio: 3 / 4; padding: 7px; overflow: hidden; border: 1px solid rgba(128,128,128,.4); border-radius: 5px; background: var(--tpl-bg); color: var(--tpl-text); font-family: var(--tpl-head-font); }
+.tplcard__cover { display: block; padding: 3px 5px; border-radius: 3px; }
+.tplcard__title { font-weight: 700; font-size: 15px; mix-blend-mode: difference; color: #fff; }
+.tplcard__step { display: grid; grid-template-columns: auto 1fr; gap: 3px 4px; align-items: center; }
+.tplcard__badge { display: inline-grid; place-items: center; width: 13px; height: 13px; border-radius: 50%; background: var(--tpl-badge); color: var(--tpl-badge-text); font-size: 8px; }
+.tplcard__badge--square { border-radius: 2px; }
+.tplcard__badge--pill { width: 20px; border-radius: 7px; }
+.tplcard__badge--none { background: transparent; width: 0; }
+.tplcard__line { height: 3px; width: 70%; background: var(--tpl-text); opacity: .5; border-radius: 2px; }
+.tplcard__pic { grid-column: 1 / -1; display: block; width: 100%; max-height: 42px; background: var(--tpl-light); border: var(--tpl-pic-border); border-radius: var(--tpl-pic-radius); box-sizing: border-box; }
+.tplcard__step--beside .tplcard__pic { grid-column: 2; width: 70%; justify-self: end; }
+.tplcard__actions { display: flex; flex-wrap: wrap; gap: 2px; justify-content: center; }
+.tplcard__actions button { border: 0; background: none; color: inherit; opacity: .75; font: inherit; font-size: 11px; cursor: pointer; text-decoration: underline; }
+
+/* page view and the export dialog */
+.glist[hidden] { display: none; }
+.gbar__btn--on { background: rgba(59,130,246,.2); border-color: var(--dw-brand, #3b82f6); }
+.pageview { flex: 1; min-height: 0; width: 100%; border: 0; border-radius: 8px; background: #6b7075; }
+.pageview--busy { display: grid; place-items: center; color: #fff; }
+/* the export dialog: two columns, every control as wide as its column */
+.dw-dialog:has(.export), .dw-dialog:has(.export__done), .dw-dialog:has(.export__busy) { width: min(520px, 100%); }
+.export { display: flex; flex-direction: column; gap: 8px; max-height: min(60vh, 560px); overflow: hidden auto; min-width: 0; padding: 2px 6px 2px 2px; }
+.export__row { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 14px; align-items: center; min-height: 34px; flex: none; }
+.export__row > span:first-child { overflow-wrap: anywhere; }
+.export__row input, .export__row select { width: 100%; min-width: 0; max-width: 100%; }
+.export__row input { font: inherit; height: 34px; padding: 0 10px; border: 1px solid var(--dw-border-strong); border-radius: var(--dw-radius-sm); background: var(--dw-surface); }
+.export__control { display: flex; align-items: center; min-width: 0; }
+.export__busy progress { width: 100%; }
+.export__path { overflow-wrap: anywhere; font-size: 12px; opacity: .8; }
+
+/* quick redact */
+.gredact--pick { pointer-events: auto; cursor: pointer; }
+.gredact--sel { outline: 2px solid var(--dw-brand, #3b82f6); outline-offset: 1px; }
+.dw-dialog:has(.redact) { width: min(560px, 100%); }
+.redact { display: flex; flex-direction: column; gap: 8px; max-height: min(52vh, 460px); overflow: hidden auto; min-width: 0; padding-inline-end: 2px; }
+/* (a fieldset is never narrower than its longest word unless it is told so) */
+.redact fieldset { border: 1px solid rgba(128,128,128,.35); border-radius: 8px; display: flex; flex-direction: column; gap: 6px; margin: 0; min-width: 0; padding: 6px 10px 10px; flex: none; }
+.redact progress { width: 100%; max-width: 100%; }
+.dw-dialog .redact p { margin: 0; }
+.redact__item { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px; align-items: start; }
+.redact__item input { margin-top: 3px; }
+.redact__item span, .redact bdi { overflow-wrap: anywhere; }
+
+/* a split button of the guide's toolbar (Template, Record more steps), and the toggle beside it */
+.gsplit { display: inline-flex; align-items: stretch; height: 34px; flex: none; border: 1px solid var(--dw-border-strong); border-radius: var(--dw-radius-sm); background: var(--dw-surface); overflow: hidden; }
+.gsplit__main, .gsplit__more { border: 0; background: none; color: inherit; font: inherit; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.gsplit__main { padding: 0 12px; }
+.gsplit__more { display: inline-flex; align-items: center; padding: 0 7px; border-inline-start: 1px solid var(--dw-border-strong); }
+.gsplit__main:hover, .gsplit__more:hover { background: var(--dw-surface-2); }
+.gtoggle { height: 34px; flex: none; padding: 0 12px; border: 1px solid var(--dw-border-strong); border-radius: var(--dw-radius-sm); background: var(--dw-surface); color: inherit; font: inherit; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.gtoggle:hover { background: var(--dw-surface-2); }
+.gtoggle[aria-pressed="true"] { background: var(--dw-brand-soft); border-color: var(--dw-brand); color: var(--dw-brand-text); box-shadow: inset 0 1px 3px rgba(0, 0, 0, .18); }
+.tplmenu { min-width: 230px; max-height: min(70vh, 520px); overflow: auto; }
+.tplmenu__sep { margin: 6px 4px; border: 0; border-top: 1px solid var(--dw-border); }
+.tplname label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.tplname input { font: inherit; padding: 6px 8px; width: 100%; }
+.tplexport { display: flex; flex-direction: column; gap: 8px; max-height: min(52vh, 420px); overflow: auto; }
+.dw-dialog .tplexport p { margin: 0; }
+.tplgallery__footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.tpl__colour, .tpl__range { display: inline-flex; align-items: center; gap: 8px; }
+.tpl__range input { width: 110px; }
+.tpl__range span { font-variant-numeric: tabular-nums; min-width: 3.5em; text-align: end; }
+.tpl__auto { border: 0; background: none; padding: 0; color: var(--dw-brand-text); font: inherit; font-size: 12px; text-decoration: underline; cursor: pointer; }
+/* the cover page in the editor (its layout is the template's, see docs/template/css.ts) */
+.gcover { outline: none; }
+.gcover:focus-visible { box-shadow: inset 0 0 0 2px var(--dw-brand, #3b82f6); }
+/* an empty subtitle or author takes no room until the cover is being written on */
+.gcover:not(:focus-within) .gcover__text--empty { display: none; }
+/* (a hint keeps the alignment of its line, which a float at the start would not) */
+.gcover .rich__editor p.is-editor-empty:first-child::before { color: inherit; opacity: .6; width: 100%; }
+.gcover .gcover__text--title .rich__editor p.is-editor-empty:first-child::before, .gcover .gcover__text--dateText .rich__editor p.is-editor-empty:first-child::before { opacity: 1; }
+
+/* the cover designs to choose from */
+.covgallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(86px, 1fr)); gap: 6px; }
+.covgallery__item { display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 0; padding: 5px; border: 2px solid transparent; border-radius: 8px; background: none; color: inherit; font: inherit; font-size: 11px; cursor: pointer; }
+.covgallery__item:hover { background: rgba(128,128,128,.14); }
+.covgallery__item[aria-checked="true"] { border-color: var(--dw-brand, #3b82f6); }
+.covgallery__frame { position: relative; display: block; overflow: hidden; border: 1px solid rgba(128,128,128,.45); pointer-events: none; }
+.covthumb { position: absolute; top: 0; inset-inline-start: 0; display: block; transform-origin: top left; text-align: initial; }
+[dir="rtl"] .covthumb { transform-origin: top right; }
+.covgallery__name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* --- Documents mode: the tabbed sidebar (7.5-C3) --- */
+.gpanel { position: relative; flex: none; align-self: stretch; display: flex; flex-direction: column; min-height: 0; max-width: 55%; border: 1px solid var(--dw-border, rgba(128,128,128,.3)); border-radius: 8px; background: var(--dw-surface, #1b1b1b); color: var(--dw-text, #fff); }
+.gpanel__edge { position: absolute; inset-block: 0; inset-inline-start: -9px; width: 10px; cursor: col-resize; touch-action: none; z-index: 5; }
+.gpanel__edge::after { content: ""; position: absolute; inset-block: 8px; inset-inline-start: 4px; width: 2px; border-radius: 2px; background: transparent; }
+.gpanel__edge:hover::after, .gpanel__edge:focus-visible::after, .gpanel__edge--on::after { background: var(--dw-brand, #3b82f6); }
+.gpanel__bar { display: flex; align-items: center; gap: 2px; padding: 4px 6px 0; border-bottom: 1px solid var(--dw-border, rgba(128,128,128,.3)); }
+.gpanel__fold { flex: none; width: 24px; height: 28px; display: inline-grid; place-items: center; border: 0; border-radius: 6px; background: none; color: inherit; cursor: pointer; }
+.gpanel__fold svg { transform: rotate(-90deg); stroke: currentColor; fill: none; stroke-width: 2; }
+.gpanel--closed .gpanel__fold svg { transform: rotate(90deg); }
+[dir="rtl"] .gpanel__fold svg { transform: rotate(90deg); }
+[dir="rtl"] .gpanel--closed .gpanel__fold svg { transform: rotate(-90deg); }
+.gpanel__fold:hover { background: rgba(128,128,128,.18); }
+.gpanel__tabs { display: flex; flex: 1; min-width: 0; gap: 2px; }
+.gpanel__tab { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 6px 8px; border: 0; border-bottom: 2px solid transparent; background: none; color: inherit; font: inherit; font-size: 13px; cursor: pointer; opacity: .65; }
+.gpanel__tab[aria-selected="true"] { opacity: 1; font-weight: 600; border-bottom-color: var(--dw-brand, #3b82f6); }
+.gpanel__tab:hover { opacity: 1; background: rgba(128,128,128,.14); }
+.gpanel__body { flex: 1; min-height: 0; overflow: auto; padding: 10px 12px; display: flex; flex-direction: column; gap: 10px; }
+.gpanel__body[hidden] { display: none; }
+.gpanel__body > * { flex: none; }
+/* folded: a thin strip with the tabs written along it */
+.gpanel--closed { width: 34px; }
+.gpanel--closed .gpanel__bar { flex-direction: column; padding: 4px; border: 0; }
+.gpanel--closed .gpanel__tabs { flex-direction: column; flex: none; gap: 4px; }
+.gpanel--closed .gpanel__tab { writing-mode: vertical-rl; flex: none; max-height: 160px; padding: 10px 4px; border: 0; border-radius: 6px; }
+.gpanel__template { margin: 0; font-size: 13px; }
+.gpanel__buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+/* the buttons of a section are as wide as the sidebar, also where one opens a panel */
+.gpanel .fxpanel__group > .pop { display: flex; }
+.gpanel .fxpanel__group > .pop > button, .gpanel .fxpanel__group > button { width: 100%; }
+.gpanel__zoom { display: grid; grid-template-columns: 1fr auto; gap: 4px 8px; align-items: center; font-size: 13px; }
+.gpanel__zoom span { grid-column: 1 / -1; }
+.gpanel__zoom input { width: 100%; min-width: 0; }
+.gpanel__zoom output { font-variant-numeric: tabular-nums; min-width: 3.6em; text-align: end; }
+
+/* the outline of the "Steps" tab */
+.goutline { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.goutline li { position: relative; }
+.goutline button { width: 100%; display: flex; align-items: center; gap: 8px; min-height: 38px; padding: 4px 6px; border: 0; border-radius: 6px; background: none; color: inherit; font: inherit; font-size: 13px; text-align: start; cursor: pointer; }
+.goutline button:hover { background: rgba(128,128,128,.16); }
+.goutline button.goutline__on { background: color-mix(in srgb, var(--dw-brand, #3b82f6) 28%, transparent); }
+.goutline__fixed button { font-weight: 600; }
+.goutline__item--before::before, .goutline__item--after::after { content: ""; position: absolute; inset-inline: 0; height: 3px; border-radius: 3px; background: var(--dw-brand, #3b82f6); }
+.goutline__item--before::before { top: -2px; }
+.goutline__item--after::after { bottom: -2px; }
+.goutline__number { flex: none; min-width: 1.8em; text-align: center; font-variant-numeric: tabular-nums; opacity: .75; }
+.goutline__words { flex: 1; min-width: 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.goutline__thumb { flex: none; width: 48px; height: 30px; display: grid; place-items: center; border-radius: 3px; background: rgba(128,128,128,.18); overflow: hidden; }
+.goutline__thumb > span { position: relative; overflow: hidden; max-width: 100%; max-height: 100%; }
+.goutline__thumb img { position: absolute; height: auto; max-width: none; display: block; }
+
+/* the page of the editor: sheets of paper when the template has a page size, else one free column */
+.gspacer { flex: none; height: 0; }
+.gscale { position: relative; flex: none; margin-inline: auto; }
+.gscale--off { display: contents; }
+.glist--paged { background: color-mix(in srgb, #808080 30%, var(--dw-surface, #fff)); border-radius: 8px; overflow: auto; }
+.geditor--side .glist--paged { padding: 14px 0; }
+.gpage--paged { position: absolute; top: 0; inset-inline-start: 0; display: block; margin: 0; transform-origin: top left; }
+[dir="rtl"] .gpage--paged { transform-origin: top right; }
+.gsheets { position: absolute; inset: 0; }
+.gsheet { position: absolute; inset-inline-start: 0; overflow: hidden; background: var(--tpl-bg); outline: 1px solid rgba(0,0,0,.25); }
+.gsheet__in { position: relative; z-index: 1; display: flex; flex-direction: column; height: 100%; box-sizing: border-box; }
+.gsheet__grow { flex: 1; }
+/* (above the column of blocks, whose room in front of page 2 lies over page 1) */
+.gpage--paged > .gcover { z-index: 2; }
+.gflow { display: flex; flex-direction: column; }
+.gpage--paged > .gflow { position: relative; z-index: 1; }
+.pgap { flex: none; height: 0; }
+.gtitle { display: flow-root; }
+.gcontents, .gcontents__part { display: flex; flex-direction: column; }
+.gpage--screen { padding: 8px 44px 40px; border-radius: 8px; background: var(--tpl-bg); }
+.gpage--screen > .gcover { margin-block: 0 var(--tpl-gap); border-radius: 10px; border: 1px solid var(--dw-border, rgba(128,128,128,.35)); }
+/* the "+" between blocks takes no room on a page: it lies in the space between them */
+.gpage--paged .ginsert { height: 0; z-index: 4; }
+.gpage--paged .ginsert::before { content: ""; position: absolute; inset-inline: 0; bottom: 0; height: max(14px, var(--tpl-gap)); }
+.gpage--paged .ginsert__line { top: calc(var(--tpl-gap) / -2 - 1px); }
+.gpage--paged .ginsert__plus { position: absolute; top: calc(var(--tpl-gap) / -2 - 10px); left: calc(50% - 10px); }
+.gpage--paged .ginsert--open { z-index: 20; }
+.gpage--paged .ginsert__menu { left: calc(50% - 110px); transform: scale(var(--inv, 1)); transform-origin: top center; }
+.gpage--paged .ginsert__menu--up { top: auto; bottom: calc(var(--tpl-gap) + 6px); transform-origin: bottom center; }
+.gpage--paged .rich__bar, .gpage--paged .gimg__bar { transform: scale(var(--inv, 1)); transform-origin: bottom left; }
+[dir="rtl"] .gpage--paged .rich__bar, [dir="rtl"] .gpage--paged .gimg__bar { transform-origin: bottom right; }
+/* handles, buttons and labels of a block lie beside or above it, never in the line of the page */
+.gpage.doc .step__head { position: relative; }
+.gpage.doc .step__head .gblock__handle { position: absolute; top: 0; inset-inline-end: calc(100% + 6px); color: var(--tpl-text); }
+.gpage.doc .gstep__side { display: contents; }
+.gpage.doc .gstep__area { position: absolute; z-index: 5; inset-inline-end: 0; bottom: calc(100% - 5px); font-size: 11px; line-height: 16px; padding: 0 7px; border: 1px solid var(--dw-border-strong, rgba(128,128,128,.5)); border-radius: 9px; background: var(--dw-surface, #fff); white-space: nowrap; }
+/* (in the margin beside the step, so they never cover what is written) */
+.gpage.doc .gstep__actions { position: absolute; z-index: 5; top: 0; inset-inline-start: calc(100% + 8px); display: flex; flex-direction: column; gap: 3px; opacity: 0; pointer-events: none; }
+.gpage.doc .gstep:hover .gstep__actions, .gpage.doc .gstep:focus-within .gstep__actions, .gpage.doc .gblock--sel .gstep__actions { opacity: 1; pointer-events: auto; }
+.gpage.doc .gstep > .gstep__adddesc { position: absolute; z-index: 5; top: calc(100% - 2px); inset-inline-start: 0; padding: 0 8px; font-size: 12px; background: var(--dw-surface, #fff); border: 1px solid var(--dw-border, rgba(128,128,128,.35)); opacity: 0; pointer-events: none; }
+.gpage.doc .gstep:hover > .gstep__adddesc, .gpage.doc .gblock--sel > .gstep__adddesc, .gpage.doc .gstep > .gstep__adddesc:focus-visible { opacity: 1; pointer-events: auto; }
+.gpage.doc .gstep > .step__desc--empty { position: absolute; z-index: 4; top: 100%; inset-inline: 0; background: var(--tpl-bg); opacity: 0; pointer-events: none; }
+.gpage.doc .gstep:hover > .step__desc--empty, .gpage.doc .gblock--sel > .step__desc--empty, .gpage.doc .gstep > .step__desc--empty:focus-within { opacity: 1; pointer-events: auto; }
+.gpage.doc .gcontent > .gcontent__side { position: absolute; top: 0; inset-inline-end: calc(100% + 6px); z-index: 2; color: var(--tpl-text); }
+.gzoom__size { padding: 0 6px; opacity: .75; }
+.gzoom__fit { text-align: center; text-align-last: center; max-width: 120px; }
+.printframe { position: fixed; right: 0; bottom: 0; width: 0; height: 0; border: 0; }
+.gblock, .gcover { scroll-margin-top: 8px; }
+
+/* the OCR debug view (development builds) */
+.ocrdbg { display: flex; flex-direction: column; gap: 8px; max-height: min(60vh, 560px); overflow: auto; min-width: 0; }
+.ocrdbg__picture { width: 100%; flex: none; background: #fff; }
+.ocrdbg__text { margin: 0; font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; text-align: left; }
+.dw-dialog:has(.ocrdbg) { width: min(920px, 100%); }

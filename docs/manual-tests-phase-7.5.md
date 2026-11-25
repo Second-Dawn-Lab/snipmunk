@@ -102,3 +102,230 @@ You must test by hand:
 - [ ] Expand area on a real step; Save as; open the `.snpd`: the picture has the new area; with "Keep full screenshots" on, expand after reopening.
 - [ ] Taskbar, tray, Start menu and desktop steps now show the shell element, not the wallpaper (Windows 11 and 10 if you have it; second monitor).
 - [ ] New guide → Choose window: only that window's clicks are steps, pictures show the window; Select area: pictures cropped to the area, outside clicks ignored with the hint; Record more steps into such a guide; Full screen.
+
+## 7.5-C: fixes, templates, export, quick redact
+
+### Tested (automatic and live in the test instance; generated data only)
+- **Drag auto-scroll (A1):** `view.test.ts` (speed by distance from the edge), `moveBlocksTo` (a selection moves together). Live on 150 steps (`scripts/e2e-guide-redact.mjs`, synthetic drag events): nothing in the middle, slowly near the bottom edge zone (about 60 px in a second), about 1600 px in a second at the edge, up at the top, stops with the drag, about 9800 px in 6 s.
+- **Page width and zoom (A2):** Narrow / Normal / Wide / Fit window and 50–200 % (control in the corner, Ctrl+wheel, Ctrl+0), stored as `docPageWidth` / `docZoom`; the scroll position follows the new height.
+- **Frame of a guide's area (A3):** a click-through window left out of the pictures around the chosen region or window; a window's frame follows it and hides while it is minimized; dimmed and dashed while paused; closed with the guide. Only the placement is unit tested.
+- **Recording mode untouched (A4):** the overlay of a guide's pick has its own mode (never written to the settings); unit test.
+- **Templates (B):** `template.test.ts` (WCAG contrast of derived colours, the six templates, frame geometry, ratio change keeps centre and zoom, apply and change), `snpd.rs` (a framed step stores what its frame shows, minor version 1), `templates.rs` (the `.snpt` file).
+- **Export (C):** `export.test.ts` (HTML self-contained and escaped, clipboard fragment, Markdown links and tables, Word read back from the zip: styles, numbering, pictures, table with header row, TOC field, header/footer with PAGE and NUMPAGES, `w:bidi` / `w:rtl`; page filling), `docexport.rs` (cut, redacted, padded pictures; only export files are written). Live (`scripts/e2e-guide-export.mjs`): a generated guide with a 16:9 corporate template → HTML, Word, Markdown, ZIP, PDF through the app's own code; every pixel under a redaction is black; the PDF has one sheet per page (counted in the file), no step on two pages, embedded fonts with text maps, links; the `.snpd` opens again with the template and frames; own template save / export / import / delete; the page view shows pages.
+- **50 steps, debug build:** HTML 5.8 s / 1.25 MB, Word 5.7 s / 624 KB, Markdown 6.0 s, ZIP 5.7 s / 929 KB, PDF 7.5 s / 920 KB (28 pages), PDF with JPEG 6.7 s / 1.1 MB (flat generated pictures compress better as PNG).
+- **Quick redact (D):** `redact.test.ts` (e-mail, IBAN, card, custom words, one set of marks, masked typed text), `snpd.rs` (masked typed text is not in the file). Live: Windows OCR on a generated picture finds the e-mail address, the IBAN (read with "OO" for "00") and the card; each is covered in the exported picture; other text is not.
+- Note: Windows OCR did not return a generated line "Card number 4111 1111 1111 1111" at all (another test card number on the same picture was read). Check cards on your real pictures.
+
+### You must test by hand
+- [ ] Open the exports: **Word** (the TOC asks to update; styles in the Styles pane; edit text, tables, header/footer; landscape; Arabic guide right-to-left), **Acrobat / Edge** (page breaks, header, footer, "Page n of N", contents with page numbers, copy text, links), a **Markdown viewer** (pictures, tables), a **browser** (HTML offline, print preview).
+- [ ] **Copy as → Rich text** into Word, Outlook and Confluence (pictures and bold must arrive); Markdown and plain text. (Not run automatically: it would replace your clipboard.)
+- [ ] The export dialog with the real save dialog: Export…, Cancel during a long PDF, "Open after exporting", Show in File Explorer.
+- [ ] Templates: the six built-ins in light and dark theme and in Arabic; Customize (colours, logo, fonts, frame, header/footer, cover image); Save as my template, rename, duplicate, delete, export, import on another PC; a saved guide on another PC.
+- [ ] Picture frame: drag the picture of a selected step, Alt+wheel, the slider, Fit and Fill; save and reopen.
+- [ ] **Select area / Choose window**: the red frame on the right monitor, following a moved and resized window, minimized and restored, dimmed while paused, gone after Stop, not in the pictures; the recording area setting unchanged afterwards.
+- [ ] Dragging steps near the top and bottom edge of a long real guide (also several selected steps); page width and zoom on a large screen.
+- [ ] Quick redact on real screenshots (selected steps and the whole guide), removing a mark (click it, then the trash button), typed-text masking.
+
+## 7.5-C2: fixes after the hand test of 7.5-C
+
+### Tested (automatic and live in the test instance; generated data only)
+- **Quick redact on editor windows (A1):** generated pictures drawn like Notepad++ (GDI text, Consolas 11 pt, line numbers; 800x400 to 3840x2160, 100 to 150 %, light and dark). `scripts/e2e-guide-scan.mjs`: on all seven the e-mail address, the password and the three IBANs (spaces, hyphens, none) are covered, in a whole-guide scan; the saved `.snpd` holds none of the hidden texts. `redact.test.ts` holds the real readings (slashed zero read as O, Ø, e, s; hyphens; split lines).
+- **Speed (A2):** seven steps 0.7 s in the debug build (about 0.1 s a step; before: 7 to 40 s a picture). The second scan reuses the kept readings (0.1 s).
+- **Texts (A3):** sentences, typed text (also when only the field's name says it is a password), descriptions, content blocks, tables, link addresses and the cover (`redact.test.ts`); a masked step is saved without its original words, control names and window title (`snpd.rs`).
+- **Saving after hiding (found this session):** a Save that replaces a picture or masks texts rewrites the `.snpd` without the earlier versions (before, they stayed inside the file); `snpd.rs`.
+- **Names (B):** `steptext.rs` (what a text control holds is never its name; "the editor" / "the text field"), `steprec.rs` (a long file description gives way to the product name; the window title is not used when there is an exe name).
+- **Toolbar, templates, cover, export dialog (C, D, E):** `scripts/e2e-guide-c2.mjs` and `options.test.ts`: one docked toolbar, block heights unchanged, "⋯" in a narrow window; template menu, update in place, export of several files, import; cover edited in place; background on every page; header texts; contents in the page view; the export dialog at 100, 125 and 150 %.
+- **Not run live:** anything that starts a real recording: "Record more steps" with another area, the countdown of the area overlay (unit tests only), and the new step names against real applications.
+
+### Card numbers
+Windows text recognition returns nothing for digit groups that are runs of ones ("4111 1111 1111 1111", "6011 1111 1111 1117"), at any size or contrast; the label before them is read. Other test cards (4012 …, 4539 …, 5105 …, 5555 …, Amex 3782 …) are read and covered. Check cards on your real pictures.
+
+### You must test by hand (English first)
+- [ ] **Notepad++** with your six lines: record a click into the editor: the step says "Click in the editor in Notepad++" (also after typing: "Type '…' in the editor"), never the text. Also Windows Notepad, Word, a browser textarea, a web form (labelled and unlabelled fields), a password field.
+- [ ] **Quick redact** on that step and on the whole guide: e-mail, password and IBAN in the picture and in the texts; how long a scan of a real guide takes; untick items; Undo; save, reopen, export and search the files for the secrets.
+- [ ] Save a guide, then Quick redact it, Save again: search the file for a hidden text (guides saved with an earlier version after a redaction still hold the earlier picture inside: use **Save as** on them once).
+- [ ] A typing step into a password field: the item "typed text" appears and the export shows dots.
+- [ ] **Toolbar**: select steps with a taskbar strip; letters; colour and size; the "⋯" menu at your window sizes.
+- [ ] **Template menu**: quick switch; save, update; export one and several (real folder dialog); import several; Manage.
+- [ ] Number background and text colours; header and footer places (title, custom text, logo, author); background picture with each option in Page view, PDF, HTML (screen and print) and **Word** (picture behind the text, cover and other pages).
+- [ ] The **cover in the editor**: write and format title, subtitle, author, date; logo and background; compare with PDF and Word. Table of contents in Page view and in the PDF.
+- [ ] **Record more steps ▾**: each choice, on the other monitor too; the new steps show the chosen area; "Same as before" afterwards uses the last choice; change the countdown in the area overlay and check that Settings → Recording is unchanged.
+- [ ] The export dialog on your screen at your scale.
+- [ ] `scripts\clean-build.bat` (stop `tauri dev` first).
+
+
+## 7.5-C3: layout rework and fixes
+
+### Tested (automatic and live in the test instance with `SNIPMUNK_NO_REAL_CAPTURE=1`; generated data only)
+- **Quick redact (A):** editor screenshots drawn with smoothed (ClearType) type by `scripts/gen-editor-fixture.ps1` (Consolas and
+  Courier New, 100 to 175 %, light and dark, highlighted line). Guarded by `editorShots.test.ts` (real readings of eight
+  pictures) and by a real-recognition test in `ocr.rs` on `src-tauri/test-data/editor-cleartype.png`. Live: one step and the whole
+  guide over seven pictures covered all 42 secret lines. The OCR debug view opens with boxes and the matches.
+- **Quick redact on a real guide (A1, from the hand test):** a Notepad++ guide with Courier New at 100 % (not part of the
+  repository). Windows reads "8" as "S", "E" or "B", "0" as "S" or "o" and "l" as "±i" in that thin type, so the check digits of an
+  IBAN fail and an address is no address. After the fixes every labelled secret line of its five editor steps is covered, in a
+  whole-guide scan and step by step, nothing else is covered, and the saved file holds none of the values. The typed password of a
+  typing step is masked too, although its label was split over two steps. Guarded by `editorShots.test.ts` (the reading of
+  `thin-cour-100`, drawn by the same script) and `redact.test.ts`.
+- **A secret read on a picture is hidden in the texts too** (a value of five letters or more; a password only if it mixes letters
+  with other signs).
+- **Sidebar, tools, zoom (B, C, E):** `scripts/e2e-guide-c3.mjs`: three tabs, thirteen sections, resize and fold remembered,
+  right-to-left; the tools row between text and picture, the clicked step does not move, menus at 100 and 150 % zoom, "⋯" when
+  narrow; zoom, drag, Alt+wheel and Fit without a frame; outline select, reorder, delete, undo; several steps.
+- **Templates and pages (D):** Blank keeps the content in one undo step; a new guide takes the template of the settings; the column
+  at A4 and fitted when narrow; the cover in the page's shape; contents with page numbers; the editor's page breaks match the page
+  view; cover and contents alone on their pages; background Custom, Fill and Fit behind the title.
+- **Not run live:** printing or saving the PDF from this build, opening the Word file, real file dialogs, a real recording.
+
+### Known limits
+- Windows text recognition still drops some lines of smoothed small type completely (2 of 168 on the generated pictures). A line
+  whose label and value are both not read cannot be covered: check the picture after Quick redact.
+- A line whose label is read but whose value is not is covered from the label to the next wide gap.
+
+### You must test by hand (English first)
+- [ ] **Quick redact** on your Notepad++ steps (single and whole guide), then look at every picture and step text. If anything is
+  left: Step tab → **OCR debug** → Copy report. A value typed in pieces ("pas", then the rest) leaves its harmless first piece.
+- [ ] Ordinary screenshots with labels ("Password:" on a form, "E-mail:" in a window): is too much covered?
+- [ ] **Sidebar:** tabs, fold, drag the edge, restart (remembered); select steps in the editor and in the outline; drag in the
+  outline with the mouse; Delete there; several steps.
+- [ ] **Tools row:** select steps all over a long guide: nothing jumps; all tools and letters; "⋯".
+- [ ] **Zoom:** slider, Alt+wheel, drag, Fit, with "Original" and with a 16:9 frame; export and compare.
+- [ ] **Blank** and "Template for new guides" (Settings → Documents), then record a guide.
+- [ ] **Pages:** A4 and Letter, portrait and landscape: editor lines against Page view, the PDF and **Word** (cover alone, contents
+  on own pages, first step on a new page; a long contents list).
+- [ ] **Background picture** on the cover with each size, in the editor, Page view, PDF, HTML and Word.
+- [ ] A step with "Show step number" off, in PDF, Word and Markdown.
+- [ ] German and Arabic afterwards.
+
+## 7.5-C4: the paged canvas, cover and contents designs
+
+### Tested (automatic and live in the test instance with `SNIPMUNK_NO_REAL_CAPTURE=1`; generated data only)
+- The test instance keeps its web view data in `E:\SecondDawn\_scratch\wv2` (`WEBVIEW2_USER_DATA_FOLDER`); the start script stops
+  it unless every web view process uses that folder.
+- **Pages (A):** `scripts/e2e-guide-c4.mjs`. The canvas has as many sheets as the PDF has pages, and every step, paragraph, list,
+  picture, table row and contents entry stands on the same page (A4 with cover and contents, after typing and reordering, another
+  template, Letter landscape, 50%, a step higher than a page, 150 steps with 30 texts); every kind of text element is as high on the
+  canvas as in print; nothing reaches into the bottom margin; header, footer and page numbers on every sheet after the cover; a
+  table's header row again on the next page; no layout shift while scrolling; the tools row, the menus, the "+" and dragging work
+  on the sheets; fit width, whole page, 100%, Ctrl+wheel; the free canvas of "Screen (no pages)"; Print preview comes back to the
+  same place; Print… and Ctrl+P give the print document the same pages, paper and orientation (the call to print was caught), and
+  once the real print dialog was opened (nothing was sent to a printer).
+- **Speed** (150 steps, 30 texts, 99 pages): key to next frame, median / 95%: development build 13 / 24 ms, built frontend 10 / 21 ms.
+  A settings change until the pages are laid out and placed: development build about 450 ms, built frontend 153 ms (worst 190). The
+  layout itself takes about 25 ms; the first layout 390 ms (built: 65 ms). In the development build only, a pause in typing costs
+  one task of about 130 ms.
+- **Cover and contents (B):** the six designs, canvas against preview; vertical and horizontal place, date, logo place, size and
+  alignment; right to left; the four contents styles with leaders, numbers, title, size and entries; Word files written (their XML
+  is checked by unit tests).
+- **Fixes (C):** table alignment on the canvas and in print; button widths; "Tree"; "Default drawing colour" and a new box in that
+  colour; the picture-area badge.
+- **Sizes and background (D):** canvas, preview and a real PDF (rendered by Windows) show the step text at the set size in pt and
+  "Fill" over the whole page.
+- The live checks of 7.5-C3 (without its page-break part), `e2e-guide-redact.mjs` and `e2e-guide-export.mjs` passed again.
+- **Not run:** a print to paper or through a print driver, opening the Word files in Word, the installer build.
+
+### Known limits
+- The cover has no header or footer (as Word's cover pages), and page numbers count the pages after it; Word's "of N" also counts
+  the cover.
+- A list is not split between pages.
+- While a table column is dragged at a zoom other than 100%, the border does not follow the pointer exactly.
+- An empty subtitle or author shows on the cover only after a click on the cover.
+- The tools row of the selected step takes room on its page while it is open: what stands below it on that page moves down, and on a
+  full page it reaches into the bottom margin until the step is unselected.
+
+### You must test by hand (English first)
+- [ ] **Pages:** work in a real guide: type, paste, insert images and tables, drag steps, undo and redo, scroll: do pages break
+  where you expect, and does anything jump? A4 and Letter, portrait and landscape.
+- [ ] **Zoom:** Ctrl+wheel, fit page width, whole page, 100%; selecting text and drawing on pictures while zoomed.
+- [ ] **Print preview and Print:** compare preview, a saved PDF and a real printout (or "Microsoft Print to PDF"): margins, header,
+  footer, background, page count.
+- [ ] **Cover designs** with your logo and picture, each design, with the layout controls; then the PDF, HTML and **Word**.
+- [ ] **Contents:** each style and leader, your own title; in **Word** update the field and compare.
+- [ ] **Tables:** left, centre, right on the canvas, preview, PDF and Word; a long table over two pages.
+- [ ] An older guide with a cover: does it look as before?
+- [ ] German and Arabic afterwards.
+
+## 7.5-C5: one File menu, matching headers and bottom bars
+
+### What moved where
+| Before | Now |
+| --- | --- |
+| Settings icon in the window title bar | gone; ⋯ → Settings |
+| Save and Edit in Paint icons at the top right (Screenshots) | **File** icon (before ⋯): Save…, Edit in Paint |
+| ⋯ → Print…, Open screenshots folder | File (Screenshots); "Open file" stays in ⋯ |
+| "File ▾" and the Save button in the Recording and Documents headers | File icon at the top right, the same place in all three modes |
+| Documents File menu: Export…, Copy as, Quick redact whole guide, Record more steps | bottom bar (Export, Copy as ▾), the Guide tab, the row above the pages |
+| Documents: header row and toolbar row | one row: name, status, steps; Print preview, Template ▾, zoom, Undo, Redo, Record more steps ▾ |
+| Zoom pill at the bottom right of the pages | in that row |
+| "1 selected ↑ ↓ 🗑" in the toolbar row | over the top start corner of the pages |
+| "Delete" under an own template (did not ask) | trash icon on its picture (hover or focus), asks first |
+
+Every File menu ends with **Close Snipmunk**, which does what the window's X does (the close setting decides). "New guide" has the
+red of "Record" and "Add capture". Ctrl+O and Ctrl+P act only in the mode they belong to; Ctrl+O also opens a guide from the
+Documents home; F2 renames a recording.
+
+### Tested (unit tests and one visual check in the test instance, generated data only)
+- The entries of the three File menus and when they can be used; the template for new guides after a delete (unit tests).
+- Screenshots of the three modes: title bar, top bar, headers, File menus, one red for the three main buttons, bottom bars of one
+  height, the Documents row wrapping at 760 px without overlap, Arabic mirrored, the trash icon and its question.
+- **Not run:** end-to-end suites, exports, OCR, measurements. The older `scripts/e2e-*.mjs` still look for removed elements
+  (`.recheader__file`, `.gbar`) and need new selectors before their next run.
+
+### You must test by hand
+- [ ] Every File menu entry in each mode, and the shortcuts Ctrl+O, Ctrl+S, Ctrl+Shift+S, Ctrl+P, Ctrl+W, F2.
+- [ ] File → Close Snipmunk with each close setting (keep running, quit, ask), with an unsaved guide or recording too.
+- [ ] A recording that is not saved yet: "Save as project…" and "Discard recording…".
+- [ ] Delete an own template that a guide uses: the guide keeps its look.
+
+## 7.5-D: guide edit tools and UI consistency
+
+### What changed
+- **Top bar:** the **File** button (☰) is at the far left (far right in Arabic and Urdu), behind a divider the main button of the mode.
+  Screenshots: Edit in Paint, Share, Zoom, ⋯ at the end; the top Copy icon is gone (Copy is in the bottom bar).
+- **One header** for Recording and Documents: the white card, one row and the tabs (the Recording style, which Screenshots'
+  panels share).
+- **Documents:** "1 selected ↑ ↓ 🗑" is at the start of the bottom bar.
+- **Step tools:** a grid at the top of the Step tab (Draw, Text, Hide, Picture, then colour, size, Delete selected). Nothing is put
+  above the picture any more. The letters work on the selected step also with the sidebar folded: A L R E H P, T O N, B X K,
+  C Z W S G M. Delete takes away the selected mark; Escape puts away the tool, then the mark, then the selection.
+- **Callout (O):** click (box beside the tip) or drag (from the tip to the box); type in place (Enter: new line; Esc or a click
+  outside: done; double-click: again). Six shapes, fill, border, width, text colour, font size, bold; handles for the box, the
+  round handle for the tip. The box may stand beside, above or below the picture, inside the step. The Text tool types in place too.
+- **Spotlight (S)** and **magnifier (G):** drag an area; options under the grid; the spotlight's style also in the Guide tab, with
+  "Apply to all steps".
+- **Zoom into the click** is inside the picture area; the Step tab says whether the step follows the guide or has its own setting,
+  with "Use the guide default".
+- The link address of a text block is typed in its toolbar (no browser prompt is left in the app).
+
+### Tested (automatic and live in the test instance with `SNIPMUNK_NO_REAL_CAPTURE=1`; generated data only)
+- Unit tests: `marks.test.ts` (callout options, six shapes, frame units, outside positions, zoom, old callouts, handles, magnifier,
+  spotlight, tool letters, remembered options, HTML), `zoom.test.ts` (zoom inside the area, guide default and own setting); Rust:
+  save and open of callout, spotlight and magnifier, the redacted piece of a magnified area outside the stored picture.
+- Live: the three modes, the two headers compared, placing, typing, dragging and resizing a callout, spotlight, magnifier,
+  Delete / Ctrl+Z, letters with a folded sidebar, zoom setting, Text tool, an old callout, "Apply to all steps", Escape, link,
+  print preview (layer on the picture, same page count), saved and opened again, narrow window, Arabic.
+- Exported pictures, by their pixels: dimmed outside the spotlight, the magnifier's bubble shows its area enlarged.
+- Old scripts updated and passed again: `e2e-guide-editor`, `-c2`, `-c3`, `-export`, `-redact`, the `edit` section of `-c4`.
+  `-scan` was only checked for its elements; the other sections of `-c4` and `-pictures` were not run.
+
+### Known limits
+- Arrows, boxes, texts and other drawn marks cannot be moved or resized (not part of this phase).
+- A callout or bubble beside a picture that is as wide as the text makes the picture smaller, so that everything fits the step.
+- A box can stand at most half a picture width beside and 300 frame units above or below the picture.
+- Word, Markdown and "Copy as" get one picture of everything (page colour or transparent around it); PDF and HTML keep the
+  picture with its frame and lay a transparent layer over it.
+- The Tree's small pictures show no marks. Quick redact does not read or mask the words of callouts.
+- A version from before 7.5-D that saves a file again drops the small pieces of magnified areas (`docs/snpd-format.md`).
+- Found, not fixed (older than this phase): a step set to "Full screen" or an expanded area shows the active window again after
+  saving and reopening the guide (the larger picture is in the file).
+
+### You must test by hand (English first)
+- [ ] **Callouts** in a real guide: each shape; type long text, Arabic and German; drag the box far outside, on a framed template
+  and with steps beside the picture; then Print preview, a saved PDF, HTML, **Word** and Markdown.
+- [ ] **Old guide** with callouts: unchanged on opening; double-click one and move it.
+- [ ] **Spotlight**: two on one picture, each shape, light and dark, soft edge; export.
+- [ ] **Magnifier**: on small text (is it sharp?), over a blurred area (it must stay hidden), then crop or switch the picture area so
+  the source falls outside, save, reopen, export.
+- [ ] **Zoom**: with Active window, Full screen and a custom area; with a picture frame; the guide default on and off.
+- [ ] The letter keys, Delete and Undo while typing in texts and fields (no tool should react).
+- [ ] German and Arabic afterwards.

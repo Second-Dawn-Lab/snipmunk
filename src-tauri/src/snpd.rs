@@ -208,6 +208,51 @@ pub fn stored_crop(step: &Step, block: &Value, keep_full: bool, picture: &str) -
     }
 }
 
+/// The part of the picture a framed step shows (the template's ratio, the step's `frame` {cx, cy, w}), clipped to the picture;
+/// `None` when the guide has no frame or the step has no place of its own. The same rules as `src/docs/template/frame.ts`.
+pub fn framed_area(doc: &Value, block: &Value, size: [u32; 2]) -> Option<Rect> {
+    let f = &doc["template"]["frame"];
+    let ratio = match f["ratio"].as_str()? {
+        "original" => return None,
+        "custom" => f["w"].as_f64()? / f["h"].as_f64()?,
+        other => {
+            let (w, h) = other.split_once(':')?;
+            w.parse::<f64>().ok()? / h.parse::<f64>().ok()?
+        }
+    };
+    if !ratio.is_finite() || ratio <= 0.0 {
+        return None;
+    }
+    let place = &block["frame"];
+    // A zoom made in a picture without a frame is no place in this one.
+    if place["own"] == json!(true) {
+        return None;
+    }
+    let (cx, cy, w) = (
+        place["cx"].as_f64()?,
+        place["cy"].as_f64()?,
+        place["w"].as_f64()?.max(16.0),
+    );
+    let h = w / ratio;
+    let (iw, ih) = (size[0] as f64, size[1] as f64);
+    let axis = |centre: f64, len: f64, max: f64| {
+        if len <= max {
+            (centre - len / 2.0).clamp(0.0, max - len)
+        } else {
+            (max - len) / 2.0
+        }
+    };
+    let (x, y) = (axis(cx, w, iw).round(), axis(cy, h, ih).round());
+    let (x0, y0) = (x.max(0.0), y.max(0.0));
+    let (x1, y1) = ((x + w.round()).min(iw), (y + h.round()).min(ih));
+    (x1 - x0 >= 1.0 && y1 - y0 >= 1.0).then_some([
+        x0 as i32,
+        y0 as i32,
+        (x1 - x0) as i32,
+        (y1 - y0) as i32,
+    ])
+}
+
 /// A short signature of how a picture is made (its source file, crop and redactions): same signature, same stored picture.
 fn signature(src: &Path, crop: Rect, redact: &[(Rect, String)]) -> String {
     use std::hash::{Hash, Hasher};
@@ -244,6 +289,116 @@ fn png_of(img: &image::RgbaImage) -> CmdResult<Vec<u8>> {
     crate::thumbs::png_bytes(img, image::codecs::png::CompressionType::Fast).map_err(io)
 }
 
+/// Take out of a step what Quick redact hid, so that none of it goes into the file. Typed text that was masked is left out
+/// (the step's own words show dots). A masked step is stored with the words of its block and without the names of the
+/// control and the window.
+fn scrub(s: &mut Step, block: &Value) {
+    let flag = |name: &str| block.get(name).and_then(Value::as_bool) == Some(true);
+    if flag("maskTyped") {
+        if let Some(typed) = s.typed.take().filter(|t| !t.is_empty()) {
+            for part in &mut s.text {
+                part.t = part.t.replace(&typed, "••••••");
+            }
+        }
+    }
+    if flag("masked") {
+        if let Some(text) = block
+            .get("text")
+            .and_then(|t| serde_json::from_value::<Vec<crate::steptext::Part>>(t.clone()).ok())
+        {
+            s.text = text;
+        }
+        if let Some(e) = &mut s.element {
+            e.name.clear();
+            e.parents.clear();
+        }
+        if let Some(w) = &mut s.window {
+            w.title.clear();
+        }
+    }
+}
+
+/// The area a magnifier of a step shows (`None` for every other mark).
+fn magnified_area(a: &Value) -> Option<Rect> {
+    if a.get("kind")?.as_str()? != "magnify" {
+        return None;
+    }
+    let n = |k: &str| a.get(k).and_then(Value::as_f64);
+    let (x, y, x2, y2) = (n("x")?, n("y")?, n("x2")?, n("y2")?);
+    let (x0, y0) = (x.min(x2).floor() as i32, y.min(y2).floor() as i32);
+    let (x1, y1) = (x.max(x2).ceil() as i32, y.max(y2).ceil() as i32);
+    (x1 > x0 && y1 > y0).then_some([x0, y0, x1 - x0, y1 - y0])
+}
+
+/// The part two rectangles share.
+fn overlap(a: Rect, b: Rect) -> Option<Rect> {
+    let (x0, y0) = (a[0].max(b[0]), a[1].max(b[1]));
+    let (x1, y1) = (
+        (a[0] + a[2]).min(b[0] + b[2]),
+        (a[1] + a[3]).min(b[1] + b[3]),
+    );
+    (x1 > x0 && y1 > y0).then_some([x0, y0, x1 - x0, y1 - y0])
+}
+
+/// A magnified area that the step's stored picture does not hold is stored as a small picture of its own: exactly the area, with
+/// the redactions burned in. Its pixels come from the working picture of the step, or (in a guide opened from a file, whose
+/// picture was cut already) from the piece the file kept. Returns its entry and its rectangle in working picture pixels.
+fn keep_patch(
+    work: &Path,
+    step: &Step,
+    mark: &Value,
+    area: Rect,
+    redact: &[(Rect, String)],
+    known: &std::collections::HashSet<String>,
+    pictures: &mut Vec<(String, Vec<u8>)>,
+) -> CmdResult<Option<(String, Rect)>> {
+    let whole = [0, 0, step.image_size[0] as i32, step.image_size[1] as i32];
+    let kept = || {
+        let p = &mark["patch"];
+        let file = p["file"].as_str()?;
+        // Only a step picture of the working folder, never a path.
+        if !file.starts_with("pic-") || file.contains(['/', '\\']) {
+            return None;
+        }
+        let n = |k: &str| p[k].as_f64().map(|v| v.round() as i32);
+        let (x, y, x2, y2) = (n("x")?, n("y")?, n("x2")?, n("y2")?);
+        Some((work.join(file), [x, y, x2 - x, y2 - y]))
+    };
+    let inside = overlap(area, whole) == Some(area);
+    let (src, bounds) = match kept() {
+        Some(piece) if !inside => piece,
+        _ => (work.join(&step.image), whole),
+    };
+    let Some(part) = overlap(area, bounds) else {
+        return Ok(None);
+    };
+    let entry = format!("pic/{}-m{}.png", step.n, signature(&src, part, redact));
+    if !known.contains(&entry) && !pictures.iter().any(|(n, _)| *n == entry) {
+        // (a piece that is gone: the magnifier shows nothing, the guide is saved)
+        let Ok(img) = image::open(&src) else {
+            return Ok(None);
+        };
+        let mut img = img.to_rgba8();
+        let moved: Vec<(Rect, String)> = redact
+            .iter()
+            .filter(|(r, _)| overlap(*r, bounds).is_some())
+            .map(|(r, k)| (shift(*r, bounds[0], bounds[1]), k.clone()))
+            .collect();
+        burn_redactions(&mut img, &moved);
+        let local = clamp_rect(shift(part, bounds[0], bounds[1]), img.width(), img.height());
+        let cut = image::imageops::crop_imm(
+            &img,
+            local[0] as u32,
+            local[1] as u32,
+            local[2] as u32,
+            local[3] as u32,
+        )
+        .to_image();
+        pictures.push((entry.clone(), png_of(&cut)?));
+    }
+    Ok(Some((entry, part)))
+}
+
 /// Make the content of the file from the working folder and the document: every step picture cropped and redacted, the rectangles of
 /// the steps moved to the cropped picture, the editing-only fields (crop, redactions) left out of the stored blocks.
 /// `known` are the picture entries the file has already (not made again).
@@ -278,7 +433,14 @@ pub fn prepare(
         if b.get("type").and_then(Value::as_str) == Some("step") {
             let n = b.get("n").and_then(Value::as_u64).unwrap_or(0) as u32;
             if let Some(step) = by_n.get(&n) {
-                let crop = stored_crop(step, &b, keep_full, &picture);
+                // A step in a picture frame stores what the frame shows (as far as the screen goes), also when that is more than the
+                // window; "keep full screenshots" keeps everything.
+                let framed = if keep_full {
+                    None
+                } else {
+                    framed_area(doc, &b, step.image_size)
+                };
+                let crop = framed.unwrap_or_else(|| stored_crop(step, &b, keep_full, &picture));
                 let redact: Vec<(Rect, String)> = b
                     .get("redact")
                     .and_then(Value::as_array)
@@ -295,8 +457,10 @@ pub fn prepare(
                     .unwrap_or_default();
                 if step.image.is_empty() {
                     // A blank step has no picture: it is stored as it is.
+                    let mut s = (*step).clone();
+                    scrub(&mut s, &b);
                     if let Some(o) = b.as_object_mut() {
-                        o.insert("step".into(), serde_json::to_value(step).map_err(io)?);
+                        o.insert("step".into(), serde_json::to_value(&s).map_err(io)?);
                     }
                     out_blocks.push(b);
                     continue;
@@ -322,8 +486,29 @@ pub fn prepare(
                 } else if thumbnail.is_none() {
                     thumbnail = None;
                 }
+                // Magnified areas outside what the step stores get a piece of their own (by the place of their mark).
+                let mut patches: Vec<(usize, Option<Value>)> = Vec::new();
+                if let Some(list) = b.get("annotations").and_then(Value::as_array) {
+                    for (i, mark) in list.iter().enumerate() {
+                        let Some(area) = magnified_area(mark) else {
+                            continue;
+                        };
+                        let patch = if overlap(area, crop) == Some(area) {
+                            None
+                        } else {
+                            keep_patch(work, step, mark, area, &redact, known, &mut pictures)?.map(
+                                |(file, r)| {
+                                    let (x, y) = (r[0] - crop[0], r[1] - crop[1]);
+                                    json!({ "file": file, "x": x, "y": y, "x2": x + r[2], "y2": y + r[3] })
+                                },
+                            )
+                        };
+                        patches.push((i, patch));
+                    }
+                }
                 // The step as stored: its picture, and every rectangle in the pixels of the cropped picture.
                 let mut s = (*step).clone();
+                scrub(&mut s, &b);
                 s.image = entry;
                 s.image_size = [crop[2] as u32, crop[3] as u32];
                 s.click = s.click.map(|c| [c[0] - crop[0], c[1] - crop[1]]);
@@ -342,6 +527,23 @@ pub fn prepare(
                     // The annotations are in the pixels of the full picture: moved the same way.
                     if let Some(a) = o.get_mut("annotations") {
                         *a = shift_annotations(a, crop[0], crop[1]);
+                    }
+                    for (i, patch) in patches {
+                        if let Some(mark) = o
+                            .get_mut("annotations")
+                            .and_then(Value::as_array_mut)
+                            .and_then(|list| list.get_mut(i))
+                            .and_then(Value::as_object_mut)
+                        {
+                            match patch {
+                                Some(p) => mark.insert("patch".into(), p),
+                                None => mark.remove("patch"),
+                            };
+                        }
+                    }
+                    // The frame's centre is in picture pixels too.
+                    if let Some(f) = o.get_mut("frame") {
+                        *f = shift_annotations(f, crop[0], crop[1]);
                     }
                     if let Some(z) = o.get_mut("zoomRect") {
                         if let Ok(r) = serde_json::from_value::<Rect>(z.clone()) {
@@ -450,6 +652,43 @@ fn sources_from(p: &Prepared) -> CmdResult<Vec<Source>> {
     Ok(v)
 }
 
+/// The entry an item of a package stands for: `meta/pic/3-ab.png.2` is a version of `pic/3-ab.png`.
+fn plain_name(entry: &str) -> &str {
+    entry
+        .strip_prefix("meta/")
+        .map(|r| r.rsplit_once('.').map_or(r, |(name, _)| name))
+        .unwrap_or(entry)
+}
+
+/// The step pictures a stored document shows, with the pieces its magnifiers keep.
+fn pictures_of(doc: &Value) -> std::collections::HashSet<String> {
+    doc["blocks"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .flat_map(|b| {
+            let pieces = b["annotations"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|a| a["patch"]["file"].as_str());
+            b["step"]["image"].as_str().into_iter().chain(pieces)
+        })
+        .map(str::to_string)
+        .collect()
+}
+
+/// How much of a document is hidden: the masks in its texts and the steps whose recorded names are left out.
+fn hidden(doc: &Value) -> usize {
+    let masks = doc.to_string().matches("••••••").count();
+    let steps = doc["blocks"].as_array().map_or(0, |a| {
+        a.iter()
+            .filter(|b| b["masked"] == json!(true) || b["maskTyped"] == json!(true))
+            .count()
+    });
+    masks + steps
+}
+
 /// Save the working guide to `path`. `as_new`: write a compact NEW file (Save as, or the first save); else append the small changes to
 /// the existing file (the document and the pictures that changed); when the existing file cannot be appended to it is written again.
 pub fn save(
@@ -473,6 +712,20 @@ pub fn save(
     let prepared = prepare(work, doc, steps, &known)?;
     let how = match existing {
         Some(pkg) => {
+            // An appended save leaves the earlier versions in the file. When this one hides something that an earlier one holds
+            // (a picture is cut or redacted anew, texts were masked), the file is written again without them.
+            let shown = pictures_of(&prepared.document);
+            let superseded = pkg
+                .entries
+                .keys()
+                .map(|k| plain_name(k))
+                .any(|n| n.starts_with("pic/") && !shown.contains(n));
+            let before = pkg
+                .meta("document.json")
+                .ok()
+                .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+                .map_or(0, |d| hidden(&d));
+            let hides = superseded || hidden(&prepared.document) > before;
             // Only what is new or changed is appended: the document, new pictures (names carry their signature), new inserted images.
             let mut items: Vec<(String, Vec<u8>)> = vec![(
                 "document.json".into(),
@@ -490,7 +743,15 @@ pub fn save(
                 items.push(("thumbnail.png".into(), t.clone()));
             }
             package::append_meta(path, KIND_DOC, &items).map_err(io)?;
-            "appended"
+            if hides {
+                package::compact_keeping(path, path, KIND_DOC, |n| {
+                    !n.starts_with("pic/") || shown.contains(n)
+                })
+                .map_err(io)?;
+                "rewritten"
+            } else {
+                "appended"
+            }
         }
         None => {
             if let Some(dir) = path.parent() {
@@ -560,6 +821,14 @@ pub fn open_file(work: &Path, path: &Path) -> CmdResult<()> {
             if let Some(o) = b.as_object_mut() {
                 o.insert("n".into(), json!(n));
                 o.remove("step");
+                // The pieces of magnified areas are under their flat names too.
+                if let Some(list) = o.get_mut("annotations").and_then(Value::as_array_mut) {
+                    for mark in list {
+                        if let Some(file) = mark["patch"]["file"].as_str().map(flat) {
+                            mark["patch"]["file"] = json!(file);
+                        }
+                    }
+                }
             }
         }
     }
@@ -633,7 +902,7 @@ fn remember(path: &Path, name: &str, steps: u32) {
     write_recent(&list);
 }
 
-fn base64(bytes: &[u8]) -> String {
+pub fn base64(bytes: &[u8]) -> String {
     const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
     for c in bytes.chunks(3) {
@@ -977,6 +1246,93 @@ mod tests {
     }
 
     #[test]
+    fn a_magnified_area_outside_the_stored_picture_is_kept_as_a_redacted_piece_of_its_own() {
+        let (d, steps, mut doc) = work_with_steps(1);
+        let work = d.path().join("work");
+        // The window is (50,20) 100x60. One magnifier on the red area outside it (with a black box over its left half), one
+        // inside the window. A callout box and a bubble are in frame units: they are not moved with the picture.
+        doc["blocks"][0]["redact"] = json!([{ "rect": [10, 10, 10, 20], "kind": "black" }]);
+        doc["blocks"][0]["annotations"] = json!([
+            { "id": "m1", "kind": "magnify", "x": 10, "y": 10, "x2": 30, "y2": 30, "at": { "x": 600, "y": -40 }, "zoom": 3 },
+            { "id": "m2", "kind": "magnify", "x": 60, "y": 30, "x2": 80, "y2": 50, "at": { "x": 100, "y": 100 } },
+            { "id": "c1", "kind": "callout", "x": 60, "y": 30, "x2": 70, "y2": 40, "box": { "x": -120, "y": 5, "w": 190, "h": 40 }, "text": "Here\nnow", "shape": "cloud", "fill": "#101010", "color": "#202020", "textColor": "#F0F0F0", "size": 22, "bold": true, "width": 4 },
+            { "id": "s1", "kind": "spot", "x": 60, "y": 30, "x2": 90, "y2": 50, "shape": "ellipse" }
+        ]);
+        doc["spotlight"] = json!({ "dim": 40, "tone": "light", "soft": true });
+        doc["blocks"][0]["spotlight"] = json!({ "dim": 70 });
+        let file = d.path().join("g.snpd");
+        save(&work, &file, &doc, &steps, true).unwrap();
+        let read = |file: &Path| {
+            let pkg = package::open(file, KIND_DOC).unwrap();
+            let stored: Value =
+                serde_json::from_slice(&pkg.meta("document.json").unwrap()).unwrap();
+            (pkg, stored)
+        };
+        let (pkg, stored) = read(&file);
+        let marks = &stored["blocks"][0]["annotations"];
+        // Moved with the picture: the areas and tips; kept: what is in frame units.
+        assert_eq!(marks[0]["x"], json!(-40.0));
+        assert_eq!(marks[0]["at"], json!({ "x": 600, "y": -40 }));
+        assert_eq!(marks[2]["box"]["x"], json!(-120));
+        assert_eq!(marks[2]["x2"], json!(20.0));
+        assert_eq!(marks[3]["x"], json!(10.0));
+        let piece = marks[0]["patch"]["file"].as_str().unwrap().to_string();
+        assert_eq!(
+            marks[0]["patch"],
+            json!({ "file": piece, "x": -40, "y": -10, "x2": -20, "y2": 10 })
+        );
+        assert!(marks[1].get("patch").is_none(), "inside the stored picture");
+        let img = image::load_from_memory(&pkg.meta(&piece).unwrap())
+            .unwrap()
+            .to_rgba8();
+        // Exactly the area, and nothing that was redacted.
+        assert_eq!((img.width(), img.height()), (20, 20));
+        assert_eq!(img.get_pixel(4, 4).0, [0, 0, 0, 255]);
+        assert_eq!(img.get_pixel(15, 4).0, [255, 0, 0, 255]);
+        // Opened again the piece is in the working folder, and the next save keeps it from there.
+        let work2 = d.path().join("work2");
+        open_file(&work2, &file).unwrap();
+        let doc2 = read_document(&work2).unwrap();
+        let name = doc2["blocks"][0]["annotations"][0]["patch"]["file"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert_eq!(name, flat(&piece));
+        assert!(work2.join(&name).is_file());
+        // The callout with every option, the spotlight and both spotlight styles come back as they were saved.
+        assert_eq!(doc2["blocks"][0]["annotations"][2], marks[2]);
+        assert_eq!(doc2["blocks"][0]["annotations"][3], marks[3]);
+        assert_eq!(doc2["blocks"][0]["spotlight"], json!({ "dim": 70 }));
+        assert_eq!(doc2["spotlight"], doc["spotlight"]);
+        let lines = std::fs::read_to_string(work2.join("steps.jsonl")).unwrap();
+        let steps2: Vec<Step> = lines
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        let copy = d.path().join("copy.snpd");
+        save(&work2, &copy, &doc2, &steps2, true).unwrap();
+        let (pkg2, stored2) = read(&copy);
+        let again = &stored2["blocks"][0]["annotations"][0]["patch"];
+        let kept = image::load_from_memory(&pkg2.meta(again["file"].as_str().unwrap()).unwrap())
+            .unwrap()
+            .to_rgba8();
+        assert_eq!(kept.dimensions(), (20, 20));
+        assert_eq!(kept.get_pixel(15, 4).0, [255, 0, 0, 255]);
+        // A later save without the magnifier takes its piece out of the file.
+        let mut without = doc.clone();
+        without["blocks"][0]["annotations"] = json!([]);
+        assert_eq!(
+            save(&work, &file, &without, &steps, false).unwrap().how,
+            "rewritten"
+        );
+        assert!(!package::open(&file, KIND_DOC)
+            .unwrap()
+            .entries
+            .keys()
+            .any(|k| k.contains(&piece)));
+    }
+
+    #[test]
     fn a_later_save_appends_only_what_changed_and_the_file_opens_again_with_everything() {
         let (d, steps, mut doc) = work_with_steps(3);
         let work = d.path().join("work");
@@ -1029,20 +1385,20 @@ mod tests {
     }
 
     #[test]
-    fn a_save_that_was_cut_off_is_undone_and_a_changed_crop_adds_one_new_picture() {
+    fn a_save_that_was_cut_off_is_undone_and_a_changed_crop_replaces_its_picture() {
         let (d, steps, mut doc) = work_with_steps(2);
         let work = d.path().join("work");
         let file = d.path().join("g.snpd");
         save(&work, &file, &doc, &steps, true).unwrap();
         let good = std::fs::read(&file).unwrap();
-        // A new crop of step 2: one new picture and the document are appended.
+        // A new crop of step 2: the file holds the new picture only (the old one may show what was cut away).
         doc["blocks"][1]["crop"] = json!([0, 0, 120, 80]);
         save(&work, &file, &doc, &steps, false).unwrap();
         let p = package::open(&file, KIND_DOC).unwrap();
         assert_eq!(
             p.entries.keys().filter(|k| k.contains("pic/2-")).count(),
-            2,
-            "the old and the new picture of step 2"
+            1,
+            "only the new picture of step 2"
         );
         // The program died while the next save was being written: the old tail is put back at the next open.
         doc["title"] = json!("Never finished");
@@ -1178,5 +1534,172 @@ mod tests {
         assert_eq!((img.width(), img.height()), (180, 85));
         // The red area (10..50, 10..30) of the screenshot is inside the expanded area: it is in the picture now.
         assert!(img.pixels().any(|p| p.0 == [255, 0, 0, 255]));
+    }
+
+    /// 7.5-C: a step in a picture frame stores the area its frame shows (more than the window here), nothing else; the frame's centre
+    /// moves with it, the file asks for minor version 1, and a guide without template stays at minor 0.
+    #[test]
+    fn a_framed_step_stores_what_its_frame_shows_and_the_file_says_so() {
+        let (d, steps, mut doc) = work_with_steps(2);
+        let work = d.path().join("work");
+        let plain = d.path().join("plain.snpd");
+        save(&work, &plain, &doc, &steps, true).unwrap();
+        assert_eq!(package::open(&plain, KIND_DOC).unwrap().manifest.minor, 0);
+        // 200x100 picture, window (50,20 100x60). A 2:1 frame, 180 px wide, centred at (100,50): (10,5) 180x90.
+        doc["template"] = json!({ "frame": { "ratio": "custom", "w": 2, "h": 1 } });
+        doc["blocks"][0]["frame"] = json!({ "cx": 100, "cy": 50, "w": 180 });
+        // Step 2: a frame wider than the picture: clipped to the picture (the rest is padding when shown).
+        doc["blocks"][1]["frame"] = json!({ "cx": 100, "cy": 50, "w": 400 });
+        let file = d.path().join("f.snpd");
+        save(&work, &file, &doc, &steps, true).unwrap();
+        let pkg = package::open(&file, KIND_DOC).unwrap();
+        assert_eq!(pkg.manifest.minor, 1);
+        let stored: Value = serde_json::from_slice(&pkg.meta("document.json").unwrap()).unwrap();
+        let s1: Step = serde_json::from_value(stored["blocks"][0]["step"].clone()).unwrap();
+        assert_eq!(s1.image_size, [180, 90]);
+        assert_eq!(stored["blocks"][0]["frame"]["cx"], json!(90.0));
+        assert_eq!(stored["blocks"][0]["frame"]["cy"], json!(45.0));
+        let s2: Step = serde_json::from_value(stored["blocks"][1]["step"].clone()).unwrap();
+        assert_eq!(s2.image_size, [200, 100]);
+        assert_eq!(stored["template"]["frame"]["ratio"], "custom");
+        // What came with 7.5-C2 asks for minor version 2.
+        let mut newer = doc.clone();
+        newer["template"]["header"] = json!({ "left": "text", "texts": { "left": "Internal" } });
+        let two = d.path().join("two.snpd");
+        save(&work, &two, &newer, &steps, true).unwrap();
+        assert_eq!(package::open(&two, KIND_DOC).unwrap().manifest.minor, 2);
+        // "Keep full screenshots" ignores the frame for what is stored.
+        doc["keepFull"] = json!(true);
+        let full = d.path().join("full.snpd");
+        save(&work, &full, &doc, &steps, true).unwrap();
+        let p = package::open(&full, KIND_DOC).unwrap();
+        let st: Value = serde_json::from_slice(&p.meta("document.json").unwrap()).unwrap();
+        assert_eq!(st["blocks"][0]["step"]["imageSize"], json!([200, 100]));
+    }
+
+    #[test]
+    fn masked_typed_text_is_not_in_the_saved_file() {
+        let (d, mut steps, mut doc) = work_with_steps(2);
+        let work = d.path().join("work");
+        for s in &mut steps {
+            s.typed = Some("hunter2secret".into());
+            s.text = vec![crate::steptext::Part {
+                t: "Type 'hunter2secret'".into(),
+                b: false,
+            }];
+        }
+        doc["blocks"][0]["maskTyped"] = json!(true);
+        doc["blocks"][0]["text"] = json!([{ "t": "Type '••••••'" }]);
+        let file = d.path().join("g.snpd");
+        save(&work, &file, &doc, &steps, true).unwrap();
+        let pkg = package::open(&file, KIND_DOC).unwrap();
+        let stored: Value = serde_json::from_slice(&pkg.meta("document.json").unwrap()).unwrap();
+        let first = stored["blocks"][0].to_string();
+        assert!(!first.contains("hunter2secret"), "{first}");
+        assert!(first.contains("••••••"));
+        assert!(
+            stored["blocks"][1].to_string().contains("hunter2secret"),
+            "only what was ticked"
+        );
+    }
+
+    #[test]
+    fn a_zoom_made_without_a_frame_is_no_place_in_a_frame() {
+        let doc = json!({ "template": { "frame": { "ratio": "1:1" } } });
+        let mut block = json!({ "frame": { "cx": 100, "cy": 50, "w": 40 } });
+        assert_eq!(
+            framed_area(&doc, &block, [200, 100]),
+            Some([80, 30, 40, 40])
+        );
+        // The zoom stays a view of the step: the file keeps the step's area.
+        block["frame"]["own"] = json!(true);
+        assert_eq!(framed_area(&doc, &block, [200, 100]), None);
+        let plain = json!({ "template": { "frame": { "ratio": "original" } } });
+        assert_eq!(framed_area(&plain, &block, [200, 100]), None);
+    }
+
+    #[test]
+    fn hiding_something_after_a_save_leaves_no_earlier_version_in_the_file() {
+        let (d, mut steps, mut doc) = work_with_steps(2);
+        let work = d.path().join("work");
+        let secret = "s3cretValue";
+        steps[0].text = vec![crate::steptext::Part {
+            t: format!("Click {secret}"),
+            b: false,
+        }];
+        let file = d.path().join("g.snpd");
+        save(&work, &file, &doc, &steps, true).unwrap();
+        let pictures = |file: &Path| {
+            let p = package::open(file, KIND_DOC).unwrap();
+            p.entries
+                .keys()
+                .filter(|k| plain_name(k).starts_with("pic/"))
+                .count()
+        };
+        // An ordinary change is appended.
+        doc["title"] = json!("Renamed");
+        assert_eq!(
+            save(&work, &file, &doc, &steps, false).unwrap().how,
+            "appended"
+        );
+        assert_eq!(pictures(&file), 2);
+        // A masked text: the earlier versions that hold it are gone.
+        doc["blocks"][0]["masked"] = json!(true);
+        doc["blocks"][0]["text"] = json!([{ "t": "Click ••••••" }]);
+        assert_eq!(
+            save(&work, &file, &doc, &steps, false).unwrap().how,
+            "rewritten"
+        );
+        let bytes = std::fs::read(&file).unwrap();
+        assert!(!bytes.windows(secret.len()).any(|w| w == secret.as_bytes()));
+        // A new redaction: the earlier picture is gone.
+        doc["blocks"][1]["redact"] = json!([{ "rect": [60, 30, 20, 20], "kind": "black" }]);
+        assert_eq!(
+            save(&work, &file, &doc, &steps, false).unwrap().how,
+            "rewritten"
+        );
+        assert_eq!(pictures(&file), 2);
+        let p = package::open(&file, KIND_DOC).unwrap();
+        assert!(!p.entries.keys().any(|k| k.starts_with("meta/")));
+        // Saving the same again only appends.
+        assert_eq!(
+            save(&work, &file, &doc, &steps, false).unwrap().how,
+            "appended"
+        );
+        open_file(&d.path().join("again"), &file).unwrap();
+    }
+
+    #[test]
+    fn a_masked_step_is_stored_with_its_blocks_words_and_without_control_and_window_names() {
+        let (d, mut steps, mut doc) = work_with_steps(1);
+        let work = d.path().join("work");
+        let secret = "s3cretValue";
+        steps[0].text = vec![crate::steptext::Part {
+            t: format!("Click password: {secret}"),
+            b: false,
+        }];
+        steps[0].window = Some(crate::guides::WindowInfo {
+            rect: [50, 20, 100, 60],
+            title: format!("{secret} - Editor"),
+            process: "editor".into(),
+        });
+        steps[0].element = Some(crate::guides::ElementInfo {
+            name: format!("password: {secret}"),
+            control_type: "Edit".into(),
+            localized_control_type: "edit".into(),
+            automation_id: String::new(),
+            toggle: None,
+            selected: None,
+            rect: [1, 1, 5, 5],
+            parents: vec![format!("{secret} tab")],
+        });
+        doc["blocks"][0]["masked"] = json!(true);
+        doc["blocks"][0]["text"] = json!([{ "t": "Click password: ••••••" }]);
+        let file = d.path().join("g.snpd");
+        save(&work, &file, &doc, &steps, true).unwrap();
+        let pkg = package::open(&file, KIND_DOC).unwrap();
+        let stored = String::from_utf8(pkg.meta("document.json").unwrap()).unwrap();
+        assert!(!stored.contains(secret), "{stored}");
+        assert!(stored.contains("••••••"));
     }
 }

@@ -74,7 +74,21 @@ const paths = {
   ),
   openfile: <path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9zM14 3v6h6M12 17v-5M9.500 14.500 12 12l2.500 2.500" />,
   chevronNext: <path d="m9 6 6 6-6 6" />,
+  hamburger: <path d="M4 6.500h16M4 12h16M4 17.500h16" />,
   // annotation tools
+  spotlight: (
+    <>
+      <rect x="3" y="4" width="18" height="16" rx="2" strokeDasharray="3 2.500" />
+      <circle cx="12" cy="12" r="4.500" />
+    </>
+  ),
+  magnify: (
+    <>
+      <circle cx="14.500" cy="9.500" r="6.500" />
+      <path d="M12 9.500h5M14.500 7v5M9.900 14.100 8 16" />
+      <rect x="3" y="16" width="5" height="5" rx="1" />
+    </>
+  ),
   pen: <path d="M17 3a2.800 2.800 0 0 1 4 4L8 20l-5 1 1-5zM14 6l4 4" />,
   highlighter: <path d="M9 11l5 5M4 20h6l10-10-6-6L4 14zM14 4l6 6" />,
   eraser: <path d="M20 20H9L3.500 14.500a2 2 0 0 1 0-2.800L12 3.200a2 2 0 0 1 2.800 0l5.500 5.500a2 2 0 0 1 0 2.800L11 20.500" />,

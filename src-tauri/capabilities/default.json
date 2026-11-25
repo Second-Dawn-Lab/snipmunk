@@ -12,7 +12,8 @@
     "recbar",
     "webcambubble",
     "scrollpill",
-    "guidebar"
+    "guidebar",
+    "guideframe"
   ],
   "permissions": [
     "core:default",

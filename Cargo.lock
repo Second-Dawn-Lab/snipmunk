@@ -4582,6 +4582,7 @@ dependencies = [
  "mp4",
  "serde",
  "serde_json",
+ "snipmunk-pixels",
  "tauri",
  "tauri-build",
  "tauri-plugin-autostart",
@@ -4596,6 +4597,13 @@ dependencies = [
  "windows-collections 0.2.0",
  "windows-core 0.62.2",
  "zip 2.6.1",
+]
+
+[[package]]
+name = "snipmunk-pixels"
+version = "0.0.0"
+dependencies = [
+ "image",
 ]
 
 [[package]]

@@ -26,7 +26,8 @@ import { ipc, type Capture, type CmdError, type Group, type Session } from "../i
 import { hasRecordingGroup, mergeGroupOrder } from "../recordingGroups";
 import { SearchIndex } from "../search";
 import { stageAll } from "../share/exporter";
-import { DocumentsMode } from "../docs/DocumentsMode";
+import { DocumentsMode, renameGuide } from "../docs/DocumentsMode";
+import { guideEntries, screenshotEntries, type FileEntry } from "./fileEntries";
 import { useGuide } from "../docs/useGuide";
 import { SaveDialog } from "./SaveDialog";
 import { Toasts, useToasts, type ToastAction } from "./Toasts";
@@ -461,7 +462,8 @@ export function MainWindow() {
         return;
       }
       if (typing || dialogOpen) return;
-      if (settingsRef.current.captureKind === "video" && (e.ctrlKey || e.metaKey) && (e.key === "o" || e.key === "O" || e.key === "p" || e.key === "P")) return;
+      // In the other modes Ctrl+O and Ctrl+P belong to the recording or the guide.
+      if (settingsRef.current.captureKind !== "screenshot" && (e.ctrlKey || e.metaKey) && (e.key === "o" || e.key === "O" || e.key === "p" || e.key === "P")) return;
       if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === "o" || e.key === "O")) {
         e.preventDefault();
         void shareRef.current?.openFile();
@@ -696,6 +698,34 @@ export function MainWindow() {
     setQuery("");
     setApplied("");
   };
+  // The File menu of the top bar: what the mode on show can do with its files.
+  const fileEntries: FileEntry[] = docMode
+    ? guideEntries(
+        t,
+        { open: !!guide.doc, file: !!guide.savedPath, unchanged: !guide.dirty, busy: guide.busy, recent: guide.recent },
+        {
+          create: () => guide.newGuide(),
+          open: () => guide.open(),
+          save: () => void guide.save(),
+          saveAs: () => void guide.saveAs(),
+          rename: renameGuide,
+          explorer: () => guide.savedPath && void ipc.openFolder(guide.savedPath).catch((e) => setError(messageOf(e))),
+          close: () => guide.close(),
+          openRecent: (path) => guide.openRecent(path),
+        },
+      )
+    : recMode
+      ? rec.fileEntries
+      : screenshotEntries(
+          t,
+          { capture: capture !== null, busy: share.busy, windows: /Windows/i.test(navigator.userAgent) },
+          {
+            save: () => capture && share.save([capture]),
+            paint: () => capture && void share.paint(capture),
+            print: () => void share.print(printTargetsRef.current()),
+            folder: () => void share.openFolder(),
+          },
+        );
   const openHit = (h: SearchHit) => {
     setGroupId(h.group.id);
     setViews((prev) => ({ ...prev, [h.group.id]: { sel: emptySelection, active: h.capture.id } }));
@@ -794,17 +824,14 @@ export function MainWindow() {
         recording={recMode}
         documents={{ onNew: guide.newGuide, hotkey: settings.docStartHotkey }}
         onRecord={(area) => rec.startRecording(area)}
+        file={fileEntries}
         share={{
           hasCapture: capture !== null,
           busy: share.busy,
           canShare: share.canShare,
           onPaint: () => capture && void share.paint(capture),
-          onSave: () => capture && (recMode ? recSave(capture) : share.save([capture])),
-          onCopy: () => capture && (recMode ? recCopy(capture) : void share.copy([capture], copyMode)),
           onShare: () => capture && (recMode ? recShare(capture) : void share.share(view.sel.ids.size > 0 ? byIds([...view.sel.ids]) : [capture])),
           onOpenFile: () => void share.openFile(),
-          onOpenFolder: () => void share.openFolder(),
-          onPrint: () => void share.print(printTargetsRef.current()),
         }}
       />
 
@@ -829,17 +856,16 @@ export function MainWindow() {
 
 
       {docMode ? (
-        <main className="panels panels--single">
-          <DocumentsMode
-            guide={guide}
-            settings={settings}
-            session={rawSession}
-            captures={rawSession ? rawSession.groups.filter((g) => g.kind !== "recording").flatMap((g) => g.captures) : []}
-            onError={(m) => setError(m)}
-          />
+        <DocumentsMode
+          guide={guide}
+          settings={settings}
+          onPatch={(c) => void patch(c)}
+          session={rawSession}
+          captures={rawSession ? rawSession.groups.filter((g) => g.kind !== "recording").flatMap((g) => g.captures) : []}
+        >
           {rec.dialogs}
           {guide.dialogs}
-        </main>
+        </DocumentsMode>
       ) : (
       <main className={`panels${recMode ? " panels--single" : ""}`}>
         {!recMode && (
@@ -929,8 +955,13 @@ export function MainWindow() {
         </div>
         )}
         <div className="panel panel--right">
-          {recMode && rec.header}
-          {recMode && rec.tabsBar}
+          {/* The same header as an open guide has: one row about what is on show, and the tabs. */}
+          {recMode && (rec.header || rec.tabsBar) && (
+            <div className="modehead">
+              {rec.header && <div className="headrow">{rec.header}</div>}
+              {rec.tabsBar}
+            </div>
+          )}
           {recMode && !capture && rec.empty(() => rec.startRecording(settings.recMode))}
           {(!recMode || capture) && <Preview
             session={session}

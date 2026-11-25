@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { placePopover, type PopoverPlacement } from "./popoverPlacement";
 
 const FOCUSABLE =
@@ -26,6 +27,14 @@ export function Pop(props: {
   const panel = useRef<HTMLDivElement>(null);
   const [place, setPlace] = useState<PopoverPlacement | null>(null);
   const id = useId();
+  // Inside something that is shown scaled (the pages of the guide editor) the panel would be placed and sized wrongly: it is
+  // then put into the document's body.
+  const [outside, setOutside] = useState(false);
+  useLayoutEffect(() => {
+    setOutside(open && !!wrap.current?.closest("[data-scaled]"));
+  }, [open]);
+  /** Whether a node belongs to this popover, wherever its panel is. */
+  const mine = (node: Node) => !!wrap.current?.contains(node) || !!panel.current?.contains(node);
 
   const reposition = useCallback(() => {
     const w = wrap.current;
@@ -60,7 +69,7 @@ export function Pop(props: {
       observer?.disconnect();
       window.removeEventListener("resize", reposition);
     };
-  }, [open, reposition]);
+  }, [open, outside, reposition]);
 
   // Move the focus into the panel when it opens.
   useEffect(() => {
@@ -70,12 +79,12 @@ export function Pop(props: {
       target?.focus();
     });
     return () => cancelAnimationFrame(frame);
-  }, [open]);
+  }, [open, outside]);
 
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
-      if (wrap.current && !wrap.current.contains(e.target as Node)) onClose();
+      if (wrap.current && !wrap.current.contains(e.target as Node) && !panel.current?.contains(e.target as Node)) onClose();
     };
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
@@ -118,28 +127,30 @@ export function Pop(props: {
 
   const onBlur = (e: React.FocusEvent) => {
     const next = e.relatedTarget as Node | null;
-    if (open && next && wrap.current && !wrap.current.contains(next)) onClose();
+    if (open && next && wrap.current && !mine(next)) onClose();
   };
+
+  const floating = open && (
+    <div
+      ref={panel}
+      id={id}
+      className={`pop__panel${place ? "" : " pop__panel--measuring"}${props.className ? ` ${props.className}` : ""}`}
+      role={kind === "menu" ? "menu" : "dialog"}
+      aria-label={props.label}
+      style={
+        place
+          ? { left: place.left, top: place.top, maxHeight: place.maxHeight, maxWidth: place.maxWidth }
+          : undefined
+      }
+    >
+      {props.children}
+    </div>
+  );
 
   return (
     <span className="pop" ref={wrap} onKeyDown={onKeyDown} onBlur={onBlur}>
       {props.trigger}
-      {open && (
-        <div
-          ref={panel}
-          id={id}
-          className={`pop__panel${place ? "" : " pop__panel--measuring"}${props.className ? ` ${props.className}` : ""}`}
-          role={kind === "menu" ? "menu" : "dialog"}
-          aria-label={props.label}
-          style={
-            place
-              ? { left: place.left, top: place.top, maxHeight: place.maxHeight, maxWidth: place.maxWidth }
-              : undefined
-          }
-        >
-          {props.children}
-        </div>
-      )}
+      {floating && outside ? createPortal(floating, document.body) : floating}
     </span>
   );
 }

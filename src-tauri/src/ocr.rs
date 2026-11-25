@@ -232,12 +232,27 @@ mod win {
     }
 
     /// Recognize an RGBA picture in one language.
+    /// The engine of a language, made once per thread and used again (the scan of a guide reads many pictures).
+    fn engine(tag: &str) -> Result<OcrEngine> {
+        thread_local! {
+            static ENGINES: std::cell::RefCell<std::collections::HashMap<String, OcrEngine>> =
+                Default::default();
+        }
+        ENGINES.with(|cache| {
+            if let Some(e) = cache.borrow().get(tag) {
+                return Ok(e.clone());
+            }
+            let language = Language::CreateLanguage(&HSTRING::from(tag))?;
+            let engine = OcrEngine::TryCreateFromLanguage(&language)
+                .map_err(|_| anyhow!("Windows OCR has no {tag}"))?;
+            cache.borrow_mut().insert(tag.to_string(), engine.clone());
+            Ok(engine)
+        })
+    }
+
     pub fn recognize(rgba: &[u8], width: u32, height: u32, tag: &str) -> Result<Vec<OcrLine>> {
         init_com();
-        let mut bgra = rgba.to_vec();
-        for px in bgra.as_chunks_mut::<4>().0 {
-            px.swap(0, 2);
-        }
+        let bgra = snipmunk_pixels::swap_red_blue(rgba);
         let writer = DataWriter::new()?;
         writer.WriteBytes(&bgra)?;
         let buffer = writer.DetachBuffer()?;
@@ -247,10 +262,7 @@ mod win {
             width as i32,
             height as i32,
         )?;
-        let language = Language::CreateLanguage(&HSTRING::from(tag))?;
-        let engine = OcrEngine::TryCreateFromLanguage(&language)
-            .map_err(|_| anyhow!("Windows OCR has no {tag}"))?;
-        let result = engine.RecognizeAsync(&bitmap)?.get()?;
+        let result = engine(tag)?.RecognizeAsync(&bitmap)?.get()?;
         let mut lines = Vec::new();
         for line in result.Lines()? {
             let mut words = Vec::new();
@@ -435,15 +447,9 @@ fn read_pass(
     tags: &[String],
 ) -> Result<(String, Vec<OcrLine>), String> {
     let (data, w, h): (std::borrow::Cow<[u8]>, u32, u32) = if factor > 1 {
-        let img = image::RgbaImage::from_raw(width, height, rgba.to_vec())
+        let big = snipmunk_pixels::upscale_rgba(rgba, width, height, factor)
             .ok_or("the picture has an unexpected size")?;
-        let big = image::imageops::resize(
-            &img,
-            width * factor,
-            height * factor,
-            image::imageops::FilterType::CatmullRom,
-        );
-        (big.into_raw().into(), width * factor, height * factor)
+        (big.into(), width * factor, height * factor)
     } else {
         (rgba.into(), width, height)
     };
@@ -477,6 +483,206 @@ fn read_pass(
         }
     }
     Ok((language, lines))
+}
+
+// --- the pictures of a guide (Quick redact) ------------------------------------------------------------------------------------
+
+/// Languages written with letters other than the Latin ones.
+const OTHER_SCRIPTS: &[&str] = &[
+    "am", "ar", "bg", "bn", "el", "fa", "he", "hi", "hy", "ja", "ka", "kk", "ko", "mk", "mr", "ne",
+    "ru", "sr-cyrl", "ta", "te", "th", "uk", "ur", "zh",
+];
+
+/// One language per writing system: the engines of the Latin-script languages read the same letters, so only the first of
+/// them is used; every other script keeps its own.
+pub fn one_per_script(tags: &[String]) -> Vec<String> {
+    let mut latin = false;
+    tags.iter()
+        .filter(|t| {
+            let low = t.to_lowercase();
+            let other = OTHER_SCRIPTS
+                .iter()
+                .any(|s| low == *s || low.starts_with(&format!("{s}-")));
+            other || !std::mem::replace(&mut latin, true)
+        })
+        .cloned()
+        .collect()
+}
+
+/// Text lower than this (pixels) is read a second time, enlarged.
+const SMALL_WORD: f32 = 24.0;
+
+/// The parts of a picture with small text, as [x, y, width, height]: the boxes of the small lines with room around them (a
+/// line the first reading missed usually lies next to one it found), joined where they touch.
+pub fn small_text_regions(lines: &[OcrLine], width: u32, height: u32) -> Vec<[u32; 4]> {
+    let mut boxes: Vec<(f32, f32, f32, f32)> = lines
+        .iter()
+        .filter_map(|l| {
+            let h = l.words.iter().map(|w| w.h).fold(0.0f32, f32::max);
+            let (x0, y0, x1, y1) = line_box(l)?;
+            (h > 0.0 && h < SMALL_WORD).then(|| {
+                let (px, py) = (4.0 * h + 8.0, 2.0 * h + 6.0);
+                (
+                    (x0 - px).max(0.0),
+                    (y0 - py).max(0.0),
+                    (x1 + px).min(width as f32),
+                    (y1 + py).min(height as f32),
+                )
+            })
+        })
+        .collect();
+    loop {
+        let mut joined = false;
+        let mut out: Vec<(f32, f32, f32, f32)> = Vec::with_capacity(boxes.len());
+        for b in boxes {
+            match out
+                .iter_mut()
+                .find(|o| b.0 <= o.2 && o.0 <= b.2 && b.1 <= o.3 && o.1 <= b.3)
+            {
+                Some(o) => {
+                    *o = (o.0.min(b.0), o.1.min(b.1), o.2.max(b.2), o.3.max(b.3));
+                    joined = true;
+                }
+                None => out.push(b),
+            }
+        }
+        boxes = out;
+        if !joined {
+            break;
+        }
+    }
+    boxes
+        .into_iter()
+        .filter_map(|(x0, y0, x1, y1)| {
+            let (x, y) = (x0.floor() as u32, y0.floor() as u32);
+            let w = (x1.ceil() as u32).min(width).saturating_sub(x);
+            let h = (y1.ceil() as u32).min(height).saturating_sub(y);
+            (w >= 4 && h >= 4).then_some([x, y, w, h])
+        })
+        .collect()
+}
+
+fn shift_lines(lines: &mut [OcrLine], dx: u32, dy: u32) {
+    for line in lines {
+        for w in &mut line.words {
+            w.x += dx as f32;
+            w.y += dy as f32;
+        }
+    }
+}
+
+/// Read the part `area` ([x, y, width, height]) of the picture of a guide step for Quick redact: once as it is, then the places
+/// with small text enlarged. The lines of BOTH readings are returned (one reading often gets a number right that the other
+/// does not), in the pixels of the whole picture.
+pub fn recognize_area(
+    rgba: &[u8],
+    width: u32,
+    height: u32,
+    area: [u32; 4],
+    setting: &str,
+    key: String,
+) -> Result<OcrResult, String> {
+    let started = Instant::now();
+    if width == 0 || height == 0 || rgba.len() != width as usize * height as usize * 4 {
+        return Err("the picture has an unexpected size".into());
+    }
+    let x = area[0].min(width - 1);
+    let y = area[1].min(height - 1);
+    let w = area[2].clamp(1, width - x);
+    let h = area[3].clamp(1, height - y);
+    let available: Vec<String> = win::languages().into_iter().map(|l| l.tag).collect();
+    let tags = one_per_script(&choose_languages(setting, &available));
+    if tags.is_empty() {
+        return Err(if available.is_empty() {
+            "Windows has no text recognition language installed".into()
+        } else {
+            "none of the chosen text recognition languages is installed".into()
+        });
+    }
+    let max = win::max_dimension();
+    let part = snipmunk_pixels::crop_rgba(rgba, width, x, y, w, h);
+    // A part larger than the engine takes (a very tall inserted picture) is read in tiles, once.
+    if w > max || h > max {
+        let mut r = recognize(&part, w, h, setting, key)?;
+        shift_lines(&mut r.lines, x, y);
+        (r.width, r.height) = (width, height);
+        r.took_ms = started.elapsed().as_millis() as u64;
+        return Ok(r);
+    }
+    let (language, mut lines) = read_pass(&part, w, h, 1, &tags)?;
+    let mut regions = small_text_regions(&lines, w, h);
+    // Nothing at all was read: the text may be too small for the engine, so the whole part is enlarged once.
+    if lines.is_empty() {
+        regions = vec![[0, 0, w, h]];
+    }
+    let mut again = Vec::new();
+    for [rx, ry, rw, rh] in regions {
+        if rw * 2 > max || rh * 2 > max {
+            continue;
+        }
+        let piece = snipmunk_pixels::crop_rgba(&part, w, rx, ry, rw, rh);
+        if let Ok((_, mut found)) = read_pass(&piece, rw, rh, 2, &tags) {
+            shift_lines(&mut found, rx, ry);
+            again.append(&mut found);
+        }
+    }
+    lines.append(&mut again);
+    read_left_out(&part, w, h, &mut lines, &tags);
+    shift_lines(&mut lines, x, y);
+    Ok(finish(key, language, width, height, lines, started))
+}
+
+/// How many left-out pieces of a picture are read again.
+const MOST_PIECES: usize = 60;
+
+/// Windows leaves some lines out altogether (long runs of digits in small smoothed type) or reads only a bit of them. Every
+/// stretch of writing near the text that was read, and covered by little of it, is cut out and read once more, enlarged.
+fn read_left_out(part: &[u8], w: u32, h: u32, lines: &mut Vec<OcrLine>, tags: &[String]) {
+    let boxes: Vec<_> = lines.iter().filter_map(line_box).collect();
+    if boxes.is_empty() {
+        return;
+    }
+    // The part of the picture with text, and room around it for lines before the first and after the last one read.
+    let room = 3.0 * median_word_height(lines).max(8.0);
+    let x0 = boxes.iter().map(|b| b.0).fold(f32::MAX, f32::min) - 4.0 * room;
+    let y0 = boxes.iter().map(|b| b.1).fold(f32::MAX, f32::min) - room;
+    let x1 = boxes.iter().map(|b| b.2).fold(0.0f32, f32::max) + 4.0 * room;
+    let y1 = boxes.iter().map(|b| b.3).fold(0.0f32, f32::max) + room;
+    let (x, y) = (x0.max(0.0) as u32, y0.max(0.0) as u32);
+    let region = [
+        x,
+        y,
+        (x1.ceil() as u32).min(w).saturating_sub(x),
+        (y1.ceil() as u32).min(h).saturating_sub(y),
+    ];
+    let known: Vec<[f32; 4]> = lines
+        .iter()
+        .flat_map(|l| l.words.iter().map(|o| [o.x, o.y, o.w, o.h]))
+        .collect();
+    let max = win::max_dimension();
+    for [px, py, pw, ph] in snipmunk_pixels::unread_writing(part, w, h, region, &known, MOST_PIECES)
+    {
+        if pw * 2 > max || ph * 2 > max {
+            continue;
+        }
+        let piece = snipmunk_pixels::crop_rgba(part, w, px, py, pw, ph);
+        // A piece that reads as nothing (or as a letter or two) at one size is often read at the next one.
+        for factor in [2, 3, 4] {
+            if pw * factor > max || ph * factor > max {
+                break;
+            }
+            let Ok((_, mut found)) = read_pass(&piece, pw, ph, factor, tags) else {
+                break;
+            };
+            // (a letter for about every height of the line: this much was really read)
+            let enough = letter_count(&found) as u32 * ph >= pw;
+            shift_lines(&mut found, px, py);
+            lines.append(&mut found);
+            if enough {
+                break;
+            }
+        }
+    }
 }
 
 /// Write a result next to its session (a temporary file renamed over, never half a file).
@@ -831,6 +1037,32 @@ mod tests {
     }
 
     #[test]
+    fn a_guide_scan_uses_one_language_per_writing_system() {
+        let tags: Vec<String> = ["de-DE", "en-GB", "zh-Hans-CN", "ar-SA", "fr-FR"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert_eq!(one_per_script(&tags), ["de-DE", "zh-Hans-CN", "ar-SA"]);
+        assert!(one_per_script(&[]).is_empty());
+    }
+
+    #[test]
+    fn small_text_that_lies_together_becomes_one_region_and_large_text_none() {
+        let lines = vec![
+            at("Title", 400.0, 10.0, 200.0, 40.0),
+            at("email", 50.0, 100.0, 60.0, 12.0),
+            at("password", 50.0, 120.0, 90.0, 12.0),
+            at("far away", 700.0, 500.0, 80.0, 12.0),
+        ];
+        let r = small_text_regions(&lines, 800, 600);
+        assert_eq!(r.len(), 2, "{r:?}");
+        // The first holds both neighbouring lines with room around them, inside the picture.
+        let [x, y, w, h] = r[0];
+        assert!(x == 0 && y <= 80 && x + w >= 180 && y + h >= 152, "{r:?}");
+        assert!(r[1][0] + r[1][2] <= 800 && r[1][1] + r[1][3] <= 600);
+    }
+
+    #[test]
     fn a_result_is_written_whole_and_read_back() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("ocr").join("c1.json");
@@ -890,5 +1122,60 @@ mod tests {
         assert!(tile_bands(40_000, 4000, 160)
             .iter()
             .all(|b| b.1 - b.0 <= 4000));
+    }
+
+    /// A tool for finding out why Quick redact missed something: reads the PNG pictures of a folder as a guide scan does and
+    /// writes what was read next to each (`<name>.json`). Run with the folder in SNIPMUNK_OCR_PROBE and `--ignored`.
+    #[test]
+    #[ignore]
+    fn ocr_probe_folder() {
+        let Ok(dir) = std::env::var("SNIPMUNK_OCR_PROBE") else {
+            return;
+        };
+        for entry in std::fs::read_dir(dir).unwrap().flatten() {
+            let path = entry.path();
+            if path.extension().is_none_or(|e| e != "png") {
+                continue;
+            }
+            let img = image::open(&path).unwrap().to_rgba8();
+            let (w, h) = img.dimensions();
+            let read =
+                recognize_area(img.as_raw(), w, h, [0, 0, w, h], "auto", String::new()).unwrap();
+            std::fs::write(
+                path.with_extension("json"),
+                serde_json::to_vec(&read).unwrap(),
+            )
+            .unwrap();
+        }
+    }
+
+    /// A picture like a screenshot of an editor with smoothed (ClearType) type, drawn by scripts/gen-editor-fixture.ps1 with
+    /// made-up values: the first reading drops the lines of the long numbers; with the second look every secret line has its
+    /// label or its value read. (Skipped where Windows has no recognition language.)
+    #[cfg(windows)]
+    #[test]
+    fn lines_of_an_editor_screenshot_that_are_left_out_are_read_again() {
+        if win::languages()
+            .iter()
+            .all(|l| !l.tag.starts_with("en") && !l.tag.starts_with("de"))
+        {
+            return;
+        }
+        let img = image::load_from_memory(include_bytes!("../test-data/editor-cleartype.png"))
+            .unwrap()
+            .to_rgba8();
+        let (w, h) = img.dimensions();
+        let read = recognize_area(img.as_raw(), w, h, [0, 0, w, h], "auto", String::new()).unwrap();
+        // The rows of the secrets in the picture (their middle, pixels).
+        for row in [62.0f32, 83.0, 104.0, 125.0, 167.0, 209.0] {
+            let words: Vec<&str> = read
+                .lines
+                .iter()
+                .flat_map(|l| l.words.iter())
+                .filter(|o| o.y <= row && o.y + o.h >= row && o.x > 70.0)
+                .map(|o| o.text.as_str())
+                .collect();
+            assert!(!words.is_empty(), "nothing was read at height {row}");
+        }
     }
 }

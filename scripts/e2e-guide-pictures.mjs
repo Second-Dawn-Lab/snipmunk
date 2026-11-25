@@ -48,6 +48,8 @@ const ev = (expression) =>
   });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const invoke = (cmd, args = {}) => ev(`window.__TAURI_INTERNALS__.invoke(${JSON.stringify(cmd)}, ${JSON.stringify(args)})`);
+// (a test instance must never be able to capture the real desktop: asked before anything is clicked)
+if ((await ev("window.__TAURI_INTERNALS__.invoke('dev_capture_guard').catch(() => false)")) !== true) throw new Error("STOP: the test instance has no no-real-capture guard");
 let failed = 0;
 const check = (ok, what, extra = "") => {
   console.log(`${ok ? "PASS" : "FAIL"}  ${what}${extra ? "  " + extra : ""}`);
@@ -80,7 +82,6 @@ const state = await invoke("doc_state");
 check(state.open && state.steps >= 3, "the working guide has steps", JSON.stringify(state));
 const all = await invoke("doc_read");
 const steps = (all.steps ?? []).filter((s) => !s.deleted);
-const want = new Map(steps.map((s) => [s.image, s.imageSize]));
 for (const s of steps) {
   const r = await ev(`(async () => { const u = window.__TAURI_INTERNALS__.convertFileSrc('guide/current/${s.image}', 'snipmunk-img');
     const res = await fetch(u); const b = await res.blob(); const bmp = await createImageBitmap(b); return [res.status, b.type, b.size, bmp.width, bmp.height]; })()`);

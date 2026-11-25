@@ -2,12 +2,17 @@
 # (see src-tauri/Cargo.toml); clone it next to this folder: ../dawn-core
 [workspace]
 resolver = "2"
-members = ["src-tauri"]
+members = ["src-tauri", "crates/pixels"]
 
 [workspace.package]
 version = "0.0.0"
 edition = "2021"
 license = "MIT"
+
+# Debug information of our own crates: only what a backtrace needs (file and line), not variables. It keeps the build
+# folder small; set it to "full" for a session in a debugger.
+[profile.dev]
+debug = "line-tables-only"
 
 # Optimize dependencies even in dev builds: image decoding and scaling are far too slow unoptimized.
 # Our own crate stays fast to rebuild.
@@ -27,6 +32,10 @@ opt-level = 0
 
 # The dawn-core image crate stays fast in dev builds too (screen capture and scaling).
 [profile.dev.package.dawn-capture]
+opt-level = 3
+
+# Enlarging pictures for text recognition (crates/pixels) is far too slow unoptimized.
+[profile.dev.package.snipmunk-pixels]
 opt-level = 3
 
 [workspace.dependencies]

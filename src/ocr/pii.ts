@@ -49,8 +49,53 @@ function trimEnd(s: string): string {
   return s.replace(/[ ./\-–()]+$/, (m) => (m.includes(")") && s.slice(0, s.length - m.length).includes("(") ? m.slice(0, m.indexOf(")") + 1) : ""));
 }
 
+/** An address as recognition may read it: a space beside the "@" or a dot, "©" for "@", "c0m"; only with a common ending. */
+const EMAIL_READ =
+  /[A-Za-z0-9][A-Za-z0-9._%+-]*(?: ?@ ?|[©®](?=[A-Za-z0-9]))[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?: ?\. ?[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*? ?\. ?(?:com|c0m|de|org|net|eu|info|biz|edu|gov|io|uk|fr|nl|pl|ch)(?![A-Za-z0-9])/gi;
+
+/** An address whose domain was read with a sign no address has ("gma±i" for "gmail"): an "@" and a common ending around it
+ * are enough. */
+const EMAIL_ODD = /[A-Za-z0-9][A-Za-z0-9._%+-]*@[A-Za-z0-9][^\s@<>()"',;:]{0,50}\.(?:com|c0m|de|org|net|eu|info|biz|edu|gov|io|uk|fr|nl|pl|ch)(?![A-Za-z0-9])/gi;
+
+/** Labels of an e-mail address in the interface languages. */
+const EMAIL_LABEL =
+  /(?<![\p{L}\p{N}_@.])(?:e[ -]?mail(?:[ -](?:address|adresse))?|mail|correo(?: electrónico)?|courriel|e-?posta|البريد الإلكتروني|ای میل|邮箱|电子邮件)[ \t]*[:：=][ \t]*/giu;
+/** Where the labels of e-mail addresses stand in a line. */
+export const findEmailLabels = (text: string): { kind: "email"; start: number; end: number }[] =>
+  [...text.matchAll(EMAIL_LABEL)].map((m) => ({ kind: "email", start: m.index as number, end: (m.index as number) + m[0].length }));
+
+/** Does a value look like an address, however its "@" was read? */
+const ADDRESS_LIKE = /[@©®€]|\. ?(?:com|c0m|de|org|net|eu|info|biz|edu|gov|io|uk|fr|nl|pl|ch|at|es|it|pk|ae|sa|cn)$/i;
+
+/** What stands after the label of an e-mail address and looks like one, also when recognition spoiled the "@" or a dot. */
+function labelledEmails(text: string): Match[] {
+  const out: Match[] = [];
+  for (const label of text.matchAll(EMAIL_LABEL)) {
+    const from = (label.index as number) + label[0].length;
+    const word = /[^\s<>()"',;]+/y;
+    word.lastIndex = from + (/^[<("']*/.exec(text.slice(from))?.[0].length ?? 0);
+    const start = word.lastIndex;
+    let value = word.exec(text)?.[0] ?? "";
+    let end = start + value.length;
+    // An address that was read in pieces ("name @ example . com").
+    for (;;) {
+      const next = /^ ?([^\s<>()"',;]+)/.exec(text.slice(end));
+      if (!next || !(/[@.]$/.test(value) || /^[@.]/.test(next[1]))) break;
+      value = text.slice(start, (end += next[0].length));
+    }
+    const trimmed = value.replace(/[.:]+$/, "");
+    if (trimmed.length > 2 && !/^•+$/.test(trimmed) && ADDRESS_LIKE.test(trimmed)) out.push({ kind: "email", start, end: start + trimmed.length, text: trimmed });
+  }
+  return out;
+}
+
 export function findEmails(text: string): Match[] {
-  return [...text.matchAll(EMAIL)].map((m) => ({ kind: "email" as const, start: m.index as number, end: (m.index as number) + m[0].length, text: m[0] }));
+  const read = [...text.matchAll(EMAIL), ...text.matchAll(EMAIL_READ), ...text.matchAll(EMAIL_ODD)].map((m) => ({ kind: "email" as const, start: m.index as number, end: (m.index as number) + m[0].length, text: m[0] }));
+  // The longer reading first: it holds the shorter one.
+  const all = [...read, ...labelledEmails(text)].sort((a, b) => b.end - b.start - (a.end - a.start));
+  const out: Match[] = [];
+  for (const m of all) if (!out.some((o) => m.start < o.end && o.start < m.end)) out.push(m);
+  return out.sort((a, b) => a.start - b.start);
 }
 
 export function findPhones(text: string): Match[] {

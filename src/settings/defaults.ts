@@ -34,6 +34,10 @@ export interface Settings {
   docStepPicture: "window" | "screen";
   /** What a new guide records: the active app, the whole screen, a chosen window or a chosen area. */
   docArea: "active" | "screen" | "window" | "region";
+  /** The width of the editor's column and its zoom (50 to 200 percent); a view setting, not part of a guide. */
+  docPageWidth: "narrow" | "normal" | "wide" | "fit";
+  docZoom: number;
+  docFit: "auto" | "width" | "page" | "none";
   docZoomDefault: boolean;
   docMarkerColor: string;
   docMarkerRight: string;
@@ -42,6 +46,11 @@ export interface Settings {
   docBadgeStyle: "circle" | "square" | "none";
   docKeepFull: boolean;
   docGuidesDir: string;
+  /** The template a new guide starts with (the id of a built-in or an own one). */
+  docTemplate: string;
+  /** The sidebar of the guide editor: its width in pixels and whether it is folded to its tabs. */
+  docPanelWidth: number;
+  docPanelCollapsed: boolean;
   showMagnifier: boolean;
   // The last colors and sizes picked in the annotation tool popovers. Colors are "#rrggbb"; fill and outline
   // may also be "none". Opacities are 0 to 100.
@@ -153,6 +162,9 @@ export const defaultSettings: Settings = {
   docEnterTab: false,
   docStepPicture: "window",
   docArea: "active",
+  docPageWidth: "normal",
+  docZoom: 100,
+  docFit: "auto",
   docZoomDefault: false,
   docMarkerColor: "#FF5A36",
   docMarkerRight: "#3B82F6",
@@ -161,6 +173,9 @@ export const defaultSettings: Settings = {
   docBadgeStyle: "circle",
   docKeepFull: false,
   docGuidesDir: "",
+  docTemplate: "basic",
+  docPanelWidth: 300,
+  docPanelCollapsed: false,
   showMagnifier: true,
   lastPenColor: "#E53935",
   lastPenSize: 4,

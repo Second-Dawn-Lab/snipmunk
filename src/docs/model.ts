@@ -1,3 +1,6 @@
+import type { SpotStyle } from "./marks";
+import type { StepFrame } from "./template/frame";
+import type { Template } from "./template/model";
 // The guide document of Documents mode (no React): blocks, the operations on them, and the document-level undo/redo history.
 // The same JSON is `document.json` of the working folder and of a `.snpd` file (see docs/snpd-format.md).
 import type { GuideStep } from "../ipc";
@@ -16,11 +19,12 @@ export interface MarkerStyle {
   size: MarkerSize;
 }
 
-export type AnnotationKind = "arrow" | "line" | "rect" | "ellipse" | "highlight" | "pen" | "text" | "callout" | "badge";
+export type AnnotationKind = "arrow" | "line" | "rect" | "ellipse" | "highlight" | "pen" | "text" | "callout" | "badge" | "spot" | "magnify";
 export interface Annotation {
   id: string;
   kind: AnnotationKind;
-  /** Pixels of the step picture. */
+  /** Pixels of the step picture. (A callout with a `box`: x, y is the box, x2, y2 the tip. A magnifier and a spotlight: the
+   * corners of their area.) */
   x: number;
   y: number;
   x2?: number;
@@ -30,6 +34,21 @@ export interface Annotation {
   width: number;
   text?: string;
   n?: number;
+  /** A callout's box in frame units (see docs/marks.ts); without it the callout is one of before 7.5-D. */
+  box?: { x: number; y: number; w: number; h: number };
+  /** The shape of a callout, a spotlight or a magnifier's bubble. */
+  shape?: string;
+  fill?: string;
+  textColor?: string;
+  /** The font size of a callout (frame units). */
+  size?: number;
+  bold?: boolean;
+  /** The centre of a magnifier's bubble (frame units), how many times it enlarges, and its line to the area. */
+  at?: { x: number; y: number };
+  zoom?: number;
+  line?: boolean;
+  /** The pixels of a magnified area that lies outside the stored picture of a saved guide. */
+  patch?: { file: string; x: number; y: number; x2: number; y2: number };
 }
 
 export interface Redaction {
@@ -38,6 +57,15 @@ export interface Redaction {
 }
 
 export interface StepBlock {
+  /** The step shows no number and is not counted: the next step takes it. */
+  numberHidden?: boolean;
+  /** The typed text of this typing step is masked; it is left out of saved files. */
+  maskTyped?: boolean;
+  /** Quick redact hid something of this step: a saved file takes its words from `text` and keeps no names of the control and
+   * the window. */
+  masked?: boolean;
+  /** The step's own place in the template's picture frame (centre and width, picture pixels). */
+  frame?: StepFrame | null;
   id: string;
   type: "step";
   /** The number of the step in the working folder (its picture and recorded data). */
@@ -56,6 +84,8 @@ export interface StepBlock {
   marker?: Partial<MarkerStyle>;
   annotations?: Annotation[];
   redact?: Redaction[];
+  /** How this step's spotlights dim the picture, where it differs from the guide's `spotlight`. */
+  spotlight?: Partial<SpotStyle>;
   [k: string]: unknown;
 }
 
@@ -69,14 +99,18 @@ export interface ContentBlock {
 export type Block = StepBlock | ContentBlock;
 
 export interface GuideDoc {
+  /** The template of the guide, embedded (absent: the basic one, and no styling is applied in older versions). */
+  template?: Template;
   version: number;
   title: string;
   created: number;
   marker: MarkerStyle;
-  badge: "circle" | "square" | "none";
+  badge: "circle" | "square" | "pill" | "none";
   picture: "window" | "screen";
   keepFull: boolean;
   zoomDefault: boolean;
+  /** The guide's style of spotlights. */
+  spotlight?: SpotStyle;
   blocks: Block[];
   [k: string]: unknown;
 }
@@ -97,10 +131,18 @@ export function createDocument(title: string, created: number, steps: readonly G
   };
 }
 
+/** The picture area a step recorded with `area` needs when the guide shows something else: a chosen window or region in a
+ * guide of whole screens, the whole screen in a guide of windows. */
+function cropFor(doc: Pick<GuideDoc, "picture" | "keepFull">, step: GuideStep, area: string | undefined): Pick<StepBlock, "crop"> {
+  if ((area === "window" || area === "region") && doc.picture === "screen" && step.window) return { crop: step.window.rect };
+  if (area === "screen" && doc.picture === "window") return { crop: [0, 0, step.imageSize[0], step.imageSize[1]] };
+  return {};
+}
+
 /** Steps of the working folder that no block shows yet (recorded after the document was made): they are appended as blocks. */
-export function syncSteps(doc: GuideDoc, steps: readonly GuideStep[], after?: string): GuideDoc {
+export function syncSteps(doc: GuideDoc, steps: readonly GuideStep[], after?: string, area?: string): GuideDoc {
   const have = new Set(doc.blocks.filter((b): b is StepBlock => b.type === "step").map((b) => b.n));
-  const fresh = steps.filter((s) => !s.deleted && !have.has(s.n)).map((s) => ({ id: newId(), type: "step", n: s.n }) as StepBlock);
+  const fresh = steps.filter((s) => !s.deleted && !have.has(s.n)).map((s) => ({ id: newId(), type: "step", n: s.n, ...cropFor(doc, s, area) }) as StepBlock);
   if (fresh.length === 0) return doc;
   const at = after ? doc.blocks.findIndex((b) => b.id === after) + 1 : doc.blocks.length;
   const blocks = [...doc.blocks];
@@ -140,6 +182,16 @@ export function moveBlockTo(doc: GuideDoc, id: string, index: number): GuideDoc 
   return { ...doc, blocks };
 }
 
+/** Move several blocks together (keeping their order) so they sit before the block at `index` (of the list before the move). */
+export function moveBlocksTo(doc: GuideDoc, ids: ReadonlySet<string>, index: number): GuideDoc {
+  const moving = doc.blocks.filter((b) => ids.has(b.id));
+  if (moving.length === 0) return doc;
+  const before = doc.blocks.slice(0, index).filter((b) => ids.has(b.id)).length;
+  const rest = doc.blocks.filter((b) => !ids.has(b.id));
+  const at = index - before;
+  return { ...doc, blocks: [...rest.slice(0, at), ...moving, ...rest.slice(at)] };
+}
+
 /** Move several blocks (in their order) up or down by one place as a group. */
 export function moveBlocks(doc: GuideDoc, ids: ReadonlySet<string>, delta: -1 | 1): GuideDoc {
   const blocks = [...doc.blocks];
@@ -164,11 +216,12 @@ export function updateBlock<T extends Block>(doc: GuideDoc, id: string, change: 
   return { ...doc, blocks: doc.blocks.map((b) => (b.id === id ? ({ ...b, ...change } as Block) : b)) };
 }
 
-/** The numbers shown in the badges: the steps counted in the order of the blocks (content blocks do not count). */
+/** The numbers shown in the badges: the steps counted in the order of the blocks (content blocks and steps without a number do
+ * not count). */
 export function stepNumbers(doc: GuideDoc): Map<string, number> {
   const m = new Map<string, number>();
   let n = 0;
-  for (const b of doc.blocks) if (b.type === "step") m.set(b.id, ++n);
+  for (const b of doc.blocks) if (b.type === "step" && !b.numberHidden) m.set(b.id, ++n);
   return m;
 }
 
@@ -200,17 +253,49 @@ export function cropRect(step: GuideStep, block: StepBlock, doc: Pick<GuideDoc, 
   return w && w[2] > 8 && w[3] > 8 ? clamp(w) : whole;
 }
 
-/** The rectangle that is shown: the zoom area when zoom is on for the step, else the crop. */
-export function viewRect(step: GuideStep, block: StepBlock, doc: Pick<GuideDoc, "picture" | "keepFull" | "zoomDefault">): Rect {
-  const crop = cropRect(step, block, doc);
-  const zoomOn = block.zoom ?? doc.zoomDefault;
-  const z = block.zoomRect ?? step.zoom;
-  if (zoomOn && z && step.click) {
-    const x = Math.max(crop[0], Math.min(crop[0] + crop[2] - 1, z[0]));
-    const y = Math.max(crop[1], Math.min(crop[1] + crop[3] - 1, z[1]));
-    return [x, y, Math.max(8, Math.min(crop[0] + crop[2] - x, z[2])), Math.max(8, Math.min(crop[1] + crop[3] - y, z[3]))];
+/** Does the step show its zoom into the click? Its own setting, else the guide's. */
+export const zoomOn = (block: StepBlock, doc: Pick<GuideDoc, "zoomDefault">): boolean => block.zoom ?? doc.zoomDefault;
+
+/** The most of its area that the automatic zoom shows (so that it is a zoom in a small window too). */
+const AUTO_SHARE = 0.6;
+
+/**
+ * The zoom into a click INSIDE the area the step shows (window, screen or chosen crop). `zoom` is the recorded zoom around the
+ * click, or with `own` the area drawn for this step; with `ratio` (a picture frame) the result has that shape. It never leaves
+ * the area: it is made smaller where it is larger, and moved inside where it reaches over an edge.
+ */
+export function zoomInside(zoom: Rect, own: boolean, click: [number, number], area: Rect, ratio: number | null = null): Rect {
+  const [ax, ay, aw, ah] = area;
+  let w = Math.max(8, zoom[2]);
+  let h = Math.max(8, zoom[3]);
+  if (ratio) {
+    w = Math.max(w, h * ratio);
+    h = w / ratio;
   }
+  const most = own ? 1 : AUTO_SHARE;
+  const k = Math.min(1, (most * aw) / w, (most * ah) / h);
+  w = Math.max(1, Math.min(aw, Math.round(w * k)));
+  h = Math.max(1, Math.min(ah, Math.round(h * k)));
+  // A drawn area stays where it was drawn; the automatic one is around the click.
+  const [cx, cy] = own ? [zoom[0] + zoom[2] / 2, zoom[1] + zoom[3] / 2] : click;
+  const place = (centre: number, len: number, from: number, room: number) => Math.round(Math.max(from, Math.min(from + room - len, centre - len / 2)));
+  return [place(cx, w, ax, aw), place(cy, h, ay, ah), w, h];
+}
+
+/** The rectangle that is shown: the zoom into the click (inside the crop) when zoom is on for the step, else the crop. */
+export function viewRect(step: GuideStep, block: StepBlock, doc: Pick<GuideDoc, "picture" | "keepFull" | "zoomDefault">, ratio: number | null = null): Rect {
+  const crop = cropRect(step, block, doc);
+  const z = block.zoomRect ?? step.zoom;
+  if (zoomOn(block, doc) && z && step.click) return zoomInside(z, !!block.zoomRect, block.markerPos ?? step.click, crop, ratio);
   return crop;
+}
+
+/**
+ * The guide's "Zoom into the click". It changes only the steps that have no setting of their own; their place in the picture
+ * frame was made for the earlier area, so it is made anew.
+ */
+export function setZoomDefault(doc: GuideDoc, zoomDefault: boolean, steps: ReadonlyMap<number, GuideStep>): GuideDoc {
+  return { ...doc, zoomDefault, blocks: doc.blocks.map((b) => (b.type === "step" && b.zoom === undefined && b.frame && steps.get(b.n)?.click ? { ...b, frame: undefined } : b)) };
 }
 
 /** The marker colour for a step: right click uses the right colour, the others the left one. */

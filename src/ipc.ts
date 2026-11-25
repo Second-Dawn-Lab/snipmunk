@@ -196,7 +196,7 @@ export interface GuideStep {
   window: { rect: [number, number, number, number]; title: string; process: string } | null;
   zoom: [number, number, number, number] | null;
   text: { t: string; b?: boolean }[];
-  element?: { name: string; controlType: string; rect: [number, number, number, number] } | null;
+  element?: { name: string; controlType: string; rect: [number, number, number, number]; parents?: string[] } | null;
   typed?: string | null;
   keys?: string | null;
   deleted: boolean;
@@ -401,8 +401,26 @@ export const ipc = {
   docRecentRemove: (path: string) => call<void>("doc_recent_remove", { path }),
   docAddImage: (base64Data: string) => call<{ name: string; width: number; height: number }>("doc_add_image", { base64Data }),
   docAddBlankStep: () => call<GuideStep>("doc_add_blank_step"),
+  docExportPicture: (file: string, area: [number, number, number, number] | null, redact: { rect: [number, number, number, number]; kind: string }[], background: string) =>
+    call<{ base64: string; width: number; height: number }>("doc_export_picture", { file, area, redact, background }),
+  exportWrite: (path: string, base64: string) => call<number>("export_write", { path, base64 }),
+  pickExportSave: (start: string | null, name: string, kind: string) => call<string | null>("pick_export_save", { start, name, kind }),
+  exportPdf: (html: string, path: string, widthMm: number, heightMm: number) => call<number>("export_pdf", { html, path, widthMm, heightMm }),
+  exportCancel: () => call<void>("export_cancel"),
+  docOcr: (file: string, area: [number, number, number, number] | null) => call<OcrResult>("doc_ocr", { file, area }),
+  /** The marked part of a step picture after each label box, on its row (or nothing). */
+  docInk: (file: string, labels: [number, number, number, number][]) => call<([number, number, number, number] | null)[]>("doc_ink", { file, labels }),
+  templatesList: () => call<unknown[]>("templates_list"),
+  templatesSave: (template: unknown) => call<unknown>("templates_save", { template }),
+  templatesUse: (id: string) => call<unknown>("templates_use", { id }),
+  templatesRename: (id: string, name: string, copy: boolean) => call<unknown>("templates_rename", { id, name, copy }),
+  templatesDelete: (id: string) => call<void>("templates_delete", { id }),
+  templatesExport: (id: string, path: string) => call<void>("templates_export", { id, path }),
+  templatesImport: (path: string) => call<unknown>("templates_import", { path }),
+  templatesExportMany: (ids: string[], folder: string) => call<number>("templates_export_many", { ids, folder }),
+  pickTemplatesOpen: () => call<string[]>("pick_templates_open"),
   docAddStepImage: (base64Data: string) => call<GuideStep>("doc_add_step_image", { base64Data }),
-  guideRecordMore: () => call<string>("guide_record_more"),
+  guideRecordMore: (area?: string) => call<string>("guide_record_more", { area: area ?? null }),
   pickGuideOpen: (start: string | null) => call<string | null>("pick_guide_open", { start }),
   pickGuideSave: (start: string | null, name: string) => call<string | null>("pick_guide_save", { start, name }),
   takePendingGuide: () => call<string | null>("take_pending_guide"),

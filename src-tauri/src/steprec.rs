@@ -382,6 +382,12 @@ mod pure_tests {
     }
 
     #[test]
+    fn the_frame_of_a_guides_area_sits_around_it_also_on_a_monitor_to_the_left() {
+        assert_eq!(frame_place([100, 200, 640, 360]), ((96, 196), (648, 368)));
+        assert_eq!(frame_place([-1920, 0, 800, 600]), ((-1924, -4), (808, 608)));
+    }
+
+    #[test]
     fn the_title_of_a_page_is_the_window_title_without_the_browser() {
         assert_eq!(
             page_title("Inbox (3) - Mail - Google Chrome", "Google Chrome"),
@@ -819,35 +825,55 @@ pub async fn guide_start(app: AppHandle, area: Option<String>) -> CmdResult<Stri
     match word.as_str() {
         // Choose a window / draw a region on the selection overlay first; the guide starts when it is chosen.
         "window" | "region" => {
-            if !crate::capture::pick_guide_area(&app, &word) {
+            if !crate::capture::pick_guide_area(&app, &word, false) {
                 return Err(CmdError::new("busy", "a capture is running already"));
             }
             Ok(String::new())
         }
-        "screen" => start_command(app, false, Some(AreaMode::Screen)).await,
-        _ => start_command(app, false, Some(AreaMode::Active)).await,
+        "screen" => start_command(app, false, Some(AreaMode::Screen), None).await,
+        _ => start_command(app, false, Some(AreaMode::Active), None).await,
     }
 }
 
-/// The overlay chose a window or a region for a new guide: start it.
-pub fn area_picked(app: &AppHandle, area: AreaMode) {
+/// The overlay chose a window or a region for a guide: start it (a new one, or more steps of the open one).
+pub fn area_picked(app: &AppHandle, area: AreaMode, pick: crate::capture::GuidePick) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
-        let _ = start_command(app, false, Some(area)).await;
+        let _ = start_command(app, pick.append, Some(area), pick.countdown).await;
     });
 }
 
-/// "Record more steps" into the open guide: the new steps are appended to it.
+/// "Record more steps" into the open guide: the new steps are appended to it. `area`: chosen again ("active", "screen",
+/// "window", "region"); without it the one the guide was last recorded with.
 #[tauri::command]
-pub async fn guide_record_more(app: AppHandle) -> CmdResult<String> {
+pub async fn guide_record_more(app: AppHandle, area: Option<String>) -> CmdResult<String> {
     if !crate::snpd::is_open() {
         return Err(CmdError::new("not_found", "no guide is open"));
     }
-    // The area the guide was recorded with (a window that is gone: the active app).
-    let area = guides::read_info("current")
-        .map(|i| area_of_info(&i.settings))
-        .unwrap_or(AreaMode::Active);
-    start_command(app, true, Some(area)).await
+    let area = match area.as_deref() {
+        Some(word @ ("window" | "region")) => {
+            if !crate::capture::pick_guide_area(&app, word, true) {
+                return Err(CmdError::new("busy", "a capture is running already"));
+            }
+            return Ok(String::new());
+        }
+        Some("screen") => AreaMode::Screen,
+        Some("active") => AreaMode::Active,
+        // The area the guide was recorded with (a window that is gone: the active app).
+        _ => guides::read_info("current")
+            .map(|i| area_of_info(&i.settings))
+            .unwrap_or(AreaMode::Active),
+    };
+    start_command(app, true, Some(area), None).await
+}
+
+/// The settings a guide keeps of its area.
+fn area_settings(area: AreaMode) -> serde_json::Value {
+    serde_json::json!({
+        "area": area.word(),
+        "region": match area { AreaMode::Region(r) => serde_json::json!([r.x, r.y, r.w, r.h]), _ => serde_json::Value::Null },
+        "hwnd": match area { AreaMode::Window(h) => serde_json::json!(h as i64), _ => serde_json::Value::Null },
+    })
 }
 
 /// The area stored in a guide's settings (`area`, and `region` for a region).
@@ -875,7 +901,12 @@ fn area_of_info(settings: &serde_json::Value) -> AreaMode {
     }
 }
 
-async fn start_command(app: AppHandle, append: bool, area: Option<AreaMode>) -> CmdResult<String> {
+async fn start_command(
+    app: AppHandle,
+    append: bool,
+    area: Option<AreaMode>,
+    countdown: Option<u32>,
+) -> CmdResult<String> {
     if STARTING.swap(true, Ordering::SeqCst) {
         return Err(CmdError::new("busy", "a guide is starting already"));
     }
@@ -886,6 +917,7 @@ async fn start_command(app: AppHandle, append: bool, area: Option<AreaMode>) -> 
         true,
         append,
         area.unwrap_or_default(),
+        countdown,
     )
     .await;
     STARTING.store(false, Ordering::SeqCst);
@@ -905,7 +937,14 @@ pub async fn start_with(
     real_hooks: bool,
     append: bool,
     area: AreaMode,
+    countdown: Option<u32>,
 ) -> CmdResult<String> {
+    if real_hooks && crate::capture::real_capture_blocked() {
+        return Err(CmdError::new(
+            "unavailable",
+            "this test instance records nothing real",
+        ));
+    }
     if app.state::<GuideRec>().active.lock().unwrap().is_some()
         || crate::recording::is_recording(&app)
     {
@@ -927,7 +966,8 @@ pub async fn start_with(
         let app = app2;
         // The countdown of the recording is used (Settings → Recording), shown on the screen like the recording's; Esc cancels it.
         if real_hooks {
-            let n = app.state::<crate::commands::AppState>().settings.lock().unwrap().rec_countdown;
+            let setting = app.state::<crate::commands::AppState>().settings.lock().unwrap().rec_countdown;
+            let n = countdown.unwrap_or(setting);
             if n > 0 {
                 // Snipmunk's window is out of the way while it counts.
                 if let Some(w) = app.get_webview_window("main") {
@@ -945,14 +985,19 @@ pub async fn start_with(
         let info = if append {
             // The open guide goes on: it is "recording" again and its numbering continues.
             guides::set_state("current", "recording")?;
+            // An area chosen again is what "the same as before" means next time.
+            guides::set_settings("current", &area_settings(area))?;
             guides::read_info("current").ok_or_else(|| CmdError::new("not_found", "no guide is open"))?
-        } else { guides::create(&default_title(), serde_json::json!({
-            "stepMode": if settings.auto { "auto" } else { "manual" }, "typing": settings.typing,
-            "shortcuts": settings.shortcuts, "enterTab": settings.enter_tab, "zoom": settings.zoom_default, "lang": settings.lang,
-            "area": area.word(),
-            "region": match area { AreaMode::Region(r) => serde_json::json!([r.x, r.y, r.w, r.h]), _ => serde_json::Value::Null },
-            "hwnd": match area { AreaMode::Window(h) => serde_json::json!(h as i64), _ => serde_json::Value::Null },
-        }))? };
+        } else {
+            let mut of_guide = serde_json::json!({
+                "stepMode": if settings.auto { "auto" } else { "manual" }, "typing": settings.typing,
+                "shortcuts": settings.shortcuts, "enterTab": settings.enter_tab, "zoom": settings.zoom_default, "lang": settings.lang,
+            });
+            if let (Some(all), Some(of_area)) = (of_guide.as_object_mut(), area_settings(area).as_object()) {
+                all.extend(of_area.clone());
+            }
+            guides::create(&default_title(), of_guide)?
+        };
         let start_n = guides::read_steps(&info.id).iter().map(|s| s.n).max().unwrap_or(0);
         let (tx, rx) = std::sync::mpsc::channel::<Raw>();
         let paused = Arc::new(AtomicBool::new(false));
@@ -986,13 +1031,97 @@ pub async fn start_with(
     .await
     .map_err(|e| CmdError::new("io", e.to_string()))??;
     if real_hooks {
-        ui_start(&app);
+        ui_start(&app, area);
     }
     Ok(id)
 }
 
+/// The red frame around the chosen window or region of a guide: left out of the pictures, click-through, on the right monitor.
+/// A window's frame follows it (moved, resized, hidden while minimized). It goes when the guide stops, and is dimmed while paused
+/// (the page of the frame listens to the guide state). Runs on a worker thread of its own, holding no lock around window calls.
+fn show_frame(app: &AppHandle, area: AreaMode) {
+    let first = match area {
+        AreaMode::Region(r) => Some([r.x, r.y, r.w as i32, r.h as i32]),
+        AreaMode::Window(h) => facts::window_rect(h),
+        _ => return,
+    };
+    let Some(first) = first else {
+        return;
+    };
+    let built = tauri::WebviewWindowBuilder::new(
+        app,
+        "guideframe",
+        tauri::WebviewUrl::App("index.html".into()),
+    )
+    .title("Snipmunk – Guide frame")
+    .decorations(false)
+    .transparent(true)
+    .shadow(false)
+    .always_on_top(true)
+    .skip_taskbar(true)
+    .focused(false)
+    .resizable(false)
+    .visible(false)
+    .build();
+    let Ok(w) = built else {
+        return;
+    };
+    let _ = w.set_ignore_cursor_events(true);
+    place_frame(&w, first);
+    crate::webview::exclude_from_capture(&w);
+    let _ = w.show();
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let mut last = first;
+        let mut hidden = false;
+        loop {
+            std::thread::sleep(Duration::from_millis(120));
+            if !app.state::<GuideRec>().state().recording {
+                break;
+            }
+            if let AreaMode::Window(h) = area {
+                match facts::window_rect(h) {
+                    // A minimized window is moved far off the screen by Windows.
+                    Some(r) if !facts::is_iconic(h) => {
+                        if r != last {
+                            last = r;
+                            place_frame(&w, r);
+                        }
+                        if hidden {
+                            hidden = false;
+                            let _ = w.show();
+                        }
+                    }
+                    _ => {
+                        if !hidden {
+                            hidden = true;
+                            let _ = w.hide();
+                        }
+                    }
+                }
+            }
+        }
+        let _ = w.close();
+    });
+}
+
+/// The place of the frame window around an area (desktop pixels): a margin of 4 px for the red border.
+pub fn frame_place(r: [i32; 4]) -> ((i32, i32), (u32, u32)) {
+    const M: i32 = 4;
+    (
+        (r[0] - M, r[1] - M),
+        ((r[2] + 2 * M).max(1) as u32, (r[3] + 2 * M).max(1) as u32),
+    )
+}
+
+fn place_frame(w: &tauri::WebviewWindow, r: [i32; 4]) {
+    let ((x, y), (wd, h)) = frame_place(r);
+    let _ = w.set_position(tauri::PhysicalPosition::new(x, y));
+    let _ = w.set_size(tauri::PhysicalSize::new(wd, h));
+}
+
 /// The window goes away and the bar appears (like a recording). Called after the state lock is released.
-fn ui_start(app: &AppHandle) {
+fn ui_start(app: &AppHandle, area: AreaMode) {
     let app = app.clone();
     std::thread::spawn(move || {
         // Snipmunk's window goes away (a window that was hidden stays hidden), as when recording.
@@ -1002,6 +1131,7 @@ fn ui_start(app: &AppHandle) {
             }
         }
         show_bar(&app);
+        show_frame(&app, area);
     });
 }
 
@@ -1042,6 +1172,9 @@ fn show_bar(_: &AppHandle) {}
 
 fn close_bar(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("guidebar") {
+        let _ = w.close();
+    }
+    if let Some(w) = app.get_webview_window("guideframe") {
         let _ = w.close();
     }
 }
@@ -1218,6 +1351,8 @@ pub struct UiaFacts {
     pub menu_path: Vec<String>,
     /// The class names of the element and of its nearest parents (the shell tells its parts apart by them).
     pub classes: Vec<String>,
+    /// A text control (an editor, a text field). `name` never holds what it contains.
+    pub surface: steptext::Surface,
 }
 
 /// Which part of the Windows shell a click was in (the taskbar and the Start menu are not "File Explorer"). Pure; tested.
@@ -1808,6 +1943,7 @@ impl Pipe {
             area,
             caption,
             page,
+            surface: snap.uia.as_ref().map(|u| u.surface).unwrap_or_default(),
         };
         let text = steptext::step_text(kind, &meta, &self.settings.lang);
         let zoom = click.map(|c| {
@@ -1883,7 +2019,7 @@ pub async fn dev_guide_start(
         (None, Some(r)) => FrameSource::Synthetic(Rect::new(r[0], r[1], r[2] as u32, r[3] as u32)),
         _ => FrameSource::Synthetic(Rect::new(0, 0, 640, 360)),
     };
-    start_with(app, src, true, false, false, AreaMode::Active).await
+    start_with(app, src, true, false, false, AreaMode::Active, None).await
 }
 
 #[cfg(debug_assertions)]
@@ -2170,8 +2306,9 @@ mod facts {
     };
     use windows::Win32::UI::Accessibility::{
         CUIAutomation, IUIAutomation, IUIAutomationElement, IUIAutomationSelectionItemPattern,
-        IUIAutomationTogglePattern, ToggleState_On, UIA_SelectionItemPatternId,
-        UIA_TogglePatternId,
+        IUIAutomationTextPattern, IUIAutomationTogglePattern, IUIAutomationValuePattern,
+        ToggleState_On, UIA_SelectionItemPatternId, UIA_TextPatternId, UIA_TogglePatternId,
+        UIA_ValuePatternId,
     };
     use windows::Win32::UI::Input::KeyboardAndMouse::{
         GetKeyboardLayout, LoadKeyboardLayoutW, MapVirtualKeyExW, ToUnicodeEx, HKL,
@@ -2215,9 +2352,8 @@ mod facts {
     }
 
     /// The name of an app for people, looked up once per exe: the display name of the package (Microsoft Store and MSIX apps:
-    /// "Snipping Tool"), else FileDescription, else ProductName of the exe's version info ("Google Chrome", "Notepad"); then the
-    /// (short) title of the window, then the exe name without ".exe". Store apps often have the exe name as FileDescription
-    /// ("SnippingTool.exe"), which is not a name for people and is skipped.
+    /// "Snipping Tool"), else the short product name from the exe's version info (see `pick_app_name`), else the exe name
+    /// without ".exe". The title of a window is used only for the frame of a Store app or without an exe name.
     pub fn app_name(pid: u32, path: &str, stem: &str, title: &str) -> String {
         static CACHE: std::sync::Mutex<Option<std::collections::HashMap<String, String>>> =
             std::sync::Mutex::new(None);
@@ -2237,8 +2373,13 @@ mod facts {
                     String::new()
                 } else {
                     package_display_name(pid)
-                        .or_else(|| good(version_string(path, "FileDescription"), stem))
-                        .or_else(|| good(version_string(path, "ProductName"), stem))
+                        .or_else(|| {
+                            pick_app_name(
+                                version_string(path, "FileDescription"),
+                                version_string(path, "ProductName"),
+                                stem,
+                            )
+                        })
                         .unwrap_or_default()
                 };
                 // Only a name that belongs to the exe is cached (the title of a window changes).
@@ -2253,20 +2394,59 @@ mod facts {
         if !from_exe.is_empty() {
             return from_exe;
         }
+        // The frame of a Store app is named by its window; every other program has at least the name of its exe.
         let t = title.trim();
-        if !t.is_empty() && t.chars().count() <= 40 {
+        let frame = stem.eq_ignore_ascii_case("ApplicationFrameHost") || stem.is_empty();
+        if frame && !t.is_empty() && t.chars().count() <= 40 {
             return t.to_string();
         }
         stem.to_string()
     }
 
-    /// A version-info string that is a name for people (not empty, not the exe name).
-    pub(super) fn good(v: Option<String>, stem: &str) -> Option<String> {
-        let v = v?.trim().to_string();
-        let low = v.to_lowercase();
-        let st = stem.to_lowercase();
-        (!v.is_empty() && low != st && low != format!("{st}.exe") && !low.ends_with(".exe"))
-            .then_some(v)
+    /// A version-info string as a name: without a description after it ("Notepad++ : a free (GNU) source code editor",
+    /// "Foo - the file manager"), and whether it had one. `None` when empty or a file name.
+    fn short_name(v: Option<String>) -> Option<(String, bool)> {
+        let v = v?;
+        let full = v.trim().trim_end_matches('\0').trim();
+        let cut = [" : ", ": ", " - ", " \u{2013} ", " \u{2014} ", " | "]
+            .iter()
+            .filter_map(|sep| full.find(sep))
+            .filter(|i| *i > 0)
+            .min();
+        let name = cut.map_or(full, |i| &full[..i]).trim();
+        (!name.is_empty() && !name.to_lowercase().ends_with(".exe"))
+            .then(|| (name.to_string(), cut.is_some()))
+    }
+
+    /// The name of a program from its FileDescription and ProductName: the description, unless it is a long sentence and
+    /// the product name is short; the product name of Windows itself is not the name of a program. A name that only repeats
+    /// the exe name is used when there is no other.
+    pub(super) fn pick_app_name(
+        description: Option<String>,
+        product: Option<String>,
+        stem: &str,
+    ) -> Option<String> {
+        let description = short_name(description);
+        let product = short_name(product).filter(|(p, _)| !p.contains("Operating System"));
+        let wordy = description
+            .as_ref()
+            .is_some_and(|(d, had_more)| *had_more || d.chars().count() > 40);
+        let order = if wordy {
+            [product, description]
+        } else {
+            [description, product]
+        };
+        let names: Vec<String> = order
+            .into_iter()
+            .flatten()
+            .map(|(n, _)| n)
+            .filter(|n| n.chars().count() <= 60)
+            .collect();
+        names
+            .iter()
+            .find(|n| !n.eq_ignore_ascii_case(stem))
+            .or(names.first())
+            .cloned()
     }
 
     /// The display name of the package of a process (Microsoft Store / MSIX apps), the way the Start menu shows it: the name of the
@@ -2456,6 +2636,12 @@ mod facts {
         String::from_utf16_lossy(&buf[..n.max(0) as usize])
     }
 
+    pub fn is_iconic(h: isize) -> bool {
+        use windows::Win32::UI::WindowsAndMessaging::IsIconic;
+        // SAFETY: a plain query.
+        unsafe { IsIconic(HWND(h as *mut _)).as_bool() }
+    }
+
     pub fn is_window(h: isize) -> bool {
         use windows::Win32::UI::WindowsAndMessaging::IsWindow;
         // SAFETY: a plain query.
@@ -2630,6 +2816,52 @@ mod facts {
         }
     }
 
+    /// Replace the name of an element by one a step may show (`steptext::safe_name`): for a control that holds text, its
+    /// label, or its name when that is not its text. The value and the text are read only to compare with and end here.
+    ///
+    /// # Safety
+    /// Called on the UI Automation thread with an element that came from it.
+    unsafe fn safe_text_name(el: &IUIAutomationElement, f: &mut UiaFacts) {
+        let class = f.classes.first().cloned().unwrap_or_default();
+        let holds_text =
+            crate::steptext::surface_of(&f.control, &class) != crate::steptext::Surface::None;
+        let long = f.name.chars().count() > 20 || f.name.contains(['\n', '\r']);
+        let mut content: Vec<String> = Vec::new();
+        let mut label = String::new();
+        if holds_text || long || f.control == "ComboBox" {
+            // SAFETY: COM calls on the thread that owns the element.
+            unsafe {
+                if let Ok(v) = el
+                    .GetCurrentPattern(UIA_ValuePatternId)
+                    .and_then(|p| p.cast::<IUIAutomationValuePattern>())
+                {
+                    if let Ok(value) = v.CurrentValue() {
+                        content.push(value.to_string().chars().take(200).collect());
+                    }
+                }
+                if let Ok(t) = el
+                    .GetCurrentPattern(UIA_TextPatternId)
+                    .and_then(|p| p.cast::<IUIAutomationTextPattern>())
+                {
+                    if let Ok(text) = t.DocumentRange().and_then(|r| r.GetText(200)) {
+                        content.push(text.to_string());
+                    }
+                }
+                if holds_text {
+                    if let Ok(name) = el.CurrentLabeledBy().and_then(|l| l.CurrentName()) {
+                        label = name.to_string();
+                    }
+                }
+            }
+        }
+        // The value of a combo box is the chosen entry, which is what its click is about, not written text.
+        if f.control == "ComboBox" {
+            content.clear();
+        }
+        (f.name, f.surface) =
+            crate::steptext::safe_name(&f.control, &class, &f.name, &label, &content);
+    }
+
     fn describe(auto: &IUIAutomation, el: &IUIAutomationElement) -> Option<UiaFacts> {
         // SAFETY: COM calls on the UI Automation thread on elements that came from it.
         unsafe {
@@ -2652,6 +2884,7 @@ mod facts {
             if let Ok(c) = el.CurrentClassName() {
                 f.classes.push(c.to_string());
             }
+            safe_text_name(el, &mut f);
             if let Ok(p) = el.GetCurrentPattern(UIA_TogglePatternId) {
                 if let Ok(t) = p.cast::<IUIAutomationTogglePattern>() {
                     f.toggle = t.CurrentToggleState().ok().map(|s| s == ToggleState_On);
@@ -2906,6 +3139,9 @@ mod facts {
         String::new()
     }
     pub fn is_window(_: isize) -> bool {
+        false
+    }
+    pub fn is_iconic(_: isize) -> bool {
         false
     }
     pub fn layout_handle(_: &str) -> isize {
@@ -3172,6 +3408,7 @@ button,input,select{font:inherit} [role=tab]{padding:4px 10px;border:1px solid #
             false,
             false,
             area,
+            None,
         )
         .await?;
         // The live pictures need a moment to start.
@@ -3462,7 +3699,7 @@ mod app_name_tests {
     use super::facts;
 
     #[test]
-    fn the_name_of_an_app_falls_back_from_the_package_to_the_title_to_the_exe_name() {
+    fn the_name_of_an_app_falls_back_from_the_package_to_the_product_to_the_exe_name() {
         // This test program has no package identity: no package name, and no lookup of any other process.
         assert_eq!(facts::package_display_name(std::process::id()), None);
         let exe = std::env::current_exe().unwrap();
@@ -3474,18 +3711,18 @@ mod app_name_tests {
             "A window title",
         );
         assert!(
-            !name.is_empty() && !name.to_lowercase().ends_with(".exe"),
+            !name.is_empty() && !name.to_lowercase().ends_with(".exe") && name != "A window title",
             "{name}"
         );
-        // An exe that does not exist: the short title of the window, else the exe name without ".exe".
+        // An exe without version information: its name, never the title of the window.
         assert_eq!(
             facts::app_name(0, r"C:\nowhere\Foo.exe", "Foo", "Calculator"),
-            "Calculator"
-        );
-        assert_eq!(facts::app_name(0, r"C:\nowhere\Foo.exe", "Foo", ""), "Foo");
-        assert_eq!(
-            facts::app_name(0, r"C:\nowhere\Foo.exe", "Foo", &"x".repeat(80)),
             "Foo"
+        );
+        assert_eq!(
+            facts::app_name(0, "", "", "Calculator"),
+            "Calculator",
+            "nothing but the title"
         );
         // The frame of a UWP app is named by its window.
         assert_eq!(
@@ -3497,18 +3734,45 @@ mod app_name_tests {
             ),
             "Calculator"
         );
-        // The file description of Store apps is the exe name: not a name for people.
+    }
+
+    #[test]
+    fn a_long_file_description_gives_way_to_the_product_name() {
+        let pick = |d: &str, p: &str, stem: &str| {
+            facts::pick_app_name(Some(d.into()), Some(p.into()), stem)
+        };
+        let npp = Some("Notepad++".to_string());
         assert_eq!(
-            facts::good(Some("SnippingTool.exe".into()), "SnippingTool"),
-            None
+            pick(
+                "Notepad++ : a free (GNU) source code editor",
+                "Notepad++",
+                "notepad++"
+            ),
+            npp
+        );
+        assert_eq!(pick("Notepad++", "Notepad++", "notepad++"), npp);
+        // A description with more after a dash is cut; a product that is Windows itself is no name.
+        assert_eq!(
+            pick("Total Commander - file manager", "", "totalcmd"),
+            Some("Total Commander".into())
         );
         assert_eq!(
-            facts::good(Some("SnippingTool".into()), "SnippingTool"),
-            None
+            pick(
+                "Notepad",
+                "Microsoft\u{ae} Windows\u{ae} Operating System",
+                "notepad"
+            ),
+            Some("Notepad".into())
         );
         assert_eq!(
-            facts::good(Some(" Snipping Tool ".into()), "SnippingTool"),
+            pick("Google Chrome", "Google Chrome", "chrome"),
+            Some("Google Chrome".into())
+        );
+        // A file name is no name; a name that differs from the exe wins over one that repeats it.
+        assert_eq!(
+            pick("SnippingTool.exe", "Snipping Tool", "SnippingTool"),
             Some("Snipping Tool".into())
         );
+        assert_eq!(facts::pick_app_name(None, None, "x"), None);
     }
 }

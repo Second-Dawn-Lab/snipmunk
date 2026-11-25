@@ -2,12 +2,29 @@ import { Button, Dialog } from "@seconddawn/ui";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useT } from "../i18n";
 import { bumpGuideGeneration } from "./urls";
+import { applyTemplate, materializeFrames } from "./template/apply";
+import { BASIC, BUILT_INS, normalizeTemplate } from "./template/model";
 import { ipc, type GuideStep, type DocRecent } from "../ipc";
 import { notify } from "../notify";
 import type { Settings } from "../settings/defaults";
+import type { MoreArea } from "./RecordMore";
 import { History, createDocument, syncSteps, type Block, type GuideDoc, type MarkerStyle } from "./model";
 
 const LAST_FOLDER = "snipmunk.guides.folder";
+
+/** A new guide with the template set in Settings. "Basic" is what a guide without a template shows, with the marker and the
+ * number style of the settings; a template that is gone leaves it at that. */
+export async function startWith(doc: GuideDoc, id: string): Promise<GuideDoc> {
+  if (id === BASIC.id) return doc;
+  const built = BUILT_INS.find((x) => x.id === id);
+  if (built) return applyTemplate(doc, built);
+  try {
+    return applyTemplate(doc, normalizeTemplate(await ipc.templatesUse(id)));
+  } catch (e) {
+    console.warn("[guide] the template of new guides could not be used:", e);
+    return doc;
+  }
+}
 
 /** The defaults for a new guide, from the settings of Documents mode. */
 export function defaultsOf(s: Settings): Pick<GuideDoc, "marker" | "badge" | "picture" | "keepFull" | "zoomDefault"> {
@@ -29,6 +46,8 @@ export function useGuide(settings: Settings) {
   settingsRef.current = settings;
   const [doc, setDoc] = useState<GuideDoc | null>(null);
   const [steps, setSteps] = useState<Map<number, GuideStep>>(new Map());
+  const stepsRef = useRef(steps);
+  stepsRef.current = steps;
   const [savedPath, setSavedPath] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -44,6 +63,8 @@ export function useGuide(settings: Settings) {
   /** After which block new steps are inserted when a recording into the open guide ends. */
   const insertAfter = useRef<string | undefined>(undefined);
   const recording = useRef(false);
+  /** The new steps were recorded with an area chosen again: they show that area, whatever the guide's pictures show. */
+  const otherArea = useRef(false);
 
   const bump = () => setTick((n) => n + 1);
 
@@ -73,7 +94,7 @@ export function useGuide(settings: Settings) {
 
   /** Take the working copy from the backend (also after a recording ended). */
   const load = useCallback(
-    async (opts: { insertAfter?: string } = {}) => {
+    async (opts: { insertAfter?: string; otherArea?: boolean } = {}) => {
       const all = await ipc.docRead();
       bumpGuideGeneration();
       if (!all.info) {
@@ -89,9 +110,10 @@ export function useGuide(settings: Settings) {
         const area = (all.info as { settings?: { area?: string } }).settings?.area;
         if (area === "screen") defaults.picture = "screen";
         else if (area === "window" || area === "region") defaults.picture = "window";
-        d = createDocument(all.info.title, all.info.created, all.steps, defaults);
+        d = await startWith(createDocument(all.info.title, all.info.created, all.steps, defaults), settingsRef.current.docTemplate);
       } else {
-        d = syncSteps(d, all.steps, opts.insertAfter);
+        const area = (all.info as { settings?: { area?: string } }).settings?.area;
+        d = syncSteps(d, all.steps, opts.insertAfter, opts.otherArea ? area : undefined);
       }
       setSteps(map);
       setSavedPath(all.savedPath);
@@ -129,7 +151,7 @@ export function useGuide(settings: Settings) {
       const after = insertAfter.current;
       insertAfter.current = undefined;
       recording.current = false;
-      void load({ insertAfter: after });
+      void load({ insertAfter: after, otherArea: otherArea.current });
     });
     return () => void p.then((fn) => fn());
   }, [load]);
@@ -194,7 +216,7 @@ export function useGuide(settings: Settings) {
         target = await ipc.pickGuideSave(folder(), d.title);
         if (!target) return false;
       }
-      const r = await ipc.docSave(target, !savedPath, d);
+      const r = await ipc.docSave(target, !savedPath, materializeFrames(d, stepsRef.current));
       remember(r.path);
       setSavedPath(r.path);
       setDirty(false);
@@ -216,7 +238,7 @@ export function useGuide(settings: Settings) {
       if (!target) return false;
       setBusy(true);
       window.clearTimeout(pendingWrite.current);
-      const r = await ipc.docSave(target, true, d);
+      const r = await ipc.docSave(target, true, materializeFrames(d, stepsRef.current));
       remember(r.path);
       setSavedPath(r.path);
       setDirty(false);
@@ -286,12 +308,13 @@ export function useGuide(settings: Settings) {
   const close = useCallback(() => guard(() => undefined), [guard]);
 
   const recordMore = useCallback(
-    (afterBlock?: string) => {
+    (afterBlock?: string, area: MoreArea = "same") => {
       insertAfter.current = afterBlock;
+      otherArea.current = area !== "same";
       recording.current = true;
       void window.clearTimeout(pendingWrite.current);
       const d = docRef.current;
-      const go = () => void ipc.guideRecordMore().catch((e) => (recording.current = false, setError(String((e as { message?: string })?.message ?? e))));
+      const go = () => void ipc.guideRecordMore(area === "same" ? undefined : area).catch((e) => (recording.current = false, setError(String((e as { message?: string })?.message ?? e))));
       // The document is on disk before the recording appends to the working copy.
       if (d) void ipc.docWrite(d).then(go).catch(go);
       else go();
@@ -309,12 +332,14 @@ export function useGuide(settings: Settings) {
     return () => void p.then((fn) => fn());
   }, []);
 
-  // Keys: Ctrl+S, Ctrl+Shift+S, Ctrl+O.
+  // Keys, in Documents mode only: Ctrl+S, Ctrl+Shift+S, and Ctrl+O (also with no guide open).
+  const inDocuments = settings.captureKind === "documents";
   useEffect(() => {
+    if (!inDocuments) return;
     const onKey = (e: KeyboardEvent) => {
-      if (!docRef.current || !(e.ctrlKey || e.metaKey) || e.altKey) return;
+      if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
       const k = e.key.toLowerCase();
-      if (k === "s") {
+      if (k === "s" && docRef.current) {
         e.preventDefault();
         void (e.shiftKey ? saveAs() : save());
       } else if (k === "o" && !e.shiftKey) {
@@ -324,7 +349,7 @@ export function useGuide(settings: Settings) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [save, saveAs, open]);
+  }, [save, saveAs, open, inDocuments]);
 
   const title = doc?.title ?? "";
   const rename = useCallback((next: string) => change((d) => (next.trim() && next.trim() !== d.title ? { ...d, title: next.trim() } : d)), [change]);

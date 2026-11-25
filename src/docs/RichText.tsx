@@ -12,11 +12,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useT } from "../i18n";
 import { ipc } from "../ipc";
 import { notify } from "../notify";
+import { editors } from "./editors";
 import type { PmDoc } from "./model";
+import { PageGaps } from "./pageGaps";
 import { guideImageUrl } from "./urls";
-
-/** The editors that are on the page: Ctrl+Z asks the one that has the focus first, then the document history. */
-export const editors = new Map<HTMLElement, Editor>();
 
 const FONTS = ["Segoe UI", "Calibri", "Arial", "Georgia", "Cambria", "Times New Roman", "Consolas", "Verdana"];
 const SIZES = [10, 12, 14, 16, 18, 20, 24, 28, 32, 40];
@@ -25,7 +24,7 @@ const HIGHLIGHTS = ["#fff59d", "#ffd6a5", "#c7f9cc", "#bde0fe", "#ffc8dd", "#e0e
 
 /** The fonts of the list that this computer has (measured: a font that is not there falls back and measures the same). */
 let installed: string[] | null = null;
-function installedFonts(): string[] {
+export function installedFonts(): string[] {
   if (installed) return installed;
   const c = document.createElement("canvas").getContext("2d");
   if (!c) return (installed = FONTS);
@@ -121,8 +120,9 @@ const SingleLine = Extension.create({
 export interface RichProps {
   value: PmDoc | null;
   onChange: (doc: PmDoc) => void;
-  /** "full": the whole toolbar, tables, images; "step": bold and plain text only. */
-  mode: "full" | "step";
+  /** "full": the whole toolbar, tables, images; "step": bold and plain text only; "cover": the look of a text (font, size,
+   * colour, alignment) without lists, tables and images. */
+  mode: "full" | "step" | "cover";
   placeholder?: string;
   /** One line: Enter ends the edit. */
   singleLine?: boolean;
@@ -149,6 +149,15 @@ export function RichText(props: RichProps) {
         ...(props.singleLine ? [SingleLine] : []),
       ];
     }
+    if (mode === "cover") {
+      return [
+        StarterKit.configure({ heading: false, bulletList: false, orderedList: false, listItem: false, blockquote: false, codeBlock: false, code: false, horizontalRule: false, link: false }),
+        TextStyleKit.configure({ backgroundColor: false }),
+        // (a text without an alignment of its own stands as the cover's design places it)
+        TextAlign.configure({ types: ["paragraph"], alignments: ["start", "center", "end"], defaultAlignment: null }),
+        Placeholder.configure({ placeholder: props.placeholder ?? "" }),
+      ];
+    }
     return [
       StarterKit.configure({ heading: { levels: [1, 2, 3] }, link: { openOnClick: false, autolink: true, linkOnPaste: true } }),
       TextStyleKit.configure({ backgroundColor: false }),
@@ -158,6 +167,7 @@ export function RichText(props: RichProps) {
       GuideTable.configure({ resizable: true }),
       GuideImage.configure({ allowBase64: false, inline: false }),
       Placeholder.configure({ placeholder: props.placeholder ?? "" }),
+      PageGaps,
     ];
   }, [mode, props.singleLine]);
 
@@ -166,7 +176,7 @@ export function RichText(props: RichProps) {
     content: (props.value ?? undefined) as Content | undefined,
     editorProps: {
       attributes: { class: "rich__editor", "aria-label": props.ariaLabel ?? "" },
-      transformPastedHTML: (html) => (mode === "step" ? simpleHtml(html) : sanitizeHtml(html, remote)),
+      transformPastedHTML: (html) => (mode === "full" ? sanitizeHtml(html, remote) : simpleHtml(html)),
       handlePaste: (view, event) => {
         const cd = event.clipboardData;
         if (!cd) return false;
@@ -261,13 +271,13 @@ export function RichText(props: RichProps) {
 
   return (
     <div className={`rich${mode === "full" ? " rich--box" : ""}${focused ? " rich--focus" : ""}`} ref={rootRef}>
-      {editor && mode === "full" && focused && <Toolbar editor={editor} />}
+      {editor && mode !== "step" && focused && <Toolbar editor={editor} cover={mode === "cover"} />}
       <EditorContent editor={editor} />
     </div>
   );
 }
 
-function Toolbar({ editor }: { editor: Editor }) {
+function Toolbar({ editor, cover }: { editor: Editor; cover: boolean }) {
   const { t } = useT();
   const s = useEditorState({
     editor,
@@ -283,7 +293,7 @@ function Toolbar({ editor }: { editor: Editor }) {
       font: (e.getAttributes("textStyle").fontFamily as string | undefined) ?? "",
       size: (e.getAttributes("textStyle").fontSize as string | undefined) ?? "",
       color: (e.getAttributes("textStyle").color as string | undefined) ?? "",
-      align: (e.getAttributes("paragraph").textAlign ?? e.getAttributes("heading").textAlign ?? "start") as string,
+      align: (e.getAttributes("paragraph").textAlign ?? e.getAttributes("heading").textAlign ?? (cover ? "" : "start")) as string,
       table: e.isActive("table"),
       tableHeader: e.isActive("tableHeader"),
       tableAlign: ((e.getAttributes("table").align as string | undefined) ?? "start"),
@@ -297,11 +307,13 @@ function Toolbar({ editor }: { editor: Editor }) {
       {label}
     </button>
   );
-  const setLink = () => {
-    const prev = editor.getAttributes("link").href as string | undefined;
-    const url = window.prompt(t("rich.linkPrompt"), prev ?? "https://");
-    if (url === null) return;
-    if (url.trim() === "") chain().extendMarkRange("link").unsetLink().run();
+  // The address of a link is typed in a row of the toolbar; an empty one takes the link away.
+  const [link, setLinkDraft] = useState<string | null>(null);
+  const setLink = () => setLinkDraft(link === null ? ((editor.getAttributes("link").href as string | undefined) ?? "https://") : null);
+  const applyLink = () => {
+    const url = (link ?? "").trim();
+    setLinkDraft(null);
+    if (url === "" || url === "https://") chain().extendMarkRange("link").unsetLink().run();
     else chain().extendMarkRange("link").setLink({ href: /^[a-z]+:/i.test(url) ? url : `https://${url}` }).run();
   };
   return (
@@ -322,12 +334,14 @@ function Toolbar({ editor }: { editor: Editor }) {
           </option>
         ))}
       </select>
-      <select className="rich__sel" aria-label={t("rich.heading")} value={s.h} onChange={(e) => (Number(e.target.value) ? chain().setHeading({ level: Number(e.target.value) as 1 | 2 | 3 }).run() : chain().setParagraph().run())}>
-        <option value={0}>{t("rich.normal")}</option>
-        <option value={1}>{t("rich.h1")}</option>
-        <option value={2}>{t("rich.h2")}</option>
-        <option value={3}>{t("rich.h3")}</option>
-      </select>
+      {!cover && (
+        <select className="rich__sel" aria-label={t("rich.heading")} value={s.h} onChange={(e) => (Number(e.target.value) ? chain().setHeading({ level: Number(e.target.value) as 1 | 2 | 3 }).run() : chain().setParagraph().run())}>
+          <option value={0}>{t("rich.normal")}</option>
+          <option value={1}>{t("rich.h1")}</option>
+          <option value={2}>{t("rich.h2")}</option>
+          <option value={3}>{t("rich.h3")}</option>
+        </select>
+      )}
       <span className="rich__sep" />
       {btn("B", t("rich.bold"), s.bold, () => chain().toggleBold().run(), "rich__btn--b")}
       {btn("I", t("rich.italic"), s.italic, () => chain().toggleItalic().run(), "rich__btn--i")}
@@ -335,17 +349,44 @@ function Toolbar({ editor }: { editor: Editor }) {
       {btn("S", t("rich.strike"), s.strike, () => chain().toggleStrike().run(), "rich__btn--s")}
       <span className="rich__sep" />
       <ColorMenu label={t("rich.color")} glyph="A" current={s.color} palette={PALETTE} onPick={(c) => (c ? chain().setColor(c).run() : chain().unsetColor().run())} resetLabel={t("rich.noColor")} />
-      <ColorMenu label={t("rich.highlight")} glyph="▇" current="" palette={HIGHLIGHTS} onPick={(c) => (c ? chain().setHighlight({ color: c }).run() : chain().unsetHighlight().run())} resetLabel={t("rich.noHighlight")} />
+      {!cover && <ColorMenu label={t("rich.highlight")} glyph="▇" current="" palette={HIGHLIGHTS} onPick={(c) => (c ? chain().setHighlight({ color: c }).run() : chain().unsetHighlight().run())} resetLabel={t("rich.noHighlight")} />}
       <span className="rich__sep" />
-      {btn("•", t("rich.bullets"), s.bullet, () => chain().toggleBulletList().run())}
-      {btn("1.", t("rich.numbers"), s.ordered, () => chain().toggleOrderedList().run())}
+      {!cover && btn("•", t("rich.bullets"), s.bullet, () => chain().toggleBulletList().run())}
+      {!cover && btn("1.", t("rich.numbers"), s.ordered, () => chain().toggleOrderedList().run())}
       {btn("⇤", t("rich.alignStart"), s.align === "start", () => chain().setTextAlign("start").run(), "rich__btn--dir")}
       {btn("↔", t("rich.alignCenter"), s.align === "center", () => chain().setTextAlign("center").run())}
       {btn("⇥", t("rich.alignEnd"), s.align === "end", () => chain().setTextAlign("end").run(), "rich__btn--dir")}
       <span className="rich__sep" />
-      {btn("🔗", t("rich.link"), s.link, setLink)}
-      {btn("▦", t("rich.table"), s.table, () => chain().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run())}
+      {!cover && btn("🔗", t("rich.link"), s.link, setLink)}
+      {!cover && btn("▦", t("rich.table"), s.table, () => chain().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run())}
       {btn("✕", t("rich.clear"), false, () => chain().unsetAllMarks().clearNodes().run())}
+      {link !== null && (
+        <div className="rich__row">
+          <input
+            className="rich__link"
+            type="url"
+            dir="ltr"
+            autoFocus
+            value={link}
+            aria-label={t("rich.linkPrompt")}
+            placeholder={t("rich.linkPrompt")}
+            onFocus={(e) => e.currentTarget.select()}
+            onChange={(e) => setLinkDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key !== "Enter" && e.key !== "Escape") return;
+              e.preventDefault();
+              e.stopPropagation();
+              if (e.key === "Enter") applyLink();
+              else {
+                setLinkDraft(null);
+                editor.commands.focus();
+              }
+            }}
+          />
+          {btn("✓", t("rich.link"), false, applyLink)}
+          {btn("✕", t("session.cancel"), false, () => (setLinkDraft(null), void editor.commands.focus()))}
+        </div>
+      )}
       {s.table && (
         <div className="rich__row" role="toolbar" aria-label={t("rich.table")}>
           {btn("↥", t("rich.tableRowAbove"), false, () => chain().addRowBefore().run())}

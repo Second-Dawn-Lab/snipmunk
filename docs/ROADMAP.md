@@ -1,6 +1,6 @@
 # Snipmunk roadmap
 
-Status: Phases 1 to 7 are done (Phase 7 ✅; the scrolling screenshot is parked, see Phase 8). The product has three modes: Screenshots (one clipboard list), Recording (current recording + project tabs) and Documents (next phase, 7.5). Next: Phase 7.5 Documents, then Phase 8.
+Status: Phases 1 to 7.5 are done (Phase 7 ✅; the scrolling screenshot is parked for v0.2). The product has three modes: Screenshots (one clipboard list), Recording (current recording + project tabs) and Documents (step recorder, guide editor, templates, export and `.snpd` files: Phase 7.5 ✅, up to 7.5-D). Next: Phase 8, polish and the first release for Windows.
 
 ## Phase 1: Repo setup ✅
 Project folder, README, license, `.gitignore`, roadmap and icon placeholder.
@@ -96,28 +96,38 @@ Done in the recorder sessions (details in `docs/manual-tests-phase-7.md`):
 - Session 7-B7: tabs with a clear shape and `Name*` for unsaved (the recording tab has a × too), a redesigned webcam sync control, the **scrolling screenshot is now MANUAL scrolling** (you scroll; Snipmunk watches the area and places every picture on a growing canvas: up or down, sticky header/footer once, lazy images, "Scroll slower" when too fast; auto scrolling was removed because it failed in Chrome and Notepad++), tray Quit that exits at once when nothing is unsaved (the dialog was missing in screenshot mode) and asks "Stop and keep the recording?" while recording, and a clearer installer script. **Phase 7 is done.**
 - **Carried to Phase 8**: a GPU export path (the decoder is the limit at 3440x1440); the installer registration of `.snpr` is untested until an installer is built.
 
-## Phase 7.5: Documents mode (Tango-style guides)
+## Phase 7.5: Documents mode (Tango-style guides) ✅
 A free, offline, account-free step guide recorder for any Windows app: each step is one picture plus an automatically written text.
 - **7.5-A Step recorder ✅**: the third mode (Documents), the list of guides and a read-only guide view; the recorder (mouse and keyboard hooks on their own thread, live pictures of the monitors, UI Automation on its own thread, double-click and typing grouping, shortcuts, pause, Auto/Manual, floating bar, start/step shortcuts, tray item, crash recovery); the step text in 12 languages as structured parts; the storage (`docs/documents-storage.md`); Settings → Documents. Tests in `docs/manual-tests-phase-7.5.md`.
 - **7.5-B Step editor and guide files ✅**: one open guide with the `.snpd` file (`docs/snpd-format.md`; New / Open / Save / Save as, Recent, working folder with crash recovery, cropped pictures and burned-in redactions); blocks of steps and rich text (TipTap) with insert buttons, paste handling and image drop; the step editor (inline text, description, reorder, multi-select, duplicate, per-step zoom, crop, marker, annotations, blur / pixelate / black box); one document-wide undo/redo; "Record more steps"; the fixes of the 7.5-A hand test (shortcut, own-window filter, window and app names, formal German, countdown, marker shapes). Not done: the OCR quick redact on step pictures (moved to 7.5-C), reuse of the screenshot annotator code (the guide has its own SVG layer). Tests in `docs/manual-tests-phase-7.5.md`.
 - **7.5-B2 Fixes after the first hand test ✅**: the grey step pictures (lazy loading of cropped pictures), taskbar / Start menu / tray / desktop texts, Store app names, Chromium accessibility, caption buttons, the guide tab and sidebar, the centred mode switch. See "7.5-B2" in `docs/manual-tests-phase-7.5.md`.
 - **7.5-B3 Editor polish ✅**: one bar style for the recording, guide and screenshot overlay bars, the recording bar at the top; the "+" menu and scroll-jump fixes (block containment), Alt+arrows, selection by click; images and tables in text blocks (resize, align, crop, column widths, table toolbar); the icon step toolbar; Expand area and the picture area per step; shell steps show the shell; New guide area modes (active app, full screen, chosen window, chosen area). See "7.5-B3" in `docs/manual-tests-phase-7.5.md`.
-- **7.5-C Templates and export**: templates in three levels (basic; built-in ones with colour schemes; own templates), including a template **picture frame** (a size/ratio) in which every step picture can be moved and zoomed (the real screenshot context fills the frame, padding only where the screen ends); export to PDF, Word, Markdown and HTML, and copy as…; the OCR quick redact for step pictures.
+- **7.5-C Templates and export ✅**: fixes (drag auto-scroll, page width and zoom, the frame of a guide's area, the recording mode left alone); templates in three levels (`docs/templates.md`) with a picture frame; export to PDF, Word, Markdown and HTML and "Copy as"; Quick redact on step pictures. See "7.5-C" in `docs/manual-tests-phase-7.5.md`.
+- **7.5-C2 Fixes after the hand test ✅**: Quick redact finds what it missed, scans in seconds and also masks texts; step names never show what a text control holds; one docked step toolbar; template menu, number colours, header and footer texts, background picture options, cover edited in place, contents in the page view; export dialog layout; smaller debug build and `scripts/clean-build.bat`. See "7.5-C2" in `docs/manual-tests-phase-7.5.md`.
+- **7.5-C3 Layout rework and fixes ✅**: a tabbed sidebar (Guide, Step, Steps outline) that folds and resizes; the tools row on the selected step; zoom and pan with every frame setting; the Blank template and a template for new guides; the editor at page size with page breaks, cover and contents on pages of their own; background picture sizing; Quick redact reads lines that were dropped and covers what follows a label; an OCR debug view in development builds. See "7.5-C3" in `docs/manual-tests-phase-7.5.md`.
+- **7.5-C4 Paged canvas, cover and contents designs ✅**: the editor shows real pages with header, footer and background, laid out by the same code as print and PDF; Print preview and Print; fit page width / whole page; six cover designs with layout controls; four contents designs with leaders and options; table alignment; small sidebar fixes. See "7.5-C4" in `docs/manual-tests-phase-7.5.md`.
+- **7.5-C5 UI consistency ✅**: one File icon menu in all three modes, one row above the guide pages with the zoom in it, Export and "Copy as" in a bottom bar, a red "New guide", own templates can be deleted from the gallery, no Settings icon in the title bar. See "7.5-C5" in `docs/manual-tests-phase-7.5.md`.
+- **7.5-D Guide edit tools and UI consistency ✅**: the File button at the far left; one header style in Recording and Documents; the step tools as an icon grid in the Step tab; callouts typed in place, with shapes and colours, also beside the picture; spotlight and magnifier; zoom inside the chosen picture area, with a step's own setting over the guide's default. See "7.5-D" in `docs/manual-tests-phase-7.5.md`.
 - **Video editor = a separate Second Dawn app** (after Documents): it opens `.snpr` (see `docs/snpr-format.md`) and normal video files and has the editing features (auto-zoom on clicks, cursor smoothing, multi-clip timeline); the shared rendering may move to a dawn-core crate. Snipmunk keeps a quick review only: play, trim, effects, export, copy, share, project files.
 - Later: Stack/Grid options.
+- Later for guide marks: move, resize, rotate and order for the other marks (arrows, boxes, texts); callout, magnifier and spotlight have their handles since 7.5-D.
 
-## Phase 8: Polish and the first release (v0.1.0)
-- Memory reduction (about 700 MB now, goal **under 300 MB**): **one shared WebView2 environment** for all windows, and the **hidden windows (overlay, floating bar, bubble) created only when needed** instead of pre-created; GPU export path everywhere; avoid reading text twice (OCR).
-- **Webcam bubble resize during recording** (failed in the hand test of 7-B6).
+## Phase 8: Polish and the first release (v0.1.0, Windows) — next
+- **Lightweight targets**: memory (about 700 MB now, goal **under 300 MB**): **one shared WebView2 environment** for all windows, and the **hidden windows (overlay, floating bar, bubble) created only when needed** instead of pre-created; GPU export path everywhere; avoid reading text twice (OCR).
+- **Close = quit by default** (the other close behaviours stay in the settings).
+- **Task Manager grouping check**: all of Snipmunk's processes appear as one app.
 - **Remove the unused `windows` crate features** that were added for the auto scrolling screenshot (UI Automation, `PrintWindow`, and others only it used).
+- **Updater**: the update check is registered; add the page's restart button that calls `restart_app` (the unsaved-changes dialog runs first).
+- Node 24 for GitHub Actions in all repositories.
+- **Installer** with file associations, updater key, code signing (SignPath), and an **MSIX package for the Microsoft Store**.
+- **README** and screenshots, a full manual test pass.
+
+## v0.2: after the first release
+- **Webcam bubble resize during recording** (failed in the hand test of 7-B6).
 - **Scrolling screenshot, rebuilt** (parked in 7-B8 after it failed real tests; the code is kept behind `SNIPMUNK_EXPERIMENTAL_SCROLL=1` in debug builds):
   - (a) A **Snipmunk browser extension for Chrome/Edge** that renders the full page in the browser (like Safari's full-page screenshot on iPhone) and sends it to Snipmunk.
   - (b) For **other apps**: read the real scroll position (scrollbar info / UI Automation) to place the frames, frame-to-frame matching only for fine-tuning, and per-frame detection of rows that stay still (sticky bars wherever they appear, floating decorations).
   - (c) **Test windows that copy the real failures**: a sticky bar that sticks mid-page, floating images, a GitHub-like sticky tab bar, a code editor with repetitive lines (YAML).
-- **Updater**: the update check is registered; add the page's restart button that calls `restart_app` (the unsaved-changes dialog runs first).
-- Node 24 for GitHub Actions in all repositories.
-- Installer with file associations, updater key, code signing (SignPath).
-- README and screenshots, a full manual test pass.
 
-## Phase 9: macOS
-**v0.2.0**: macOS support (ScreenCaptureKit behind the platform abstraction).
+## Phase 9: macOS (after the Windows release)
+macOS support (ScreenCaptureKit behind the platform abstraction). **Linux is dropped for now.**

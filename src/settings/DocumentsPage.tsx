@@ -2,6 +2,8 @@ import { Button, Section, Select, Switch } from "@seconddawn/ui";
 import { useEffect, useState } from "react";
 import { HotkeyNotice } from "../components/HotkeyNotice";
 import { useT } from "../i18n";
+import { BUILT_INS, normalizeTemplate, type Template } from "../docs/template/model";
+import { useTemplateName } from "../docs/template/TemplatePanel";
 import { ipc } from "../ipc";
 import { FolderSetting, Setting, type PageProps } from "./pages";
 import { Kbd, ShortcutDialog } from "./ShortcutDialog";
@@ -11,6 +13,12 @@ export function DocumentsPage({ settings, set }: PageProps) {
   const { t } = useT();
   const [dialog, setDialog] = useState<"step" | "start" | null>(null);
   const [guides, setGuides] = useState("");
+  const [own, setOwn] = useState<Template[]>([]);
+  const nameOf = useTemplateName();
+  useEffect(() => {
+    void ipc.templatesList().then((l) => setOwn(l.map(normalizeTemplate))).catch(() => undefined);
+  }, []);
+  const templates = [...BUILT_INS, ...own];
   useEffect(() => {
     void ipc.defaultFolders().then((d) => setGuides(d.guides)).catch(() => undefined);
   }, []);
@@ -45,6 +53,14 @@ export function DocumentsPage({ settings, set }: PageProps) {
         </Setting>
         <Setting id="docEnterTab" title={t("settings.docEnterTab")} description={t("settings.docEnterTabDesc")}>
           <Switch label={t("settings.docEnterTab")} checked={settings.docEnterTab} onChange={(docEnterTab) => set({ docEnterTab })} />
+        </Setting>
+        <Setting id="docTemplate" title={t("settings.docTemplate")} description={t("settings.docTemplateDesc")}>
+          <Select
+            label={t("settings.docTemplate")}
+            value={templates.some((x) => x.id === settings.docTemplate) ? settings.docTemplate : "basic"}
+            onChange={(docTemplate) => set({ docTemplate })}
+            options={templates.map((x) => ({ value: x.id, label: nameOf(x) }))}
+          />
         </Setting>
         <Setting id="docPicture" title={t("settings.docPicture")} description={t("settings.docPictureDesc")}>
           <Select
