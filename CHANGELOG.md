@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.1.2](https://github.com/Second-Dawn-Lab/snipmunk/compare/v0.1.1...v0.1.2) (2026-11-26)
+
+
+### Bug Fixes
+
+* correct the empty screenshot list and recording export dialog texts ([1f96261](https://github.com/Second-Dawn-Lab/snipmunk/commit/1f96261f29dd05d8b920189b266e2c9e8badad17))
+* keep the cursor in step with the picture in exports and preview ([99c0b87](https://github.com/Second-Dawn-Lab/snipmunk/commit/99c0b8740bc01b6dc34dba561ff11d5c94c9379f))
+* keep the cursor in step with the picture in exports and the preview ([bd77a0e](https://github.com/Second-Dawn-Lab/snipmunk/commit/bd77a0e94b82909d84a37f5b9242a12451a962fd))
+
 ## [0.1.1](https://github.com/Second-Dawn-Lab/snipmunk/compare/v0.1.0...v0.1.1) (2026-11-26)
 
 
