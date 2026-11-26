@@ -1,58 +1,152 @@
-<h1 align="center">Snipmunk</h1>
-<p align="center"><b>Grab, mark up and share everything on your screen, all in one place.</b></p>
-
-<p align="center"><sub>by Second Dawn</sub></p>
-
 <p align="center">
-  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue" /></a>
-  <img alt="Status: early development" src="https://img.shields.io/badge/status-early%20development-orange" />
+  <img src="src-tauri/icons/128x128@2x.png" alt="Snipmunk logo: a winking chipmunk inside a capture frame" width="112" />
 </p>
 
-> **Status: Early development, not usable yet.** There is nothing to download. This repository currently holds the project plan only.
+<h1 align="center">Snipmunk</h1>
+<p align="center"><b>Capture &amp; collect</b></p>
 
-## The problem
+<p align="center">
+  A free, open-source <b>screenshot clipboard</b> for Windows: capture many, mark them up, then paste all of them, or only the
+  ones you select, in one go. Plus text recognition, quick redaction, screen recording and step-by-step guides.<br />
+  Offline, no account, no telemetry.
+</p>
 
-Sharing more than one screenshot is clumsy. You capture one, paste it, switch back, capture the next, paste it again. Windows keeps a single image on the clipboard at a time, so every screenshot costs a round trip between the app you are capturing and the app you are pasting into. It is especially tedious when you are writing a document or a bug report, or giving an AI chat several screens of context.
+<p align="center">
+  <a href="https://github.com/Second-Dawn-Lab/snipmunk/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/Second-Dawn-Lab/snipmunk?label=release" /></a>
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue" /></a>
+  <img alt="Platform: Windows 10 and 11" src="https://img.shields.io/badge/Windows-10%20%7C%2011-0078D6" />
+</p>
 
-## What Snipmunk will do
+<h3 align="center"><a href="https://github.com/Second-Dawn-Lab/snipmunk/releases/latest">⬇ Download Snipmunk for Windows</a></h3>
 
-Take as many screenshots as you like in one session and annotate them like in Snipping Tool. They collect in a small widget-style window. When you are ready, paste **all** of them, or only the ones you selected, into any app in one go.
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/media/main-window-dark.png" />
+    <img src="docs/media/main-window.png" alt="The Snipmunk main window: five captures in a list, all selected, an annotated capture shown large, and the buttons Save 5 and Copy 5" width="860" />
+  </picture>
+</p>
 
-## Planned features
+## Download
 
-- **Screenshots:** rectangle, window, full screen and freeform capture, with an optional delay, started with a global hotkey (default Ctrl+Alt+PrintScreen), a red selection pointer, and support for multiple monitors and high-DPI screens.
-- **Screen recording:** record your screen, next to the screenshot tools.
-- **Annotation:** pen and highlighter with color palettes, shapes, emoji stickers, text, crop, rotate, blur, eraser, undo and redo.
-- **Text recognition:** copy all the text of a screenshot, select text on it, copy it as a table, or quickly redact email addresses and phone numbers. It all runs locally and works offline.
-- **Groups:** organize the screenshots of a session into groups.
-- **Multi-copy:** copy several screenshots at once, as separate pictures, as one stacked picture, or as a grid.
-- **Auto-kept sessions:** every change is saved at once, so nothing is lost when the app closes or crashes. You decide whether a session is cleared on exit or kept for a number of days.
-- **12 languages, including right-to-left:** English, German, Spanish, French, Italian, Dutch, Polish, Turkish, Simplified and Traditional Chinese, Arabic and Urdu.
-- **Start with Windows:** optional, so it is always ready.
+- **[Latest release](https://github.com/Second-Dawn-Lab/snipmunk/releases/latest)**: run `Snipmunk_x.y.z_x64-setup.exe`. It
+  installs for your user account.
+- **Requirements:** Windows 10 or 11, 64-bit, and Microsoft's WebView2. Windows 11 has WebView2 already; on Windows 10 the
+  installer fetches it if it is missing ([details](docs/user-guide/faq.md#what-is-webview2-and-do-i-need-it)).
+- **SmartScreen:** you may see **"Windows protected your PC"** or **"SmartScreen can't be reached"**. Click **More info**, then
+  **Run anyway**. The installer is not code-signed yet; it is built on GitHub from the source code in this repository. Signing
+  ([policy](docs/CODE_SIGNING_POLICY.md)) and a Microsoft Store version are planned.
+- **Updates:** Snipmunk checks GitHub once a day and installs a new version only when you click **Update and restart**. The check
+  can be switched off.
 
-Translations are AI-generated for now; native speaker review is very welcome.
+## Features
 
-## Platforms
+### 📷 Screenshots
 
-- **Windows:** first.
-- **macOS:** planned, soon after the first Windows release.
+<p align="center">
+  <img src="docs/media/capture-annotate-copy.gif" alt="Short film: select an area, the capture joins the list, draw an arrow, select all captures and copy them" width="760" />
+</p>
 
-See the [roadmap](docs/ROADMAP.md) for the phases.
+- Rectangle, window, full screen and freeform capture, with a delay, started with `Ctrl+Alt+PrintScreen`.
+- Every capture lands in **one list** that survives restarts.
+- Annotate: pen, highlighter, shapes, arrows, emoji, text, crop, rotate, blur, undo.
+- **Copy** the selected captures **separately, stacked or as a grid**, or drag them out as files.
+- Save as PNG, JPEG, WebP, BMP or ZIP; print; share; search by name and by the text in the picture.
+
+[Screenshots guide](docs/user-guide/screenshots.md)
+
+### 🔤 Text recognition and Quick redact
+
+| Before | After one click |
+|---|---|
+| ![Invented payment details, all readable](docs/media/quick-redact-before.png) | ![The e-mail address, phone number, IBAN, card number and password covered by black boxes](docs/media/quick-redact-after.png) |
+
+- Copy all text, select text on the picture, or **copy a table**.
+- **Quick redact** covers e-mail addresses, phone numbers, card numbers, IBANs, passwords and your own words.
+- Copies and exports have the covered **pixels really replaced**; you can also erase them from the kept picture.
+- Runs on your computer with Windows' own text recognition. Always check the result.
+
+[Text recognition guide](docs/user-guide/text-recognition.md)
+
+### 🎥 Screen recording
+
+<p align="center">
+  <img src="docs/media/recording-effects.png" alt="The recording player with a highlighted cursor, a click ripple, a webcam bubble showing a drawn test camera, and the Effects panel" width="760" />
+</p>
+
+- Record an area, a window or the full screen with **system sound, microphone and a webcam bubble**.
+- Cursor highlight and click effects, adjustable **after** recording.
+- Trim and split; export **MP4 or GIF**, in the shape you need (16:9, 9:16, 1:1).
+- Copy or share the video; keep it as a `.snpr` project; interrupted recordings can be recovered.
+
+[Recording guide](docs/user-guide/recording.md)
+
+### 📄 Step-by-step guides
+
+<p align="center">
+  <img src="docs/media/guide-recording.gif" alt="Short film: while someone clicks through a demo app, the guide bar counts the steps; then the finished guide shows each step with its text" width="760" />
+</p>
+
+- **Every click becomes a step** with a picture and an automatic text. Text typed into password fields is never stored.
+- Edit steps; add text, images and tables; **callouts, spotlight and magnifier**.
+- **Templates** with cover designs and contents, edited on real pages.
+- Export to **PDF, Word, Markdown or HTML**; save as a `.snpd` file.
+- **Quick redact a whole guide** before you share it.
+
+[Guides](docs/user-guide/guides.md) · [Templates and export](docs/user-guide/templates-and-export.md)
+
+## Lightweight
+
+| State (all of Snipmunk's processes) | Memory in use |
+|---|---:|
+| Just started | about 85 MB |
+| With 30 captures | about 100 MB |
+| A 50-step guide open | about 177 MB |
+| Minimized | about 17 MB |
+| After closing | 0: it quits completely (unless you keep it in the tray) |
+
+Private working set of a release build, measured on one Windows 11 computer; how, and more numbers:
+[performance.md](docs/performance.md).
 
 ## Privacy and offline use
 
-Snipmunk is built to work entirely on your computer. Screenshots are kept in `%AppData%\SecondDawn\snipmunk` so a crash or restart never loses them, and you choose how long they stay (settings: clear on exit, or delete sessions after N days). There is no telemetry, no account and no upload. The only network access is the update check against this repository's GitHub releases, and the download of an update you choose to install (the Microsoft Store version has neither). See the [privacy policy](PRIVACY.md).
+Everything stays on your computer: screenshots, recordings, guides and text recognition. No account, no telemetry, no upload.
+**The only network request is the update check** (it asks GitHub for the version information and sends nothing about you), plus
+the download of an update you choose to install. See the [privacy policy](PRIVACY.md) and
+[where your files are](docs/user-guide/files-and-privacy.md).
 
-### Two things to know about redactions and the clipboard
+## Languages
 
-- **"Copy each capture to the clipboard"** (settings, Capture): when it is on, the capture goes to the clipboard *right after it is taken*, before you have edited it. Anything you blur or cover afterwards is not in that clipboard copy. Turn the setting off if you want to redact first, or copy again after editing.
-- **Redactions are applied to copies and exports, not to the stored original.** Snipmunk never changes the picture file it keeps; blur, pixelate and black boxes are marks on top of it, and the copy or export you make from the capture has the pixels really replaced. The stored original therefore still contains the pixels under a redaction. To remove them from the stored picture as well, use **Blur ▾ → Apply redactions permanently**: the redactions are burned into the file, nothing of the covered area is kept on disk, and after you close Snipmunk that cannot be undone. (Until then, Undo can bring the original back; that earlier picture is held in memory only, never in a file.)
+English, German, Spanish, French, Italian, Dutch, Polish, Turkish, Simplified Chinese, Traditional Chinese, Arabic and Urdu,
+with a right-to-left layout for Arabic and Urdu. The translations are AI-generated for now;
+**help from native speakers is very welcome**.
 
-Text recognition (Text actions) runs on your computer with the text recognition that comes with Windows. Nothing is uploaded and no model is downloaded. The recognized text of a capture is kept in the session folder next to it and is deleted when the capture is deleted, when its redactions change, or when its picture is replaced.
+## Documentation
 
-## Build from source
+| | |
+|---|---|
+| **[User guide](docs/user-guide/index.md)** | Every mode, step by step |
+| [Keyboard shortcuts](docs/user-guide/shortcuts.md) | All shortcuts on one page |
+| [FAQ](docs/user-guide/faq.md) | SmartScreen, WebView2, shortcuts, microphone, bug reports |
+| File formats | [.snpr recordings](docs/snpr-format.md) · [.snpd guides](docs/snpd-format.md) · [.snpt templates](docs/templates.md#own-templates-and-the-file-format-snpt) |
+| [Roadmap](docs/ROADMAP.md) | What is done and what comes next |
 
-Snipmunk uses the shared code in [`dawn-core`](https://github.com/Second-Dawn-Lab/dawn-core), which must sit **next to** this folder (the version in `dawn-core.ref`).
+## Contributing
+
+Bug reports, ideas, translations and pull requests are welcome: [open an issue](https://github.com/Second-Dawn-Lab/snipmunk/issues)
+and see [CONTRIBUTING](https://github.com/Second-Dawn-Lab/.github/blob/main/CONTRIBUTING.md) and the
+[Code of Conduct](CODE_OF_CONDUCT.md). To report a vulnerability, follow [SECURITY.md](SECURITY.md).
+
+<details>
+<summary><b>Build from source</b></summary>
+
+### Prerequisites
+
+Windows, Node.js 20+, [pnpm](https://pnpm.io), Rust (stable) and the [Tauri prerequisites](https://tauri.app/start/prerequisites/).
+
+### Get the code
+
+Snipmunk uses the shared code in [`dawn-core`](https://github.com/Second-Dawn-Lab/dawn-core), which must sit **next to** this
+folder (the version in `dawn-core.ref`).
 
 ```text
 SecondDawn/
@@ -60,27 +154,33 @@ SecondDawn/
   snipmunk/     <- this repo
 ```
 
-You need Node.js 20+, [pnpm](https://pnpm.io), Rust (stable) and the [Tauri prerequisites](https://tauri.app/start/prerequisites/).
-
 ```bash
+git clone https://github.com/Second-Dawn-Lab/dawn-core
+git clone https://github.com/Second-Dawn-Lab/snipmunk
 cd dawn-core && pnpm install
 cd ../snipmunk && pnpm install
+```
+
+### Run and check
+
+```bash
 pnpm tauri dev      # or run-snipmunk.bat on Windows
 pnpm dev            # UI alone in a browser with a mock backend (src/ipc.mock.ts); add ?window=settings
 pnpm lint && pnpm typecheck && pnpm test
-cargo fmt --all --check && cargo clippy --workspace --all-targets && cargo test --workspace
+cargo fmt -p snipmunk -p snipmunk-pixels -- --check
+cargo clippy --workspace --all-targets && cargo test --workspace
 ```
 
-Release process: [docs/releasing.md](docs/releasing.md).
+- Release process: [docs/releasing.md](docs/releasing.md). Microsoft Store package: [docs/store.md](docs/store.md).
+- The screenshots and GIFs of the documentation: [docs/media/README.md](docs/media/README.md).
 
-## Part of Second Dawn
-
-Snipmunk is a [Second Dawn](https://github.com/Second-Dawn-Lab) app. Second Dawn builds free, open-source desktop apps that run on your own computer. The first is [Owl-L](https://github.com/Second-Dawn-Lab/owll), an offline translator. Later, all Second Dawn apps will be installable from one shared Second Dawn launcher.
+</details>
 
 ## License
 
 Snipmunk is MIT licensed. See [LICENSE](LICENSE).
 
-## Copy, save and share: where files go
+## Part of Second Dawn
 
-Copying, dragging out, printing, sharing and "Edit in Paint" render the capture (marks, crop, rotation and redactions applied) into temporary PNG files in `%AppData%\SecondDawn\snipmunk\temp`. Nothing is written anywhere else unless you save. The temporary files of a kind are deleted at the next copy of that kind and when Snipmunk quits. The clipboard holds the file list, an HTML fragment and the first picture; other programs may read the files from the temp folder until then.
+Snipmunk is a [Second Dawn](https://github.com/Second-Dawn-Lab) app. Second Dawn builds free, open-source desktop apps that run
+on your own computer. Also from Second Dawn: [Owl-L](https://github.com/Second-Dawn-Lab/owll), an offline translator.
