@@ -4568,7 +4568,7 @@ dependencies = [
 
 [[package]]
 name = "snipmunk"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "arboard",
@@ -4601,7 +4601,7 @@ dependencies = [
 
 [[package]]
 name = "snipmunk-pixels"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "image",
 ]

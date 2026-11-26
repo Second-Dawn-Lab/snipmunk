@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1](https://github.com/Second-Dawn-Lab/snipmunk/compare/v0.1.0...v0.1.1) (2026-11-26)
+
+
+### Bug Fixes
+
+* keep the save dialog's folder button inside the dialog ([fcfec24](https://github.com/Second-Dawn-Lab/snipmunk/commit/fcfec249821fc51b6996f04bd196c19c2b8cdade))
+
 ## 0.1.0 (2026-11-26)
 
 
