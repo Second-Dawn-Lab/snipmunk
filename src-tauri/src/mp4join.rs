@@ -193,7 +193,7 @@ mod tests {
 
     #[test]
     fn the_segment_files_of_a_folder_are_found_in_order_and_other_files_are_not() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testdir::new();
         for n in [
             "screen-002.mp4",
             "screen-000.mp4",
@@ -216,7 +216,7 @@ mod tests {
 
     #[test]
     fn a_file_that_is_not_an_mp4_is_not_readable_and_nothing_joins_without_segments() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testdir::new();
         let junk = dir.path().join("screen-000.mp4");
         std::fs::write(&junk, b"not an mp4 at all").unwrap();
         assert!(readable(&[junk]).is_empty());

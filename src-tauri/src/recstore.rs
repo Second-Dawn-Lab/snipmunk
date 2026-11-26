@@ -211,7 +211,7 @@ mod tests {
 
     #[test]
     fn a_name_that_exists_gets_a_number() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testdir::new();
         let a = unique_dir(dir.path(), "Rec");
         assert_eq!(a, dir.path().join("Rec"));
         fs::create_dir(&a).unwrap();
@@ -223,7 +223,7 @@ mod tests {
 
     #[test]
     fn a_folder_with_subfolders_moves_with_everything_in_it() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testdir::new();
         let from = dir.path().join("a");
         fs::create_dir_all(from.join("sub")).unwrap();
         fs::write(from.join("x.txt"), b"1").unwrap();

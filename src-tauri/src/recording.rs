@@ -2083,7 +2083,7 @@ mod tests {
 
     #[test]
     fn the_recording_info_is_written_whole_and_read_back() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testdir::new();
         let info = RecordingInfo {
             version: 1,
             screen_file: "recordings/r1/screen.mp4".into(),
@@ -2127,9 +2127,7 @@ mod segment_tests {
     #[test]
     fn segments_of_generated_frames_join_into_one_video_with_all_the_pictures() {
         let _encoder = super::encoder_lock();
-        let dir =
-            tempfile::tempdir_in(std::env::var("SNIPMUNK_TEST_DIR").unwrap_or_else(|_| ".".into()))
-                .unwrap();
+        let dir = crate::testdir::new();
         let (w, h, fps) = (320u32, 180u32, 30u32);
         let mut seg = win::Segments::new(
             dir.path(),
@@ -2182,9 +2180,7 @@ mod segment_tests {
     #[test]
     fn a_segment_cut_off_by_a_crash_is_left_out_and_the_rest_is_recovered() {
         let _encoder = super::encoder_lock();
-        let dir =
-            tempfile::tempdir_in(std::env::var("SNIPMUNK_TEST_DIR").unwrap_or_else(|_| ".".into()))
-                .unwrap();
+        let dir = crate::testdir::new();
         let (w, h, fps) = (320u32, 180u32, 30u32);
         let mut seg = win::Segments::new(
             dir.path(),
@@ -2367,11 +2363,43 @@ mod render_tests {
         sum as f64 / n as f64
     }
 
+    /// Which picture of a `generated` recording each of `frames` shows (its number among `count` pictures): the clean
+    /// `test_pattern` nearest to it along three rows. The bar's place and the shading tell all pictures apart, also
+    /// through compression noise. Tests ask this instead of counting frames: an encoder or decoder may leave a picture out
+    /// or repeat one (Windows' software encoder, which the build servers use, does), and the position of a frame in the
+    /// file then no longer says which moment it shows.
+    #[allow(clippy::chunks_exact_to_as_chunks)]
+    fn pictures_shown(frames: &[Vec<u8>], w: usize, h: usize, count: usize) -> Vec<usize> {
+        // Between the squares in two corners of the pattern.
+        let rows = [h / 4, h / 2, h * 3 / 4];
+        let line = |picture: &[u8]| -> Vec<u8> {
+            rows.iter()
+                .flat_map(|y| picture[y * w * 4..(y + 1) * w * 4].iter().copied())
+                .collect()
+        };
+        let clean: Vec<Vec<u8>> = (0..count).map(|i| line(&test_pattern(w, h, i))).collect();
+        frames
+            .iter()
+            .map(|frame| {
+                let seen = line(frame);
+                let distance = |other: &Vec<u8>| -> u64 {
+                    // (the fourth byte of a pixel says nothing)
+                    seen.chunks_exact(4)
+                        .zip(other.chunks_exact(4))
+                        .map(|(a, b)| (0..3).map(|c| u64::from(a[c].abs_diff(b[c]))).sum::<u64>())
+                        .sum()
+                };
+                (0..count)
+                    .min_by_key(|&i| distance(&clean[i]))
+                    .expect("at least one picture")
+            })
+            .collect()
+    }
+
     /// A1: pictures rendered at awkward sizes (rows padded by the decoder, odd sizes) come out as the pattern, not sheared.
     #[test]
     fn rendered_pictures_match_the_pattern_at_awkward_sizes() {
         let _encoder = super::encoder_lock();
-        let base = std::env::var("SNIPMUNK_TEST_DIR").unwrap_or_else(|_| ".".into());
         let cancel = AtomicBool::new(false);
         // 641x359 is recorded as 640x358 (the recorder and the render both drop the odd row and column).
         for (w, h) in [
@@ -2381,7 +2409,7 @@ mod render_tests {
             (3440, 1440),
             (640, 358),
         ] {
-            let dir = tempfile::tempdir_in(&base).unwrap();
+            let dir = crate::testdir::new();
             generated(dir.path(), w, h, 10, 1);
             let mut info: RecordingInfo =
                 serde_json::from_slice(&std::fs::read(dir.path().join("recording.json")).unwrap())
@@ -2423,7 +2451,6 @@ mod render_tests {
     #[test]
     fn render_stage_timings() {
         let _encoder = super::encoder_lock();
-        let base = std::env::var("SNIPMUNK_TEST_DIR").unwrap_or_else(|_| ".".into());
         let (w, h) = (
             std::env::var("SNIPMUNK_RENDER_W")
                 .ok()
@@ -2434,7 +2461,7 @@ mod render_tests {
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(1080u32),
         );
-        let dir = tempfile::tempdir_in(base).unwrap();
+        let dir = crate::testdir::new();
         generated(dir.path(), w, h, 30, 4);
         let t = std::time::Instant::now();
         let (_, _, f) =
@@ -2491,8 +2518,7 @@ mod render_tests {
     fn trim_aspect_ratio_halo_and_click_effects_are_applied_in_the_export() {
         let _encoder = super::encoder_lock();
         use crate::compose::{Aspect, Fit};
-        let base = std::env::var("SNIPMUNK_TEST_DIR").unwrap_or_else(|_| ".".into());
-        let dir = tempfile::tempdir_in(base).unwrap();
+        let dir = crate::testdir::new();
         let (w, h, fps) = (640u32, 360u32, 15u32);
         generated(dir.path(), w, h, fps, 4);
         let cancel = AtomicBool::new(false);
@@ -2524,18 +2550,86 @@ mod render_tests {
             fx.cursor.halo_color = "#FFFF00".into();
         });
         let halo = export(dir.path(), "halo.mp4", &cancel).unwrap();
-        let (_, _, a) = crate::render::win::read_frames(&plain.file, 4).unwrap();
-        let (_, _, b) = crate::render::win::read_frames(&halo.file, 4).unwrap();
-        let ms = 1000.0 + 3.0 * 1000.0 / fps as f64;
-        let cx = w as f64 / 2.0 + (ms / 500.0).cos() * (w as f64 / 4.0);
-        let cy = h as f64 / 2.0 + (ms / 500.0).sin() * (h as f64 / 4.0);
+        // The two exports are compared where they show the same recorded picture, a few pictures in. (Their fourth frames
+        // need not: see `pictures_shown`.)
+        let (_, _, a) = crate::render::win::read_frames(&plain.file, 10).unwrap();
+        let (_, _, b) = crate::render::win::read_frames(&halo.file, 10).unwrap();
+        let count = (fps * 4) as usize;
+        let in_plain = pictures_shown(&a, w as usize, h as usize, count);
+        let in_halo = pictures_shown(&b, w as usize, h as usize, count);
+        // The trim starts at 1 s, picture 15, give or take two pictures (see `pictures_shown`).
+        assert!(
+            (13..=17).contains(&in_plain[0]) && (13..=17).contains(&in_halo[0]),
+            "the exports start at the trim: {in_plain:?} / {in_halo:?}"
+        );
+        let (ia, ib) = (3..in_plain.len())
+            .find_map(|ia| {
+                in_halo
+                    .iter()
+                    .position(|&p| p == in_plain[ia])
+                    .map(|ib| (ia, ib))
+            })
+            .unwrap_or_else(|| panic!("no picture in both: {in_plain:?} / {in_halo:?}"));
+        let (a, b) = (&a[ia], &b[ib]);
+        // Where the cursor is drawn in that picture. The generated cursor goes round in a circle; the export draws it
+        // for the time of the picture in the file, which with Windows' software encoder (its files reorder pictures) is
+        // about a picture later than the picture's number says. So it is found in the plain export: what differs from the
+        // clean pattern around the circle is the cursor, a white square of 24 pixels held at its top left corner.
+        let path = |ms: f64| {
+            (
+                w as f64 / 2.0 + (ms / 500.0).cos() * (w as f64 / 4.0),
+                h as f64 / 2.0 + (ms / 500.0).sin() * (h as f64 / 4.0),
+            )
+        };
+        let nominal = in_plain[ia] as f64 * 1000.0 / fps as f64;
+        let (px, py) = path(nominal);
+        let clean = test_pattern(w as usize, h as usize, in_plain[ia]);
+        // (the edges of the pattern's white bar are left out: compression blurs them)
+        let bar = (in_plain[ia] * 7) % w as usize;
+        let cursor: Vec<(usize, usize)> = (0..h as usize)
+            .flat_map(|y| (0..w as usize).map(move |x| (x, y)))
+            .filter(|&(x, y)| {
+                let i = (y * w as usize + x) * 4;
+                (x as f64 - px).abs() < 80.0
+                    && (y as f64 - py).abs() < 80.0
+                    && !(bar.saturating_sub(3)..bar + 11).contains(&x)
+                    && (0..3)
+                        .map(|c| (a[i + c] as i32 - clean[i + c] as i32).abs())
+                        .sum::<i32>()
+                        > 150
+            })
+            .collect();
+        let left = cursor
+            .iter()
+            .map(|p| p.0)
+            .min()
+            .expect("the cursor is drawn");
+        let top = cursor.iter().map(|p| p.1).min().unwrap();
+        let right = cursor.iter().map(|p| p.0).max().unwrap();
+        let bottom = cursor.iter().map(|p| p.1).max().unwrap();
+        assert!(
+            right - left < 26 && bottom - top < 26,
+            "one cursor of 24 pixels, not {left},{top} to {right},{bottom}"
+        );
+        let (cx, cy) = (left as f64, top as f64);
+        // ...and it is on its circle where it was within a little over two pictures of that time.
+        let off = (-150..=150)
+            .map(|d| {
+                let (x, y) = path(nominal + f64::from(d));
+                ((x - cx).powi(2) + (y - cy).powi(2)).sqrt()
+            })
+            .fold(f64::MAX, f64::min);
+        assert!(
+            off < 5.0,
+            "the cursor at {cx},{cy} is {off:.1} pixels from where it was around {nominal} ms"
+        );
         let radius = h as f64 * 0.05;
         let (mut near, mut far) = (0, 0);
         for y in 0..h as usize {
             for x in 0..w as usize {
                 let i = (y * w as usize + x) * 4;
                 let d: i32 = (0..3)
-                    .map(|c| (a[3][i + c] as i32 - b[3][i + c] as i32).abs())
+                    .map(|c| (a[i + c] as i32 - b[i + c] as i32).abs())
                     .sum();
                 if d > 60 {
                     let dist = ((x as f64 - cx).powi(2) + (y as f64 - cy).powi(2)).sqrt();
@@ -2547,6 +2641,10 @@ mod render_tests {
                 }
             }
         }
+        eprintln!(
+            "halo at picture {} (frames {ia} and {ib}): {near} pixels changed near the cursor, {far} elsewhere",
+            in_plain[ia]
+        );
         assert!(near > 50, "the halo changed {near} pixels near the cursor");
         assert!(far < near / 10, "and {far} elsewhere (compression noise)");
 
@@ -2599,8 +2697,7 @@ mod render_tests {
     fn the_generated_webcam_is_recorded_across_a_pause_joined_and_drawn_over_the_export() {
         let _encoder = super::encoder_lock();
         use crate::effects::Effects;
-        let base = std::env::var("SNIPMUNK_TEST_DIR").unwrap_or_else(|_| ".".into());
-        let dir = tempfile::tempdir_in(base).unwrap();
+        let dir = crate::testdir::new();
         generated(dir.path(), 640, 360, 15, 3);
         // 1.5 s of webcam, a pause of 1 s, 1.5 s again: 3 s of video, in 3 segments (one of them after the pause).
         let cam = crate::webcam::Webcam::start(
@@ -2795,9 +2892,8 @@ mod render_tests {
     #[test]
     fn the_webcam_the_screen_and_the_sound_stay_in_step() {
         let _encoder = super::encoder_lock();
-        let base = std::env::var("SNIPMUNK_TEST_DIR").unwrap_or_else(|_| ".".into());
         // A camera that is 120 ms late (real cameras are 50 to 150 ms late), pictures dated by the camera's own time.
-        let dir = tempfile::tempdir_in(&base).unwrap();
+        let dir = crate::testdir::new();
         let (cam, screen) = sync_offsets(dir.path(), 120, false);
         eprintln!("SYNC after (camera time): webcam-mic {cam:?} ms, screen-system {screen:?} ms");
         assert!(cam.len() >= 3, "{cam:?}");
@@ -2810,7 +2906,7 @@ mod render_tests {
             );
         }
         // The old way (pictures dated by their arrival) is behind by the delay of the camera.
-        let dir2 = tempfile::tempdir_in(&base).unwrap();
+        let dir2 = crate::testdir::new();
         let (old, _) = sync_offsets(dir2.path(), 120, true);
         eprintln!("SYNC before (arrival time): webcam-mic {old:?} ms");
         assert!(old.iter().all(|d| *d > 80.0), "{old:?}");
@@ -2838,8 +2934,7 @@ mod render_tests {
     fn an_export_with_two_cuts_is_as_long_as_what_is_left_and_the_sound_stays_with_the_picture() {
         let _encoder = super::encoder_lock();
         use crate::effects::{Cut, Effects};
-        let base = std::env::var("SNIPMUNK_TEST_DIR").unwrap_or_else(|_| ".".into());
-        let dir = tempfile::tempdir_in(base).unwrap();
+        let dir = crate::testdir::new();
         generated(dir.path(), 640, 360, 30, 6);
         let cancel = AtomicBool::new(false);
         let whole = export(dir.path(), "whole.mp4", &cancel).unwrap();
@@ -2884,36 +2979,56 @@ mod render_tests {
             "{} frames",
             cut.frames
         );
-        // The pictures after a cut follow on: the right one is shown where it should be (the test pattern moves with time).
-        let (_, _, whole_frames) = crate::render::win::read_frames(&whole.file, 1000).unwrap();
+        // The pictures after a cut follow on: the right ones are shown, and where they should be (the test pattern moves
+        // with time). The cuts take out the pictures 30 to 59 and 105 to 119 of the 180.
         let (_, _, cut_frames) = crate::render::win::read_frames(&cut.file, 1000).unwrap();
-        let diff = |a: &[u8], b: &[u8]| {
-            a.iter()
-                .zip(b)
-                .step_by(97)
-                .map(|(x, y)| (*x as i64 - *y as i64).abs())
-                .sum::<i64>()
-        };
-        // Output picture 29 is the last before the first cut (source 29); output picture 30 is source 60 (2.0 s).
-        let closest = |pic: &Vec<u8>| {
-            (0..whole_frames.len())
-                .min_by_key(|&i| diff(pic, &whole_frames[i]))
-                .unwrap()
-        };
+        let shown = pictures_shown(&cut_frames, 640, 360, 180);
+        assert!(shown.len() >= 130, "{} pictures read back", shown.len());
         assert!(
-            (closest(&cut_frames[29]) as i64 - 29).abs() <= 1,
-            "before the cut"
+            shown.windows(2).all(|p| p[0] <= p[1]),
+            "the pictures run forward: {shown:?}"
         );
+        // Nothing from inside a cut. Two pictures at each edge of a cut are allowed: the software encoder's files time a
+        // picture a frame later than its number says, and the rounding at an edge can take one more.
+        let inside: Vec<usize> = shown
+            .iter()
+            .copied()
+            .filter(|p| (32..=57).contains(p) || (107..=117).contains(p))
+            .collect();
         assert!(
-            (closest(&cut_frames[31]) as i64 - 61).abs() <= 1,
-            "after the first cut: {}",
-            closest(&cut_frames[31])
+            inside.is_empty(),
+            "pictures of a cut: {inside:?} in {shown:?}"
         );
-        assert!(
-            (closest(&cut_frames[100]) as i64 - 145).abs() <= 1,
-            "after both cuts: {}",
-            closest(&cut_frames[100])
-        );
+        // Each of the three kept stretches begins and ends where it should, within two pictures, and is nearly all there.
+        for (from, to) in [(0usize, 29usize), (60, 104), (120, 179)] {
+            let kept: Vec<usize> = shown
+                .iter()
+                .copied()
+                .filter(|p| (from.saturating_sub(2)..=to + 2).contains(p))
+                .collect();
+            let (first, last) = (kept.first().copied(), kept.last().copied());
+            assert!(
+                first.is_some_and(|f| f <= from + 2) && last.is_some_and(|l| l + 2 >= to),
+                "the stretch {from} to {to} runs from {first:?} to {last:?}: {shown:?}"
+            );
+            let mut different = kept.clone();
+            different.dedup();
+            // (at least nine in ten: two may be missing at its start, and a few left out or repeated within it)
+            assert!(
+                different.len() * 10 >= (to - from + 1) * 9,
+                "the stretch {from} to {to} has only {} pictures: {shown:?}",
+                different.len()
+            );
+        }
+        // And in the middle of each stretch, away from the cuts, a frame stands at its time: before the cuts picture k,
+        // after the first 30 later, after both 45 later (up to three frames of play, for pictures left out before it).
+        for (frame, picture) in [(15usize, 15usize), (50, 80), (110, 155)] {
+            assert!(
+                shown[frame].abs_diff(picture) <= 3,
+                "frame {frame} shows picture {}, not {picture}: {shown:?}",
+                shown[frame]
+            );
+        }
         // The estimate of the dialog knows the cuts.
         let info: serde_json::Value =
             serde_json::from_slice(&std::fs::read(dir.path().join("recording.json")).unwrap())
@@ -2934,8 +3049,7 @@ mod render_tests {
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(d)
         };
-        let base = std::env::var("SNIPMUNK_TEST_DIR").unwrap_or_else(|_| ".".into());
-        let dir = tempfile::tempdir_in(base).unwrap();
+        let dir = crate::testdir::new();
         let (w, h, secs) = (
             env("SNIPMUNK_RENDER_W", 3440),
             env("SNIPMUNK_RENDER_H", 1440),
@@ -2990,8 +3104,7 @@ mod render_tests {
     #[test]
     fn a_trim_near_the_end_seeks_instead_of_decoding_from_the_start() {
         let _encoder = super::encoder_lock();
-        let base = std::env::var("SNIPMUNK_TEST_DIR").unwrap_or_else(|_| ".".into());
-        let dir = tempfile::tempdir_in(base).unwrap();
+        let dir = crate::testdir::new();
         generated(dir.path(), 320, 180, 30, 40);
         let cancel = AtomicBool::new(false);
         set_effects(dir.path(), |fx| {
@@ -3034,8 +3147,7 @@ mod render_tests {
     #[test]
     fn click_effects_start_at_the_button_press_and_last_600_ms() {
         let _encoder = super::encoder_lock();
-        let base = std::env::var("SNIPMUNK_TEST_DIR").unwrap_or_else(|_| ".".into());
-        let dir = tempfile::tempdir_in(base).unwrap();
+        let dir = crate::testdir::new();
         generated(dir.path(), 320, 180, 10, 3);
         let layer = crate::render::CursorLayer::load(dir.path(), "cursor.jsonl").unwrap();
         assert!(layer.clicks_at(1400).is_empty(), "before the click");
@@ -3049,8 +3161,7 @@ mod render_tests {
     #[test]
     fn a_gif_is_made_with_the_chosen_rate_and_size_and_its_size_can_be_estimated() {
         let _encoder = super::encoder_lock();
-        let base = std::env::var("SNIPMUNK_TEST_DIR").unwrap_or_else(|_| ".".into());
-        let dir = tempfile::tempdir_in(base).unwrap();
+        let dir = crate::testdir::new();
         generated(dir.path(), 640, 360, 15, 4);
         set_effects(dir.path(), |fx| {
             fx.trim = crate::effects::Trim {
@@ -3129,8 +3240,7 @@ mod render_tests {
     #[test]
     fn a_generated_1080p_recording_renders_with_cursor_and_mixed_sound_faster_than_real_time() {
         let _encoder = super::encoder_lock();
-        let base = std::env::var("SNIPMUNK_TEST_DIR").unwrap_or_else(|_| ".".into());
-        let dir = tempfile::tempdir_in(base).unwrap();
+        let dir = crate::testdir::new();
         let env = |k: &str, d: u32| {
             std::env::var(k)
                 .ok()

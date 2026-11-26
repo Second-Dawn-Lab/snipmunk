@@ -600,7 +600,7 @@ mod store_tests {
 
     #[test]
     fn effects_are_stored_in_the_recording_file_next_to_everything_else() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testdir::new();
         std::fs::write(
             dir.path().join("recording.json"),
             r#"{"width":640,"fps":30}"#,

@@ -593,7 +593,7 @@ mod tests {
 
     #[test]
     fn a_package_is_one_stored_zip_with_a_manifest_and_media_that_can_be_read_by_offset() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testdir::new();
         let path = sample(dir.path());
         let p = open(&path, KIND_RECORDING).unwrap();
         assert_eq!(p.manifest.format, "snipmunk.recording");
@@ -619,7 +619,7 @@ mod tests {
 
     #[test]
     fn a_small_change_appends_a_new_version_and_leaves_the_media_where_it_was() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testdir::new();
         let path = sample(dir.path());
         let before = open(&path, KIND_RECORDING).unwrap().entries["screen.mp4"];
         let size_before = std::fs::metadata(&path).unwrap().len();
@@ -673,7 +673,7 @@ mod tests {
 
     #[test]
     fn unknown_manifest_fields_and_unknown_entries_survive_a_save_and_a_save_as() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testdir::new();
         let path = future_package(dir.path(), 1, 7);
         // A newer minor version opens.
         let p = open(&path, KIND_RECORDING).unwrap();
@@ -711,7 +711,7 @@ mod tests {
 
     #[test]
     fn a_newer_major_version_is_refused_with_a_clear_message() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testdir::new();
         let path = future_package(dir.path(), 2, 0);
         let e = open(&path, KIND_RECORDING).err().unwrap();
         assert_eq!(e.kind(), io::ErrorKind::Unsupported);
@@ -720,7 +720,7 @@ mod tests {
 
     #[test]
     fn a_save_that_was_cut_off_is_undone_at_the_next_open() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testdir::new();
         let path = sample(dir.path());
         // The start of an append: the side file is written and the old central directory is overwritten with garbage.
         let cd_start = {
@@ -751,7 +751,7 @@ mod tests {
 
     #[test]
     fn cuts_and_the_webcam_sync_raise_the_minor_version_when_they_are_saved() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testdir::new();
         let path = sample(dir.path());
         assert_eq!(
             open(&path, KIND_RECORDING).unwrap().manifest.minor,

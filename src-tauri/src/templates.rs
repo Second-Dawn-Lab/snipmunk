@@ -383,8 +383,7 @@ mod tests {
     use super::*;
 
     fn tmp() -> tempfile::TempDir {
-        let base = std::env::var("SNIPMUNK_TEST_DIR").unwrap_or_else(|_| ".".into());
-        tempfile::tempdir_in(base).unwrap()
+        crate::testdir::new()
     }
 
     #[test]

@@ -1217,8 +1217,7 @@ mod tests {
     use super::*;
 
     fn dir() -> tempfile::TempDir {
-        let base = std::env::var("SNIPMUNK_TEST_DIR").unwrap_or_else(|_| ".".into());
-        tempfile::tempdir_in(base).unwrap()
+        crate::testdir::new()
     }
 
     /// A working folder with `n` steps (pictures 200x100 with a red 40x20 area at (10,10), a "window" 100x60 at (50,20)).

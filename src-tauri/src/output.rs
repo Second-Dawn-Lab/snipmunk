@@ -219,7 +219,7 @@ mod tests {
 
     #[test]
     fn an_automatic_save_goes_to_a_folder_per_group_and_never_replaces_a_file() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testdir::new();
         let settings = crate::settings::Settings {
             auto_save_dir: dir.path().to_string_lossy().into_owned(),
             save_naming: "capture".into(),

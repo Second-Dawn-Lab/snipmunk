@@ -13,12 +13,19 @@ use serde::{Deserialize, Serialize};
 use crate::error::{CmdError, CmdResult};
 use crate::package::{self, KIND_RECORDING};
 
-/// The temp folder of the product (`%TEMP%`, or the folder of `SNIPMUNK_TEMP_DIR` for development and tests).
+/// The temp folder of the product (`%TEMP%`, or the folder of `SNIPMUNK_TEMP_DIR` for development).
+#[cfg(not(test))]
 pub fn temp_base() -> PathBuf {
     std::env::var_os("SNIPMUNK_TEMP_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(crate::store::temp_root)
         .join("Snipmunk")
+}
+
+/// In the tests: a test's own folder (see `testdir`).
+#[cfg(test)]
+pub fn temp_base() -> PathBuf {
+    crate::testdir::product_folder("Snipmunk")
 }
 
 /// Where the current recording lives: `%TEMP%\Snipmunk\current`.
@@ -589,7 +596,7 @@ mod tests {
 
     #[test]
     fn template_files_of_a_start_wait_their_turn_and_are_given_once() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testdir::new();
         let file = |name: &str| {
             let path = dir.path().join(name);
             std::fs::write(&path, b"x").unwrap();
@@ -663,8 +670,8 @@ mod tests {
 
     #[test]
     fn a_project_is_served_by_offset_and_edits_are_kept_in_the_cache_until_committed() {
-        let dir = tempfile::tempdir().unwrap();
-        std::env::set_var("SNIPMUNK_TEMP_DIR", dir.path());
+        let _folders = crate::testdir::product_folders();
+        let dir = crate::testdir::new();
         let path = dir.path().join("Demo.snpr");
         package::create(
             &path,

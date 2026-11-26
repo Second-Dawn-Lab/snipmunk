@@ -1625,7 +1625,7 @@ mod tests {
     use super::*;
 
     fn store() -> (tempfile::TempDir, SessionStore) {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testdir::new();
         let store = SessionStore::open(dir.path().join("sessions"));
         (dir, store)
     }
@@ -2217,7 +2217,7 @@ mod tests {
 
     #[test]
     fn sessions_of_earlier_versions_load_with_defaults() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testdir::new();
         let root = dir.path().join("sessions");
         fs::create_dir_all(root.join("sold")).unwrap();
         fs::write(
@@ -2477,7 +2477,7 @@ mod tests {
 
     #[test]
     fn the_first_group_and_new_groups_are_named_in_the_interface_language() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testdir::new();
         let mut store = SessionStore::open_in(dir.path().join("sessions"), "de");
         assert_eq!(store.session().groups[0].name, "Gruppe 1");
         store.create_group(None).unwrap();
@@ -2675,7 +2675,7 @@ mod recording_storage_tests {
 
     #[test]
     fn a_recording_lives_in_group_and_recording_folders_with_names_that_do_not_clash() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testdir::new();
         let (mut s, g) = store(dir.path());
         let name = s
             .session()
@@ -2705,7 +2705,7 @@ mod recording_storage_tests {
 
     #[test]
     fn renaming_or_moving_between_groups_moves_the_folders_and_deleting_deletes_them() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testdir::new();
         let (mut s, g) = store(dir.path());
         let (a, _) = recording(&mut s, &g, "A");
         s.rename_group(&g, "Demo: part 1").unwrap();
@@ -2731,7 +2731,7 @@ mod recording_storage_tests {
 
     #[test]
     fn the_current_recording_is_the_newest_one_in_the_temp_folder_and_a_new_one_replaces_it() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testdir::new();
         let (mut s, g) = store(dir.path());
         assert!(s.current_recording_id().is_none() && !s.current_unsaved());
         let (a, fa) = recording(&mut s, &g, "First");
@@ -2752,7 +2752,7 @@ mod recording_storage_tests {
         assert!(!fa.exists() && fb.exists());
         assert!(s.session().find_capture(&a).is_none());
         // Recordings of an earlier layout (outside the temp folder) are never the current one and never deleted by this.
-        let other = tempfile::tempdir().unwrap();
+        let other = crate::testdir::new();
         s.set_recordings_root(other.path().join("elsewhere"));
         assert!(s.current_recording_id().is_none());
         s.drop_current_except(None).unwrap();
@@ -2764,7 +2764,7 @@ mod recording_storage_tests {
 
     #[test]
     fn several_screenshot_groups_become_one_list_sorted_by_time_and_recordings_are_left_alone() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testdir::new();
         let (mut s, rec_group) = store(dir.path());
         let png = {
             let mut b = Vec::new();
@@ -2811,7 +2811,7 @@ mod recording_storage_tests {
 
     #[test]
     fn show_in_explorer_finds_the_real_path_after_renames_moves_and_a_new_recordings_folder() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testdir::new();
         let (mut s, g) = store(dir.path());
         let (a, _) = recording(&mut s, &g, "Recording 2026-11-20 13-47");
         let at = |s: &SessionStore| s.explorer_path(&a).unwrap();
@@ -2838,7 +2838,7 @@ mod recording_storage_tests {
 
     #[test]
     fn recordings_survive_a_new_session_the_retention_setting_and_clear_on_exit() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testdir::new();
         let (mut s, g) = store(dir.path());
         let (a, folder) = recording(&mut s, &g, "Keep me");
         let old_session = s.session().id.clone();
@@ -2875,7 +2875,7 @@ mod recording_storage_tests {
     #[test]
     fn recordings_of_an_earlier_version_move_into_the_recordings_folder_and_missing_ones_are_dropped(
     ) {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testdir::new();
         let (mut s, g) = store(dir.path());
         let png = {
             let mut bytes = Vec::new();
@@ -2905,7 +2905,7 @@ mod recording_storage_tests {
 
     #[test]
     fn changing_the_recordings_folder_leaves_old_recordings_until_they_are_moved() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testdir::new();
         let (mut s, g) = store(dir.path());
         let (a, old) = recording(&mut s, &g, "A");
         s.set_recordings_root(dir.path().join("New"));

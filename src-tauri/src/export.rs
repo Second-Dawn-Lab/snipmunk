@@ -17,8 +17,15 @@ use crate::error::{CmdError, CmdResult};
 /// The kinds of staged files: one folder each.
 const KINDS: [&str; 6] = ["copy", "drag", "paint", "print", "share", "save"];
 
+#[cfg(not(test))]
 pub fn temp_root() -> PathBuf {
     crate::store::app_dir().join("temp")
+}
+
+/// In the tests: a test's own folder (see `testdir`).
+#[cfg(test)]
+pub fn temp_root() -> PathBuf {
+    crate::testdir::product_folder("temp")
 }
 
 /// Delete all staged files (at quit, and at the start of the app for what a crash left).
@@ -971,7 +978,7 @@ mod tests {
 
     #[test]
     fn a_taken_name_gets_a_number_and_nothing_is_overwritten() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testdir::new();
         fs::write(dir.path().join("a.png"), b"1").unwrap();
         assert_eq!(free_path(dir.path(), "a.png"), dir.path().join("a (2).png"));
         let (p1, _f1) = create_unique(dir.path(), "a.png").unwrap();
@@ -1114,7 +1121,8 @@ mod tests {
 
     #[test]
     fn a_zip_holds_every_file_and_a_second_zip_gets_a_new_name() {
-        let dir = tempfile::tempdir().unwrap();
+        let _folders = crate::testdir::product_folders();
+        let dir = crate::testdir::new();
         let root = temp_root().join("save");
         fs::create_dir_all(&root).unwrap();
         let a = root.join("zt_a.png");
@@ -1135,8 +1143,6 @@ mod tests {
         let mut s = String::new();
         std::io::Read::read_to_string(&mut archive.by_name("two.png").unwrap(), &mut s).unwrap();
         assert_eq!(s, "BBBBBB");
-        let _ = fs::remove_file(a);
-        let _ = fs::remove_file(b);
     }
 
     #[test]
@@ -1153,6 +1159,7 @@ mod tests {
 
     #[test]
     fn only_staged_files_can_be_used() {
+        let _folders = crate::testdir::product_folders();
         assert!(staged("C:\\Windows\\win.ini").is_err());
         assert!(staged(
             &temp_root()
@@ -1165,7 +1172,8 @@ mod tests {
 
     #[test]
     fn saving_never_replaces_an_existing_file() {
-        let dir = tempfile::tempdir().unwrap();
+        let _folders = crate::testdir::product_folders();
+        let dir = crate::testdir::new();
         let root = temp_root().join("save");
         fs::create_dir_all(&root).unwrap();
         let a = root.join("st_a.png");
@@ -1180,6 +1188,5 @@ mod tests {
         assert!(out[0].ends_with("x (2).png"));
         assert_eq!(fs::read(dir.path().join("x.png")).unwrap(), b"OLD");
         assert_eq!(fs::read(&out[0]).unwrap(), b"NEW");
-        let _ = fs::remove_file(a);
     }
 }

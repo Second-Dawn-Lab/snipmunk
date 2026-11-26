@@ -309,7 +309,7 @@ mod tests {
 
     #[test]
     fn quitting_removes_the_caches_and_keeps_what_the_page_stored() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testdir::new();
         let profile = dir.path().join("EBWebView");
         let kept = [
             "Default/Local Storage/leveldb",

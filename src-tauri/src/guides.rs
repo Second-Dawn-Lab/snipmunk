@@ -478,8 +478,7 @@ mod tests {
 
     fn with_root<R>(f: impl FnOnce() -> R) -> R {
         let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let base = std::env::var("SNIPMUNK_TEST_DIR").unwrap_or_else(|_| ".".into());
-        let dir = tempfile::tempdir_in(base).unwrap();
+        let dir = crate::testdir::new();
         // SAFETY: the tests that read the variable hold LOCK.
         unsafe { std::env::set_var("SNIPMUNK_GUIDES_DIR", dir.path()) };
         let r = f();

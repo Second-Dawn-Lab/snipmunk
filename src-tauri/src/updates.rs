@@ -420,7 +420,7 @@ mod tests {
 
     #[test]
     fn the_start_after_an_update_is_known_once() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testdir::new();
         assert!(!started_by_update_in(dir.path()));
         std::fs::write(marker_in(dir.path()), b"1").unwrap();
         assert!(started_by_update_in(dir.path()));

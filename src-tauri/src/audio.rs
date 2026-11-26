@@ -902,7 +902,7 @@ mod tests {
 
     #[test]
     fn a_wav_file_has_the_right_header_and_length() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testdir::new();
         let (mut w, _) = writer(dir.path());
         for i in 0..50 {
             w.push(&tone(48_000, 2, i * 960, 960, 440.0), i as i64 * TICKS / 50);
@@ -917,7 +917,7 @@ mod tests {
 
     #[test]
     fn silence_is_added_when_the_device_sends_nothing_and_a_pause_writes_nothing() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testdir::new();
         let (mut w, _) = writer(dir.path());
         // A loopback device that plays nothing: only ticks. After 3 s the track is 3 s long (within the 100 ms wait).
         for ms in (0..=3000).step_by(10) {
@@ -940,7 +940,7 @@ mod tests {
         // The device clock is 100 ppm fast and 100 ppm slow in the two runs; 10 minutes of generated tone. The track must end
         // within one video frame (33 ms) of the recorded time, and the correction (silence or drop) is what absorbed the drift.
         for ppm in [100i64, -100] {
-            let dir = tempfile::tempdir().unwrap();
+            let dir = crate::testdir::new();
             let (mut w, _) = writer(dir.path());
             let rate = 48_000u64;
             let packet = 480usize; // 10 ms
@@ -971,7 +971,7 @@ mod tests {
 
     #[test]
     fn a_muted_track_keeps_its_length_but_has_no_sound_and_a_cut_off_file_is_repaired() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testdir::new();
         let (mut w, on) = writer(dir.path());
         on.store(false, Ordering::Relaxed);
         for i in 0..100 {

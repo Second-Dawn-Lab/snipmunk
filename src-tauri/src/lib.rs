@@ -41,6 +41,8 @@ mod steptext;
 mod stitch;
 mod store;
 mod templates;
+#[cfg(test)]
+mod testdir;
 mod thumbs;
 mod titlebar;
 mod tray;

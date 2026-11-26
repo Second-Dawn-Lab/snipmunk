@@ -490,8 +490,7 @@ mod tests {
 
     #[test]
     fn only_export_files_are_written() {
-        let base = std::env::var("SNIPMUNK_TEST_DIR").unwrap_or_else(|_| ".".into());
-        let d = tempfile::tempdir_in(base).unwrap();
+        let d = crate::testdir::new();
         let d = std::fs::canonicalize(d.path()).unwrap();
         write_file(&d.join("a/guide.html"), b"x").unwrap();
         assert_eq!(std::fs::read(d.join("a/guide.html")).unwrap(), b"x");

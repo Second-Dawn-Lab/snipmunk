@@ -1076,7 +1076,7 @@ mod tests {
 
     #[test]
     fn a_result_is_written_whole_and_read_back() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testdir::new();
         let path = dir.path().join("ocr").join("c1.json");
         let result = OcrResult {
             key: "plain|auto".into(),

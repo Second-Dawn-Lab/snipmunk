@@ -1503,8 +1503,7 @@ mod tests {
 
     #[test]
     fn cut_sound_leaves_the_cuts_out_keeps_the_rest_in_place_and_fades_the_joins() {
-        let base = std::env::var("SNIPMUNK_TEST_DIR").unwrap_or_else(|_| ".".into());
-        let dir = tempfile::tempdir_in(base).unwrap();
+        let dir = crate::testdir::new();
         let path = wav(dir.path(), "a.wav", 48_000, 2, 4, 1000.0);
         let all = {
             let mut t = vec![TrackReader::open(&path, 1.0).unwrap()];
@@ -1611,7 +1610,7 @@ mod tests {
 
     #[test]
     fn tracks_of_other_rates_and_channels_are_mixed_as_48k_stereo() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testdir::new();
         let a = wav(dir.path(), "system.wav", 44_100, 2, 2, 440.0);
         let b = wav(dir.path(), "mic.wav", 16_000, 1, 2, 880.0);
         let mut tracks = vec![
@@ -1639,7 +1638,7 @@ mod tests {
 
     #[test]
     fn a_volume_of_zero_silences_a_track() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testdir::new();
         let a = wav(dir.path(), "system.wav", 48_000, 2, 1, 440.0);
         let mut t = vec![TrackReader::open(&a, 0.0).unwrap()];
         assert!(mix_next(&mut t, 4800).iter().all(|b| *b == 0));
@@ -1647,7 +1646,7 @@ mod tests {
 
     #[test]
     fn the_file_is_made_again_only_when_something_it_is_made_from_changes() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testdir::new();
         std::fs::write(dir.path().join("screen.mp4"), b"v1").unwrap();
         let n = "Recording 2026-11-20 13-47.mp4";
         let key = cache_key(dir.path(), n, "", 1.0, 1.0);
@@ -1702,8 +1701,8 @@ mod tests {
     #[test]
     fn every_recording_has_its_own_render_and_a_copied_folder_never_reuses_another_ones() {
         // Same inputs in two folders: the keys differ, and a render file of A is not fresh for B.
-        let a = tempfile::tempdir().unwrap();
-        let b = tempfile::tempdir().unwrap();
+        let a = crate::testdir::new();
+        let b = crate::testdir::new();
         for d in [&a, &b] {
             std::fs::write(d.path().join("screen.mp4"), b"same").unwrap();
         }
@@ -1726,7 +1725,7 @@ mod tests {
 
     #[test]
     fn the_key_follows_the_effects_and_the_export_settings() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testdir::new();
         let settings = crate::effects::ExportSettings::default();
         std::fs::write(
             dir.path().join("recording.json"),

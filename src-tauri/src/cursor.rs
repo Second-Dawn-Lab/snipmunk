@@ -611,7 +611,7 @@ mod tests {
 
     #[test]
     fn a_generated_movement_at_120_readings_a_second_makes_a_track_that_reads_back() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testdir::new();
         let path = dir.path().join("cursor.jsonl");
         let mut s = Sampler::new(AREA, 500);
         let mut a = Appender::create(&path, &s.header(30)).unwrap();
