@@ -248,16 +248,6 @@ pub(crate) fn change_session(
     Ok(session)
 }
 
-/// The folder the recordings are kept in (the setting, or the Videos folder + Snipmunk), and how many recordings are not in it.
-#[tauri::command]
-pub fn recordings_info(state: State<'_, AppState>) -> Value {
-    let store = state.sessions.lock().unwrap();
-    serde_json::json!({
-        "folder": store.recordings_root().to_string_lossy(),
-        "toMove": store.recordings_to_move().len(),
-    })
-}
-
 /// The default folders of recordings and of automatically saved screenshots (Videos / Pictures + Snipmunk).
 #[tauri::command]
 pub fn default_folders() -> Value {
@@ -295,31 +285,6 @@ pub async fn refresh_recordings(app: AppHandle, state: State<'_, AppState>) -> C
         let _ = app.emit("session-changed", &session);
     }
     Ok(session)
-}
-
-/// Move the existing recordings into the recordings folder of the setting, one after the other (the lock is held for one
-/// recording at a time), telling the page the progress (`recordings-move`: done, total).
-#[tauri::command]
-pub async fn move_recordings(app: AppHandle, state: State<'_, AppState>) -> CmdResult<usize> {
-    let ids = state.sessions.lock().unwrap().recordings_to_move();
-    let total = ids.len();
-    let mut moved = 0;
-    for (i, id) in ids.iter().enumerate() {
-        let _ = app.emit(
-            "recordings-move",
-            serde_json::json!({ "done": i, "total": total }),
-        );
-        if state.sessions.lock().unwrap().relocate_capture(id) {
-            moved += 1;
-        }
-    }
-    let _ = app.emit(
-        "recordings-move",
-        serde_json::json!({ "done": total, "total": total }),
-    );
-    let session = state.sessions.lock().unwrap().session().clone();
-    let _ = app.emit("session-changed", &session);
-    Ok(moved)
 }
 
 /// The page tells which group tab is shown, so a capture lands there.
@@ -397,19 +362,6 @@ pub fn reorder_captures(
 ) -> CmdResult<Session> {
     change_session(&app, &state, |s| {
         s.reorder_captures(&group_id, &capture_ids)
-    })
-}
-
-#[tauri::command]
-pub fn move_capture_to_group(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    capture_id: String,
-    group_id: String,
-    index: Option<usize>,
-) -> CmdResult<Session> {
-    change_session(&app, &state, |s| {
-        s.move_capture_to_group(&capture_id, &group_id, index)
     })
 }
 

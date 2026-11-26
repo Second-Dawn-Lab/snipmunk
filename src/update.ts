@@ -45,6 +45,13 @@ export function updateMessage(phase: UpdatePhase): { key: Key; vars?: Record<str
   }
 }
 
+/** The words of the question about unsaved work: before Quit, or before the restart that installs an update. */
+export function quitWording(update: boolean): { title: Key; body: Key; cancel: Key; discard: Key } {
+  return update
+    ? { title: "update.askTitle", body: "update.askBody", cancel: "update.later", discard: "update.askDont" }
+    : { title: "proj.quitTitle", body: "proj.quitBody", cancel: "session.cancel", discard: "proj.quitDont" };
+}
+
 /** What "Later" puts away: this phase of this version. The notice comes back when something else happens. */
 export const dismissKey = (phase: UpdatePhase): string => `${phase.kind}:${"version" in phase ? phase.version : ""}`;
 

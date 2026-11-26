@@ -181,10 +181,6 @@ export function revisionsOf(captureId: string): ImageRevisions {
   return r;
 }
 
-export function forgetHistory(captureId: string): void {
-  histories.delete(captureId);
-}
-
 // --- saving ------------------------------------------------------------------------------------------------------------------
 
 let queue: Promise<unknown> = Promise.resolve();
@@ -203,9 +199,4 @@ export function saveAnnotations(captureId: string, doc: AnnotationDoc, onError: 
   });
   queue = job;
   return job;
-}
-
-/** Resolves when every save asked for so far is done (used before the window closes a capture's editor). */
-export function savesDone(): Promise<unknown> {
-  return queue;
 }

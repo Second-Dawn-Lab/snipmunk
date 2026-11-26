@@ -4,7 +4,6 @@ import {
   draggedIds,
   exceedsThreshold,
   hitTest,
-  insertIndexWithout,
   isNoopMove,
   moveIds,
   moveOne,
@@ -58,14 +57,6 @@ describe("reordering", () => {
     expect(isNoopMove(order, ["b", "c"], 1)).toBe(true);
     expect(isNoopMove(order, ["b"], 3)).toBe(false);
     expect(isNoopMove(order, [], 3)).toBe(true);
-  });
-
-  it("gives the backend the position in the list without the moved cards", () => {
-    expect(insertIndexWithout(order, ["a", "b"], 4)).toBe(2);
-    expect(insertIndexWithout(order, ["d"], 1)).toBe(1);
-    expect(insertIndexWithout(order, ["a"], 5)).toBe(4);
-    // Cards of another group are not in this list: nothing is removed from before the slot.
-    expect(insertIndexWithout(order, ["x"], 3)).toBe(3);
   });
 
   it("moves one tab", () => {

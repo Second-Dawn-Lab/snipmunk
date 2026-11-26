@@ -3,9 +3,10 @@ import { ipc } from "./ipc";
 
 let cached: Promise<boolean> | null = null;
 
-/** Is the parked scrolling screenshot switched on? Asked once; false outside Tauri and when the call fails. */
+/** Is the parked scrolling screenshot switched on? Asked once; false in a release build (which has no such command),
+ * outside Tauri and when the call fails. */
 export function experimentalScroll(): Promise<boolean> {
-  cached ??= ipc.experimentalScroll().catch(() => false);
+  cached ??= import.meta.env.DEV ? ipc.experimentalScroll().catch(() => false) : Promise.resolve(false);
   return cached;
 }
 

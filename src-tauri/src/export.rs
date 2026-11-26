@@ -479,51 +479,6 @@ fn set_clipboard(
         .map_err(|e| e.to_string())
 }
 
-/// The formats now on the clipboard, by name (for the tests of this feature).
-#[tauri::command]
-pub fn clipboard_formats() -> Vec<String> {
-    #[cfg(windows)]
-    {
-        use windows::Win32::System::DataExchange::{
-            CloseClipboard, EnumClipboardFormats, GetClipboardFormatNameW, OpenClipboard,
-        };
-        let mut out = Vec::new();
-        unsafe {
-            if OpenClipboard(None).is_err() {
-                return out;
-            }
-            let mut f = 0u32;
-            loop {
-                f = EnumClipboardFormats(f);
-                if f == 0 {
-                    break;
-                }
-                let mut buf = [0u16; 128];
-                let n = GetClipboardFormatNameW(f, &mut buf);
-                out.push(if n > 0 {
-                    String::from_utf16_lossy(&buf[..n as usize])
-                } else {
-                    match f {
-                        1 => "CF_TEXT".into(),
-                        2 => "CF_BITMAP".into(),
-                        8 => "CF_DIB".into(),
-                        15 => "CF_HDROP".into(),
-                        17 => "CF_DIBV5".into(),
-                        13 => "CF_UNICODETEXT".into(),
-                        other => other.to_string(),
-                    }
-                });
-            }
-            let _ = CloseClipboard();
-        }
-        out
-    }
-    #[cfg(not(windows))]
-    {
-        Vec::new()
-    }
-}
-
 // --- Paint, folders, share, drag, pickers ------------------------------------------------------
 
 /// Open a staged picture in Paint; without Paint, in the default image editor (or viewer).

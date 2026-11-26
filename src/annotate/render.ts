@@ -45,19 +45,6 @@ export function textLines(text: string): string[] {
 /** Space around the text when it has a solid label. */
 export const labelPadding = (fontSize: number) => Math.round(fontSize * 0.3);
 
-/** The size of the text box for a text: the widest line and the lines, plus the padding of the label. */
-export function measureTextBox(
-  measure: (line: string) => number,
-  text: string,
-  fontSize: number,
-  background: boolean,
-): { w: number; h: number } {
-  const lines = textLines(text);
-  const pad = background ? labelPadding(fontSize) : 0;
-  const w = Math.max(...lines.map((l) => measure(l)), fontSize * 0.5);
-  return { w: Math.ceil(w + 2 * pad), h: Math.ceil(lines.length * fontSize * LINE_HEIGHT + 2 * pad) };
-}
-
 function luminance(hex: string): number {
   const n = parseInt(hex.slice(1), 16);
   const lin = (c: number) => {

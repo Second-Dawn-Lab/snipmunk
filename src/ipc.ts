@@ -9,6 +9,8 @@ import type { Effects } from "./recording/effects";
 import type { Settings } from "./settings/defaults";
 
 export const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+// Every use of the mock below is written `import.meta.env.DEV && !isTauri`: a production build has no use of it left
+// and does not carry it (the program only ever runs inside Tauri).
 
 // --- the session: groups of captures ---------------------------------------
 
@@ -89,7 +91,7 @@ export interface CmdError {
 
 /** The URL the web view loads a capture's image from (`snipmunk-img` scheme, served by Rust). */
 export function imageUrl(session: Session, capture: Capture): string {
-  if (!isTauri) return mockImageUrl(capture);
+  if (import.meta.env.DEV && !isTauri) return mockImageUrl(capture);
   return convertFileSrc(`${session.id}/${capture.file}`, "snipmunk-img");
 }
 
@@ -98,7 +100,7 @@ export function thumbUrl(
   session: { id: string },
   capture: { file: string; thumbnail: string | null; thumbSize?: number; thumbRev?: number },
 ): string {
-  if (!isTauri) return mockImageUrl(capture as Capture);
+  if (import.meta.env.DEV && !isTauri) return mockImageUrl(capture as Capture);
   // The size in the address makes the picture load again when the thumbnail is upgraded.
   const url = convertFileSrc(`${session.id}/${capture.thumbnail ?? capture.file}`, "snipmunk-img");
   return capture.thumbnail ? `${url}?v=${capture.thumbSize ?? 0}.${capture.thumbRev ?? 0}` : url;
@@ -170,17 +172,6 @@ export function recordingUrl(session: Session, capture: Capture, name: string): 
   // An open project (a .snpr file): its media is read from the file itself.
   if (capture.id.startsWith("proj:")) return convertFileSrc(`${session.id}/proj/${capture.id.slice(5)}/${name}`, "snipmunk-img");
   return convertFileSrc(`${session.id}/rec/${capture.id}/${name}`, "snipmunk-img");
-}
-
-/** A guide in the list of Documents mode. */
-export interface GuideSummary {
-  id: string;
-  title: string;
-  created: number;
-  state: string;
-  steps: number;
-  firstImage: string | null;
-  firstSize: [number, number] | null;
 }
 
 /** One step of a guide (rectangles are [x, y, w, h] and points [x, y] in the pixels of the step picture). */
@@ -293,11 +284,11 @@ export function toastImageUrl(info: ToastInfo): string {
 // --- plumbing -----------------------------------------------------------------
 
 async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
-  return isTauri ? await invoke<T>(cmd, args) : await mockInvoke<T>(cmd, args);
+  return import.meta.env.DEV && !isTauri ? await mockInvoke<T>(cmd, args) : await invoke<T>(cmd, args);
 }
 
 function on<T>(event: string, handler: (payload: T) => void): Promise<() => void> {
-  return isTauri ? listen<T>(event, (e) => handler(e.payload)) : mockListen(event, handler);
+  return import.meta.env.DEV && !isTauri ? mockListen(event, handler) : listen<T>(event, (e) => handler(e.payload));
 }
 
 /** Where the search for a newer version stands (`Phase` in updates.rs). */
@@ -339,8 +330,6 @@ export const ipc = {
   quitApp: () => call<void>("quit_app"),
   /** The question of Quit was cancelled (a pending restart is forgotten). */
   cancelQuit: () => call<void>("cancel_quit"),
-  /** Restart (for an update); asks about unsaved work first, like Quit. */
-  restartApp: () => call<void>("restart_app"),
   // updates (src-tauri/src/updates.rs)
   updateState: () => call<UpdateView>("update_state"),
   updateCheck: () => call<UpdateView>("update_check"),
@@ -365,12 +354,8 @@ export const ipc = {
   onRecCountdown: (cb: (n: number) => void) => on<number>("rec-countdown", cb),
   recordingState: () => call<RecState>("recording_state"),
   onRecordingState: (cb: (s: RecState) => void) => on<RecState>("recording-state", cb),
-  recordingsInfo: () => call<{ folder: string; toMove: number }>("recordings_info"),
   defaultFolders: () => call<{ recordings: string; pictures: string; guides: string }>("default_folders"),
   refreshRecordings: () => call<Session>("refresh_recordings"),
-  moveRecordings: () => call<number>("move_recordings"),
-  onRecordingsMove: (cb: (p: { done: number; total: number }) => void) => on<{ done: number; total: number }>("recordings-move", cb),
-  /** Render a recording to "<recording name>.mp4" (the cursor drawn, the sound mixed); the same file again while nothing changed. */
   /** Change how a recording looks (cursor, click effects, webcam overlay, trim); written to its recording.json before this returns. */
   setEffects: (captureId: string, effects: Effects) => call<Effects>("set_effects", { captureId, effects }),
   /** Export with the settings of the export dialog into a folder (a taken name gets " (2)"); progress comes as render-progress. */
@@ -384,6 +369,7 @@ export const ipc = {
   /** The size of the picture, the length, the frame rate and the size of the file an export will have. */
   estimateExport: (captureId: string, settings: ExportSettings) =>
     call<{ width: number; height: number; fps: number; durationMs: number; bytes: number }>("estimate_export", { captureId, settings }),
+  /** Render a recording to "<recording name>.mp4" (the cursor drawn, the sound mixed); the same file again while nothing changed. */
   renderRecording: (captureId: string) => call<{ captureId: string; file: string; thumb: string; made: boolean; seconds: number }>("render_recording", { captureId }),
   cancelRender: () => call<void>("cancel_render"),
   onRenderProgress: (cb: (p: { captureId: string; progress: number }) => void) => on<{ captureId: string; progress: number }>("render-progress", cb),
@@ -415,7 +401,6 @@ export const ipc = {
   docRead: () => call<DocAll>("doc_read"),
   docWrite: (document: unknown) => call<void>("doc_write", { document }),
   docClose: () => call<void>("doc_close"),
-  docNew: (title?: string) => call<DocAll>("doc_new", { title: title ?? null }),
   docOpen: (path: string) => call<DocAll>("doc_open", { path }),
   docSave: (path: string | null, asNew: boolean, document: unknown) => call<{ path: string; how: string; ms: number }>("doc_save", { path, asNew, document }),
   docRecent: () => call<DocRecent[]>("doc_recent"),
@@ -452,15 +437,7 @@ export const ipc = {
   pickGuideSave: (start: string | null, name: string) => call<string | null>("pick_guide_save", { start, name }),
   takePendingGuide: () => call<string | null>("take_pending_guide"),
   onOpenGuide: (cb: (path: string) => void) => on<string>("open-guide", cb),
-  guidesList: () => call<GuideSummary[]>("guides_list"),
-  guideGet: (id: string) => call<{ id: string; title: string } | null>("guide_get", { id }),
-  guideSteps: (id: string) => call<GuideStep[]>("guide_steps", { id }),
-  guideRename: (id: string, title: string) => call<string>("guide_rename", { id, title }),
-  guideDelete: (id: string) => call<void>("guide_delete", { id }),
-  guideStepDelete: (id: string, n: number, restore: boolean) => call<void>("guide_step_delete", { id, n, restore }),
-  guidesUnfinished: () => call<[string, string, number][]>("guides_unfinished"),
   guideRecover: (id: string) => call<void>("guide_recover", { id }),
-  guideText: (id: string) => call<string>("guide_text", { id }),
   guideBarFit: (width: number, height: number) => call<void>("guide_bar_fit", { width, height }),
   guideStart: (area?: string) => call<string>("guide_start", { area: area ?? null }),
   guidePause: () => call<void>("guide_pause"),
@@ -492,7 +469,6 @@ export const ipc = {
   countdownValue: () => call<number | null>("countdown_value"),
   toastInfo: () => call<ToastInfo | null>("toast_info"),
   toastOpen: () => call<void>("toast_open"),
-  toastClose: () => call<void>("toast_close"),
   /** The main window was minimized or put away to the tray (false), or is back (true). */
   onMainVisible: (cb: (visible: boolean) => void) => on<boolean>("main-visible", cb),
 
@@ -521,7 +497,6 @@ export const ipc = {
   exportStage: (kind: ExportKind, name: string, data: Blob, convert?: "bmp") => stageFile(kind, name, data, convert),
   exportClipboard: (files: string[], html: string | null, image: string | null) =>
     call<boolean>("export_clipboard", { files, html, image }),
-  clipboardFormats: () => call<string[]>("clipboard_formats"),
   exportSave: (files: string[], names: string[], folder: string) => call<string[]>("export_save", { files, names, folder }),
   exportZip: (files: string[], names: string[], folder: string, zipName: string) =>
     call<string>("export_zip", { files, names, folder, zipName }),
@@ -546,9 +521,9 @@ export const ipc = {
   pickProjectSave: (start: string | undefined, name: string) => call<string | null>("pick_project_save", { start: start ?? null, name }),
   pickProjectOpen: (start?: string) => call<string | null>("pick_project_open", { start: start ?? null }),
   onOpenProject: (cb: (path: string) => void) => on<string>("open-project", cb),
-  /** Quit wants an answer: what is running or unsaved. */
-  onQuitRequested: (cb: (what: { recording: boolean; scrolling: boolean; unsaved: boolean }) => void) =>
-    on<{ recording: boolean; scrolling: boolean; unsaved: boolean }>("quit-requested", cb),
+  /** Quit wants an answer: what is running or unsaved, and whether it is the restart that installs an update. */
+  onQuitRequested: (cb: (what: { recording: boolean; scrolling: boolean; unsaved: boolean; update: boolean }) => void) =>
+    on<{ recording: boolean; scrolling: boolean; unsaved: boolean; update: boolean }>("quit-requested", cb),
   onSaveFirst: (cb: (what: { current: boolean; project: boolean }) => void) => on<{ current: boolean; project: boolean }>("recording-save-first", cb),
   /** Open a file with the program Windows has for it. */
   openFile: (path: string) => call<void>("open_file", { path }),
@@ -579,19 +554,15 @@ export const ipc = {
     call<{ session: Session; ids: string[] }>("duplicate_captures", { captureIds, suffix }),
   /** Add a dropped image to a group. Fails with code "unsupported" when the file is not a supported image. */
   importImage: (groupId: string, file: File) => importImage(groupId, file),
-  /** Development builds only: a new session with generated captures. */
-  debugSeedSession: (count: number, groups = 1) => call<Session>("debug_seed_session", { count, groups }),
   renameCapture: (captureId: string, name: string) =>
     call<Session>("rename_capture", { captureId, name }),
   deleteCapture: (captureId: string) => call<Session>("delete_capture", { captureId }),
   reorderCaptures: (groupId: string, captureIds: string[]) =>
     call<Session>("reorder_captures", { groupId, captureIds }),
-  moveCaptureToGroup: (captureId: string, groupId: string, index?: number) =>
-    call<Session>("move_capture_to_group", { captureId, groupId, index: index ?? null }),
 };
 
 async function importImage(groupId: string, file: File): Promise<Session> {
-  if (!isTauri) return mockInvoke<Session>("import_image", { groupId, name: file.name });
+  if (import.meta.env.DEV && !isTauri) return mockInvoke<Session>("import_image", { groupId, name: file.name });
   // The bytes go as the raw request body (no base64); the group and the file name travel in headers.
   return invoke<Session>("import_image", new Uint8Array(await file.arrayBuffer()), {
     headers: { "x-group-id": encodeURIComponent(groupId), "x-file-name": encodeURIComponent(file.name) },
@@ -620,7 +591,7 @@ export interface OcrStatus {
 }
 
 async function replaceImage(captureId: string, png: Blob): Promise<Session> {
-  if (!isTauri) return mockInvoke<Session>("set_capture_thumbnail", { captureId });
+  if (import.meta.env.DEV && !isTauri) return mockInvoke<Session>("set_capture_thumbnail", { captureId });
   return invoke<Session>("replace_capture_image", new Uint8Array(await png.arrayBuffer()), {
     headers: { "x-capture-id": encodeURIComponent(captureId) },
   });
@@ -634,7 +605,7 @@ async function recognize(captureId: string, key: string, png: Blob): Promise<Ocr
 }
 
 async function setThumbnail(captureId: string, png: Blob): Promise<Session> {
-  if (!isTauri) return mockInvoke<Session>("set_capture_thumbnail", { captureId });
+  if (import.meta.env.DEV && !isTauri) return mockInvoke<Session>("set_capture_thumbnail", { captureId });
   return invoke<Session>("set_capture_thumbnail", new Uint8Array(await png.arrayBuffer()), {
     headers: { "x-capture-id": encodeURIComponent(captureId) },
   });

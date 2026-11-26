@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { GuideStep } from "../ipc";
-import { History, createDocument, cropRect, duplicateBlock, insertBlock, markerColor, moveBlock, moveBlockTo, moveBlocks, removeBlocks, stepNumbers, syncSteps, updateBlock, viewRect, type ContentBlock, type GuideDoc, type StepBlock } from "./model";
+import { History, createDocument, cropRect, duplicateBlock, insertBlock, markerColor, moveBlockTo, moveBlocks, removeBlocks, stepNumbers, syncSteps, updateBlock, viewRect, type ContentBlock, type GuideDoc, type StepBlock } from "./model";
 
 const defaults = { marker: { left: "#f00", right: "#00f", shape: "circle" as const, size: "medium" as const }, badge: "circle" as const, picture: "window" as const, keepFull: false, zoomDefault: false };
 const step = (n: number, extra: Partial<GuideStep> = {}): GuideStep => ({
@@ -39,8 +39,6 @@ describe("guide blocks", () => {
     expect(ids(withText)).toEqual([a, "t1", b, c]);
     expect(ids(d)).toEqual([a, b, c]);
     expect(ids(removeBlocks(withText, new Set([a, c])))).toEqual(["t1", b]);
-    expect(ids(moveBlock(d, a, 1))).toEqual([b, a, c]);
-    expect(moveBlock(d, a, -1)).toBe(d);
     expect(ids(moveBlockTo(d, a, 3))).toEqual([b, c, a]);
     expect(ids(moveBlockTo(d, c, 0))).toEqual([c, a, b]);
     expect(ids(moveBlocks(d, new Set([b, c]), -1))).toEqual([b, c, a]);

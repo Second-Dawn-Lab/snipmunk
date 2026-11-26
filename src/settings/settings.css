@@ -199,4 +199,3 @@
 .foldersetting__path { min-width: 0; max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; opacity: .8; }
 /* In a dialog row the path gives way and the button stays beside it (the full path is the tooltip). */
 .exportdlg__row .foldersetting { flex-wrap: nowrap; }
-.foldersetting__move { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 12px; font-size: 13px; }

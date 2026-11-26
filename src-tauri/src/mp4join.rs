@@ -46,8 +46,21 @@ pub fn readable(segments: &[PathBuf]) -> Vec<PathBuf> {
         .collect()
 }
 
+/// The finest clock of a joined file (ticks a second); the video encoder uses 30,000 or 60,000.
+const MAX_TIMESCALE: u64 = 90_000;
+
+/// `value` ticks of a clock with `from` ticks a second, in ticks of `to`, to the nearest one.
+fn rescale(value: i64, from: u64, to: u64) -> i64 {
+    let (value, from, to) = (value as i128, from.max(1) as i128, to as i128);
+    ((value * to * 2 + from).div_euclid(from * 2)) as i64
+}
+
 /// Join the segments (in this order) into `out`. All segments must have the same picture size and parameter sets (they are made
 /// by encoders with the same settings). A single segment is copied as it is.
+///
+/// The joined file keeps the clock of the first segment, so every picture stays exactly where it was: the cursor, the clicks and
+/// the sound are placed by the time of a picture. (Whole milliseconds are too coarse: a picture at 30 a second would lose a third
+/// of one, a second of video 10 ms, ten minutes 6 s.)
 pub fn join(segments: &[PathBuf], out: &Path) -> Result<Joined, String> {
     let first = segments.first().ok_or("there is nothing to join")?;
     if segments.len() == 1 {
@@ -63,6 +76,7 @@ pub fn join(segments: &[PathBuf], out: &Path) -> Result<Joined, String> {
     let head = open(first)?;
     let id = video_track(&head)?;
     let track = &head.tracks()[&id];
+    let clock = (track.timescale() as u64).clamp(1000, MAX_TIMESCALE);
     let config = AvcConfig {
         width: track.width(),
         height: track.height(),
@@ -89,20 +103,22 @@ pub fn join(segments: &[PathBuf], out: &Path) -> Result<Joined, String> {
                 FourCC::from(*b"avc1"),
                 FourCC::from(*b"mp41"),
             ],
-            timescale: 1000,
+            // The same clock for the file and the track: the library then sums the track's length without rounding.
+            timescale: clock as u32,
         },
     )
     .map_err(|e| e.to_string())?;
     writer
         .add_track(&TrackConfig {
             track_type: TrackType::Video,
-            timescale: 1000,
+            timescale: clock as u32,
             language: "und".into(),
             media_conf: MediaConfig::AvcConfig(config.clone()),
         })
         .map_err(|e| e.to_string())?;
 
-    let mut offset_ms: u64 = 0;
+    // Where the next segment begins, in ticks of `clock`.
+    let mut offset: u64 = 0;
     let mut samples = 0u64;
     for path in segments {
         let mut r = open(path)?;
@@ -123,25 +139,28 @@ pub fn join(segments: &[PathBuf], out: &Path) -> Result<Joined, String> {
         }
         let scale = t.timescale().max(1) as u64;
         let count = r.sample_count(tid).map_err(|e| e.to_string())?;
-        let mut end_ms = 0u64;
+        let mut length = 0u64;
         // A segment starts at its first sample, whatever the clock of the capture said when it began.
         let base = match r.read_sample(tid, 1).map_err(|e| e.to_string())? {
-            Some(first) => first.start_time * 1000 / scale,
+            Some(first) => first.start_time,
             None => 0,
         };
         for n in 1..=count {
             let Some(s) = r.read_sample(tid, n).map_err(|e| e.to_string())? else {
                 continue;
             };
-            let start = (s.start_time * 1000 / scale).saturating_sub(base);
-            let dur = ((s.duration as u64 * 1000 / scale).max(1)) as u32;
-            let off = (s.rendering_offset as i64 * 1000 / scale as i64) as i32;
-            end_ms = end_ms.max(start + dur as u64);
+            // Both ends are converted, not the duration: so no rounding adds up from picture to picture.
+            let begins = s.start_time.saturating_sub(base);
+            let start = rescale(begins as i64, scale, clock) as u64;
+            let end = rescale((begins + s.duration as u64) as i64, scale, clock) as u64;
+            let dur = end.saturating_sub(start).max(1) as u32;
+            let off = rescale(s.rendering_offset as i64, scale, clock) as i32;
+            length = length.max(start + dur as u64);
             writer
                 .write_sample(
                     1,
                     &Mp4Sample {
-                        start_time: offset_ms + start,
+                        start_time: offset + start,
                         duration: dur,
                         rendering_offset: off,
                         is_sync: s.is_sync,
@@ -151,7 +170,7 @@ pub fn join(segments: &[PathBuf], out: &Path) -> Result<Joined, String> {
                 .map_err(|e| e.to_string())?;
             samples += 1;
         }
-        offset_ms += end_ms;
+        offset += length;
     }
     writer.write_end().map_err(|e| e.to_string())?;
     drop(writer);
@@ -159,7 +178,7 @@ pub fn join(segments: &[PathBuf], out: &Path) -> Result<Joined, String> {
     Ok(Joined {
         segments: segments.len(),
         samples,
-        duration_ms: offset_ms,
+        duration_ms: rescale(offset as i64, clock, 1000) as u64,
     })
 }
 
@@ -212,6 +231,20 @@ mod tests {
             names,
             ["screen-000.mp4", "screen-001.mp4", "screen-002.mp4"]
         );
+    }
+
+    #[test]
+    fn times_are_converted_to_the_nearest_tick_so_nothing_adds_up() {
+        // A picture at 30 a second on a clock of 30,000: 33.333... ms. Ten minutes of them stay ten minutes.
+        assert_eq!(rescale(1000, 30_000, 30_000), 1000);
+        assert_eq!(rescale(18_000 * 1000, 30_000, 1000), 600_000);
+        assert_eq!(rescale(1000, 30_000, 1000), 33);
+        assert_eq!(rescale(2000, 30_000, 1000), 67);
+        // A finer clock than the joined file's (100 ns): both ends of a picture are converted, so the lengths add up.
+        let end = |n: i64| rescale(n * 333_333, 10_000_000, MAX_TIMESCALE);
+        let total: i64 = (0..900).map(|n| end(n + 1) - end(n)).sum();
+        assert_eq!(total, end(900));
+        assert_eq!(rescale(-1000, 30_000, 30_000), -1000);
     }
 
     #[test]

@@ -12,34 +12,46 @@
 //! lazy images, and a native edit control, both with generated content; a script scrolls them the way a user would, and the result
 //! is checked against what is known. The pictures of those tests come from that window alone.
 
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+#[cfg(debug_assertions)]
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
+#[cfg(debug_assertions)]
 use std::time::{Duration, Instant};
 
+#[cfg(debug_assertions)]
 use serde::Serialize;
+#[cfg(debug_assertions)]
 use tauri::{AppHandle, Emitter, Manager};
 
+#[cfg(debug_assertions)]
 use crate::error::CmdResult;
 use crate::geometry::Rect;
+#[cfg(debug_assertions)]
 use crate::stitch::{Canvas, Picture, Placed};
 
 /// Done was clicked / Cancel was clicked.
+#[cfg(debug_assertions)]
 static DONE: AtomicBool = AtomicBool::new(false);
+#[cfg(debug_assertions)]
 static CANCEL: AtomicBool = AtomicBool::new(false);
 /// A scrolling capture is running.
 static RUNNING: AtomicBool = AtomicBool::new(false);
 /// The newest thumbnail (PNG) for the pill, and a counter that changes with it.
 static THUMB: Mutex<Vec<u8>> = Mutex::new(Vec::new());
+#[cfg(debug_assertions)]
 static THUMB_N: AtomicU64 = AtomicU64::new(0);
 
-/// The scrolling screenshot is PARKED (it failed real tests and is rebuilt in Phase 8): it is only reachable in a debug build that is
-/// started with `SNIPMUNK_EXPERIMENTAL_SCROLL=1`. In a release build this is always false, so the mode is not offered, not accepted
-/// and not started.
+/// The scrolling screenshot is PARKED (it failed real tests and is to be rebuilt in v0.2): it is only reachable in a debug build that
+/// is started with `SNIPMUNK_EXPERIMENTAL_SCROLL=1`. In a release build this is always false, so the mode is not offered, not accepted
+/// and not started, and the experiment's code (here and `stitch.rs`) is not compiled in; only `win`, which the step recorder shares,
+/// is.
 pub fn experimental() -> bool {
     cfg!(debug_assertions) && std::env::var("SNIPMUNK_EXPERIMENTAL_SCROLL").is_ok_and(|v| v == "1")
 }
 
 /// Does the page offer the parked scrolling mode? (Only with the development switch.)
+#[cfg(debug_assertions)]
 #[tauri::command]
 pub fn experimental_scroll() -> bool {
     experimental()
@@ -57,12 +69,14 @@ pub fn thumb_png() -> Option<Vec<u8>> {
 }
 
 /// The Done button of the pill.
+#[cfg(debug_assertions)]
 #[tauri::command]
 pub fn scroll_done() {
     DONE.store(true, Ordering::SeqCst);
 }
 
 /// The Cancel button of the pill.
+#[cfg(debug_assertions)]
 #[tauri::command]
 pub fn scroll_cancel() {
     CANCEL.store(true, Ordering::SeqCst);
@@ -78,6 +92,7 @@ pub enum Source {
     Window(isize),
 }
 
+#[cfg(debug_assertions)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum End {
@@ -85,6 +100,7 @@ pub enum End {
     Cancelled,
 }
 
+#[cfg(debug_assertions)]
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct Progress {
@@ -94,6 +110,7 @@ pub struct Progress {
     pub state: &'static str,
 }
 
+#[cfg(debug_assertions)]
 pub struct Outcome {
     /// RGBA.
     pub rgba: Vec<u8>,
@@ -109,6 +126,7 @@ pub struct Outcome {
 pub type Shot = (Vec<u8>, usize, usize);
 
 /// Take the pictures from `rx` and put them on the canvas until `ask` says Done or Cancelled. `progress` is told after changes.
+#[cfg(debug_assertions)]
 pub fn collect(
     rx: &std::sync::mpsc::Receiver<Shot>,
     max_height: usize,
@@ -192,6 +210,7 @@ pub fn collect(
     })
 }
 
+#[cfg(debug_assertions)]
 fn empty(end: End) -> Outcome {
     Outcome {
         rgba: Vec::new(),
@@ -205,6 +224,7 @@ fn empty(end: End) -> Outcome {
 }
 
 /// The settings: the maximum height.
+#[cfg(debug_assertions)]
 fn max_height(app: &AppHandle) -> usize {
     let s = app
         .state::<crate::commands::AppState>()
@@ -216,6 +236,7 @@ fn max_height(app: &AppHandle) -> usize {
 }
 
 /// Tell the pill the height and give it a new thumbnail.
+#[cfg(debug_assertions)]
 fn publish(app: &AppHandle, canvas: &Canvas, state: &'static str) {
     let (rgba, w, h) = canvas.thumbnail(110, 120);
     if let Some(img) = image::RgbaImage::from_raw(w as u32, h as u32, rgba) {
@@ -236,6 +257,7 @@ fn publish(app: &AppHandle, canvas: &Canvas, state: &'static str) {
 }
 
 /// Start a scrolling capture of `area` (`hwnd`: the window it was chosen in). Runs on its own thread; the result is added as a capture.
+#[cfg(debug_assertions)]
 pub fn begin(app: &AppHandle, area: Rect, hwnd: Option<isize>, title: Option<String>) {
     if RUNNING.swap(true, Ordering::SeqCst) {
         return;
@@ -252,7 +274,7 @@ pub fn begin(app: &AppHandle, area: Rect, hwnd: Option<isize>, title: Option<Str
     });
 }
 
-#[cfg(windows)]
+#[cfg(all(windows, debug_assertions))]
 fn session(
     app: &AppHandle,
     area: Rect,
@@ -310,13 +332,13 @@ fn session(
     crate::output::deliver(app, frame, title)
 }
 
-#[cfg(not(windows))]
+#[cfg(all(not(windows), debug_assertions))]
 fn session(_: &AppHandle, _: Rect, _: Option<isize>, _: Option<String>) -> Result<(), String> {
     Err("Scrolling screenshots need Windows.".into())
 }
 
 /// A window that never takes the focus, is left out of the pictures and lets the mouse through when `through`.
-#[cfg(windows)]
+#[cfg(all(windows, debug_assertions))]
 fn overlay_window(
     app: &AppHandle,
     label: &str,
@@ -351,7 +373,7 @@ fn overlay_window(
     }
 }
 
-#[cfg(windows)]
+#[cfg(all(windows, debug_assertions))]
 fn show_frame(app: &AppHandle, area: Rect) {
     let margin = 4;
     overlay_window(
@@ -363,7 +385,7 @@ fn show_frame(app: &AppHandle, area: Rect) {
     );
 }
 
-#[cfg(windows)]
+#[cfg(all(windows, debug_assertions))]
 fn show_pill(app: &AppHandle, area: Rect) {
     THUMB.lock().unwrap_or_else(|e| e.into_inner()).clear();
     let mon = win::monitor_rect_at(area.center().0, area.center().1).unwrap_or(area);
@@ -374,12 +396,14 @@ fn show_pill(app: &AppHandle, area: Rect) {
     overlay_window(app, "scrollpill", (x, y), (w, h), false);
 }
 
+#[cfg(debug_assertions)]
 fn close_pill(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("scrollpill") {
         let _ = w.close();
     }
 }
 
+#[cfg(debug_assertions)]
 fn close_frame(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("scrollframe") {
         let _ = w.close();
@@ -403,15 +427,6 @@ pub async fn dev_scroll_test(
         .map_err(|e| crate::error::CmdError::new("capture", e))
 }
 
-#[cfg(not(all(windows, debug_assertions)))]
-#[tauri::command]
-pub fn dev_scroll_test() -> CmdResult<()> {
-    Err(crate::error::CmdError::new(
-        "unavailable",
-        "the test windows exist in development builds only",
-    ))
-}
-
 #[cfg(windows)]
 pub(crate) mod win {
     use super::{Rect, Shot, Source};
@@ -419,13 +434,18 @@ pub(crate) mod win {
     use std::sync::{Arc, Mutex};
     use std::time::{Duration, Instant};
     use windows::Win32::Foundation::{HWND, POINT, RECT};
+    #[cfg(debug_assertions)]
+    use windows::Win32::Graphics::Gdi::ClientToScreen;
     use windows::Win32::Graphics::Gdi::{
-        ClientToScreen, GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTONEAREST,
+        GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTONEAREST,
     };
+    #[cfg(debug_assertions)]
     use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_RETURN};
+    #[cfg(debug_assertions)]
+    use windows::Win32::UI::WindowsAndMessaging::GetClientRect;
     use windows::Win32::UI::WindowsAndMessaging::{
-        GetClientRect, GetWindowLongPtrW, SetWindowLongPtrW, ShowWindow, GWL_EXSTYLE,
-        SW_SHOWNOACTIVATE, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+        GetWindowLongPtrW, SetWindowLongPtrW, ShowWindow, GWL_EXSTYLE, SW_SHOWNOACTIVATE,
+        WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
     };
     use windows_capture::capture::{CaptureControl, Context, GraphicsCaptureApiHandler};
     use windows_capture::frame::Frame;
@@ -437,15 +457,18 @@ pub(crate) mod win {
     };
     use windows_capture::window::Window;
 
+    #[cfg(debug_assertions)]
     pub const VK_ENTER: i32 = VK_RETURN.0 as i32;
 
     /// Is a key down right now? (Read from the keyboard state; nothing is sent.)
+    #[cfg(debug_assertions)]
     pub fn key_down(vk: i32) -> bool {
         // SAFETY: a plain query of the keyboard state.
         unsafe { GetAsyncKeyState(vk) as u16 & 0x8000 != 0 }
     }
 
     /// The client area of a window on the desktop (physical pixels).
+    #[cfg(debug_assertions)]
     pub fn client_rect(hwnd: isize) -> Option<Rect> {
         let h = HWND(hwnd as *mut _);
         let mut r = RECT::default();

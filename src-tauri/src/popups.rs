@@ -209,8 +209,3 @@ pub fn toast_open(app: AppHandle) {
     hide_toast(&app);
     crate::tray::show_main(&app);
 }
-
-#[tauri::command]
-pub fn toast_close(app: AppHandle) {
-    hide_toast(&app);
-}

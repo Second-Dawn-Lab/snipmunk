@@ -1056,7 +1056,8 @@ pub fn doc_close() {
     discard(&work_dir());
 }
 
-/// An empty guide (no steps): for "Blank guide" and for tests.
+/// Development only: an empty guide (no steps), for the end-to-end scripts.
+#[cfg(debug_assertions)]
 #[tauri::command]
 pub fn doc_new(title: Option<String>) -> CmdResult<Value> {
     discard(&work_dir());

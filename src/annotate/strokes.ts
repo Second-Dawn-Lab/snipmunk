@@ -1,8 +1,6 @@
 // Freehand strokes: smoothing and the outline of a pen stroke (no canvas). The pen draws a filled outline whose width
 // follows the pressure of a pen tablet; the highlighter draws one wide line, so overlaps inside a stroke do not darken.
 
-export type Pt = [number, number];
-
 /** Drop samples that are almost on top of the previous one (a mouse sends many while it hardly moves). */
 export function dedupe(points: readonly number[], minDistance = 0.4): number[] {
   const out: number[] = [];

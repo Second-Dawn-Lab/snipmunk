@@ -16,12 +16,14 @@ use crate::steptext::{Kind, Part};
 
 pub const VERSION: u32 = 1;
 
-/// Where the guides are. `SNIPMUNK_GUIDES_DIR` moves them (the tests of this program do).
+/// The folder `SNIPMUNK_GUIDES_DIR` names (the tests of this program; never read by a release build).
+fn test_root() -> Option<PathBuf> {
+    crate::capture::dev_env("SNIPMUNK_GUIDES_DIR").map(PathBuf::from)
+}
+
+/// Where the guides are.
 pub fn root() -> PathBuf {
-    if let Some(d) = std::env::var_os("SNIPMUNK_GUIDES_DIR") {
-        return PathBuf::from(d);
-    }
-    crate::store::app_dir().join("documents").join("guides")
+    test_root().unwrap_or_else(|| crate::store::app_dir().join("documents").join("guides"))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -94,27 +96,13 @@ pub struct Step {
     pub deleted: bool,
 }
 
-/// A line of the list of guides.
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GuideSummary {
-    pub id: String,
-    pub title: String,
-    pub created: u64,
-    pub state: String,
-    pub steps: u32,
-    /// The picture of the first step (file name inside the guide), if any.
-    pub first_image: Option<String>,
-    pub first_size: Option<[u32; 2]>,
-}
-
 fn io(e: impl std::fmt::Display) -> CmdError {
     CmdError::new("io", e.to_string())
 }
 
 pub fn dir_of(id: &str) -> PathBuf {
     // The open guide ("current") lives in the working folder in temp; the old 7.5-A folders in the app data are not used any more.
-    if id == "current" && std::env::var_os("SNIPMUNK_GUIDES_DIR").is_none() {
+    if id == "current" && test_root().is_none() {
         return crate::projects::temp_base().join("guide-current");
     }
     root().join(sanitize(id))
@@ -141,7 +129,7 @@ pub fn create(title: &str, settings: serde_json::Value) -> CmdResult<GuideInfo> 
     let created = now_ms();
     // One guide is open at a time: its working folder is "current" (a caller has asked about unsaved changes first). The tests
     // (SNIPMUNK_GUIDES_DIR) make several.
-    let mut id = if std::env::var_os("SNIPMUNK_GUIDES_DIR").is_none() {
+    let mut id = if test_root().is_none() {
         let _ = std::fs::remove_dir_all(dir_of("current"));
         "current".to_string()
     } else {
@@ -263,45 +251,10 @@ pub fn finalize(id: &str) -> CmdResult<()> {
     Ok(())
 }
 
-pub fn list() -> Vec<GuideSummary> {
-    let mut out = Vec::new();
-    let Ok(rd) = std::fs::read_dir(root()) else {
-        return out;
-    };
-    for e in rd.flatten() {
-        let Some(id) = e.file_name().to_str().map(str::to_string) else {
-            continue;
-        };
-        let Some(info) = read_info(&id) else { continue };
-        let steps = read_steps(&id);
-        let live: Vec<&Step> = steps.iter().filter(|s| !s.deleted).collect();
-        out.push(GuideSummary {
-            id: info.id,
-            title: info.title,
-            created: info.created,
-            state: info.state,
-            steps: live.len() as u32,
-            first_image: live.first().map(|s| s.image.clone()),
-            first_size: live.first().map(|s| s.image_size),
-        });
-    }
-    out.sort_by_key(|g| std::cmp::Reverse(g.created));
-    out
-}
-
 /// The path of a picture of a guide (for the address the pages load it from).
 pub fn image_path(id: &str, name: &str) -> Option<PathBuf> {
     let p = dir_of(id).join(sanitize(name));
     p.is_file().then_some(p)
-}
-
-/// Guides that were still recording when the program ended: (id, title, number of steps).
-pub fn unfinished() -> Vec<(String, String, u32)> {
-    list()
-        .into_iter()
-        .filter(|g| g.state == "recording")
-        .map(|g| (g.id, g.title, g.steps))
-        .collect()
 }
 
 /// A default zoom area around a click: about 640 x 400, inside the window (when known) and inside the picture.
@@ -321,36 +274,7 @@ pub fn default_zoom(click: [i32; 2], window: Option<[i32; 4]>, frame: [u32; 2]) 
     [x, y, w, h]
 }
 
-// --- commands ---------------------------------------------------------------------------------------------------------------------
-
-#[tauri::command]
-pub fn guides_list() -> Vec<GuideSummary> {
-    list()
-}
-
-#[tauri::command]
-pub fn guide_get(id: String) -> Option<GuideInfo> {
-    read_info(&id)
-}
-
-#[tauri::command]
-pub fn guide_steps(id: String) -> Vec<Step> {
-    read_steps(&id)
-}
-
-#[tauri::command]
-pub fn guide_rename(id: String, title: String) -> CmdResult<String> {
-    let title = title.trim().to_string();
-    let mut info =
-        read_info(&id).ok_or_else(|| CmdError::new("not_found", "the guide does not exist"))?;
-    if !title.is_empty() {
-        info.title = title;
-        write_info(&info)?;
-    }
-    Ok(info.title)
-}
-
-#[tauri::command]
+/// Remove a guide's folder (only one below the guides' own folder).
 pub fn guide_delete(id: String) -> CmdResult<()> {
     let dir = dir_of(&id);
     if dir.starts_with(root()) && dir.is_dir() {
@@ -360,7 +284,6 @@ pub fn guide_delete(id: String) -> CmdResult<()> {
 }
 
 /// Delete (or, with `restore`, bring back) a step: a line is appended, nothing is removed from disk.
-#[tauri::command]
 pub fn guide_step_delete(id: String, n: u32, restore: Option<bool>) -> CmdResult<()> {
     append_line(
         &id,
@@ -377,34 +300,12 @@ pub fn guide_step_delete(id: String, n: u32, restore: Option<bool>) -> CmdResult
     )
 }
 
-/// Guides left over from a crash: (id, title, steps).
-#[tauri::command]
-pub fn guides_unfinished() -> Vec<(String, String, u32)> {
-    unfinished()
-}
+// --- commands ---------------------------------------------------------------------------------------------------------------------
 
 /// Recover a guide that was recording: it is finalized as it is.
 #[tauri::command]
 pub fn guide_recover(id: String) -> CmdResult<()> {
     finalize(&id)
-}
-
-/// The text of every step as a numbered list (for "Copy all as text").
-#[tauri::command]
-pub fn guide_text(id: String) -> String {
-    read_steps(&id)
-        .iter()
-        .filter(|s| !s.deleted)
-        .enumerate()
-        .map(|(i, s)| format!("{}. {}", i + 1, crate::steptext::plain(&s.text)))
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-/// The picture of a step as bytes (for "Copy picture"): the whole step picture; the page crops it.
-#[tauri::command]
-pub fn guide_image_path(id: String, name: String) -> Option<String> {
-    image_path(&id, &name).map(|p| p.to_string_lossy().into_owned())
 }
 
 /// Development only: a finished guide with `count` generated steps (a coloured picture each), to look at a long guide.
@@ -463,12 +364,6 @@ pub fn dev_guide_seed(count: u32) -> CmdResult<String> {
     Ok(g.id)
 }
 
-#[cfg(not(any(debug_assertions, feature = "measure-guard")))]
-#[tauri::command]
-pub fn dev_guide_seed() -> CmdResult<()> {
-    Err(CmdError::new("unavailable", "development builds only"))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -514,22 +409,11 @@ mod tests {
                 s.iter().map(|x| (x.n, x.deleted)).collect::<Vec<_>>(),
                 [(1, false), (2, true), (3, false)]
             );
-            assert_eq!(guide_text(g.id.clone()), "1. Step 1\n2. Step 3");
             guide_step_delete(g.id.clone(), 2, Some(true)).unwrap();
             assert!(read_steps(&g.id).iter().all(|x| !x.deleted));
-            // The list: the title, the steps and the first picture.
-            let l = list();
-            assert_eq!(
-                (l[0].title.as_str(), l[0].steps, l[0].state.as_str()),
-                ("Guide A", 3, "recording")
-            );
-            assert_eq!(l[0].first_image.as_deref(), Some("step-0001.png"));
-            assert_eq!(
-                guide_rename(g.id.clone(), "  New title ".into()).unwrap(),
-                "New title"
-            );
+            assert_eq!(read_info(&g.id).unwrap().state, "recording");
             guide_delete(g.id.clone()).unwrap();
-            assert!(list().is_empty());
+            assert!(read_info(&g.id).is_none());
         });
     }
 
@@ -547,9 +431,8 @@ mod tests {
             f.write_all(b"{\"n\":3,\"kind\":\"cli").unwrap();
             drop(f);
             assert_eq!(read_steps(&g.id).len(), 2);
-            assert_eq!(unfinished(), vec![(g.id.clone(), "Crashed".to_string(), 2)]);
+            assert_eq!(read_info(&g.id).unwrap().state, "recording");
             guide_recover(g.id.clone()).unwrap();
-            assert!(unfinished().is_empty());
             assert_eq!(read_info(&g.id).unwrap().state, "done");
         });
     }

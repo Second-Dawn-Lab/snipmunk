@@ -64,11 +64,6 @@ export function planImageSync(revs: ImageRevisions, target: number): SyncPlan {
   return revs.get(target) ? { kind: "restore", rev: target } : { kind: "missing", rev: target };
 }
 
-/** The document after a permanent redaction: the redactions are gone (they are in the pixels now), everything else stays. */
-export function withoutRedactions<I extends { type: string }, D extends { items: I[] }>(doc: D): D {
-  return { ...doc, items: doc.items.filter((a) => a.type !== "redact") };
-}
-
 export function hasRedactions(doc: { items: { type: string }[] }): boolean {
   return doc.items.some((a) => a.type === "redact");
 }

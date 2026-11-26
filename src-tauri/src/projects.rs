@@ -16,7 +16,7 @@ use crate::package::{self, KIND_RECORDING};
 /// The temp folder of the product (`%TEMP%`, or the folder of `SNIPMUNK_TEMP_DIR` for development).
 #[cfg(not(test))]
 pub fn temp_base() -> PathBuf {
-    std::env::var_os("SNIPMUNK_TEMP_DIR")
+    crate::capture::dev_env("SNIPMUNK_TEMP_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(crate::store::temp_root)
         .join("Snipmunk")
@@ -515,6 +515,8 @@ pub struct QuitState {
     pub scrolling: bool,
     /// An unsaved current recording or an edited project.
     pub unsaved: bool,
+    /// The question comes before the restart that installs an update (the page words it that way).
+    pub update: bool,
 }
 
 /// What Quit does.
@@ -561,6 +563,8 @@ fn quit_or_ask(app: &tauri::AppHandle, restart: bool) {
             let s = app.state::<crate::commands::AppState>();
             has_unsaved(&s)
         },
+        // (a restart is only ever asked for by the update)
+        update: restart,
     };
     RESTART.store(restart, Ordering::SeqCst);
     match quit_plan(state) {
@@ -577,12 +581,6 @@ fn quit_or_ask(app: &tauri::AppHandle, restart: bool) {
 #[tauri::command]
 pub fn cancel_quit() {
     RESTART.store(false, Ordering::SeqCst);
-}
-
-/// For the updater of the page: restart Snipmunk after asking about unsaved work.
-#[tauri::command]
-pub fn restart_app(app: tauri::AppHandle) {
-    request_restart(&app);
 }
 
 /// Does Snipmunk hold anything that is not saved? (An unsaved current recording, unsaved edits of a project, an unsaved guide.) For Quit.
@@ -639,10 +637,17 @@ mod tests {
                 recording: true,
                 scrolling: true,
                 unsaved: true,
+                update: true,
             },
         ] {
             assert_eq!(quit_plan(s), QuitPlan::Ask, "{s:?}");
         }
+        // An update alone is no reason to ask: with nothing to lose it restarts at once.
+        let update = QuitState {
+            update: true,
+            ..Default::default()
+        };
+        assert_eq!(quit_plan(update), QuitPlan::Exit);
     }
 
     #[test]

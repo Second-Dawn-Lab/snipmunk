@@ -685,7 +685,7 @@ pub mod win {
             let mut attrs: Option<IMFAttributes> = None;
             MFCreateAttributes(&mut attrs, 3).map_err(|e| e.to_string())?;
             let attrs = attrs.ok_or("no attributes")?;
-            if std::env::var("SNIPMUNK_SOFT_DECODE").is_err() {
+            if crate::capture::dev_env("SNIPMUNK_SOFT_DECODE").is_none() {
                 // The graphics card decodes the video when it can.
                 if let Some(manager) = gpu_manager() {
                     let _ = attrs.SetUnknown(
@@ -708,7 +708,7 @@ pub mod win {
             wanted
                 .SetGUID(&MF_MT_SUBTYPE, &MFVideoFormat_NV12)
                 .map_err(|e| e.to_string())?;
-            let nv12 = std::env::var("SNIPMUNK_RGB_DECODE").is_err()
+            let nv12 = crate::capture::dev_env("SNIPMUNK_RGB_DECODE").is_none()
                 && reader
                     .SetCurrentMediaType(
                         MF_SOURCE_READER_FIRST_VIDEO_STREAM.0 as u32,
@@ -775,13 +775,47 @@ pub mod win {
     enum Msg {
         /// The size of the pictures.
         Size(u32, u32),
-        /// A picture (BGRA, top row first) and its time in 100 ns units.
+        /// A picture (BGRA, top row first) and its time in 100 ns units, counted from the video's first picture.
         Frame(i64, Vec<u8>),
         End,
         Failed(String),
     }
 
+    /// The time the file gives its first picture (100 ns units), found by reading it. 0 for most files, but an encoder that
+    /// reorders pictures (B-frames, as Windows' software H.264 encoder does) writes every picture that much later than it
+    /// was taken, the first one included.
+    fn first_picture_time(reader: &IMFSourceReader) -> Option<i64> {
+        // (a read may come back without a picture, for a gap or a change of format)
+        for _ in 0..64 {
+            let mut flags = 0u32;
+            let mut ts = 0i64;
+            let mut sample: Option<IMFSample> = None;
+            // SAFETY: valid out pointers; the sample is only looked at here.
+            unsafe {
+                reader
+                    .ReadSample(
+                        MF_SOURCE_READER_FIRST_VIDEO_STREAM.0 as u32,
+                        0,
+                        None,
+                        Some(&mut flags),
+                        Some(&mut ts),
+                        Some(&mut sample),
+                    )
+                    .ok()?;
+            }
+            if flags & MF_SOURCE_READERF_ENDOFSTREAM.0 as u32 != 0 {
+                return None;
+            }
+            if sample.is_some() {
+                return Some(ts);
+            }
+        }
+        None
+    }
+
     /// Read the pictures of `path` on this thread and send them on; stops at the end, on an error, or when `cancel` is set.
+    /// `seek_ticks` and the times sent count from the first picture: the cursor, the clicks, the sound and the webcam were
+    /// recorded on that clock.
     fn decode(
         path: &Path,
         tx: &std::sync::mpsc::SyncSender<Msg>,
@@ -803,11 +837,14 @@ pub mod win {
             if tx.send(Msg::Size(w, h)).is_err() {
                 return Ok(());
             }
+            // The time of the first picture: read before a seek, else it is the first one the loop below gets.
+            let mut origin = None;
             if seek_ticks > 0 {
-                // SAFETY: a valid position (100 ns units) for a reader that was just opened.
+                origin = first_picture_time(&reader);
+                // SAFETY: a valid position (100 ns units) for a reader that is open.
                 unsafe {
                     let pos = windows::Win32::System::Com::StructuredStorage::PROPVARIANT::from(
-                        seek_ticks,
+                        seek_ticks + origin.unwrap_or(0),
                     );
                     let _ = reader.SetCurrentPosition(&windows::core::GUID::zeroed(), &pos);
                 }
@@ -835,6 +872,7 @@ pub mod win {
                 }
                 lap(7, &t_read);
                 let Some(sample) = sample else { continue };
+                let ts = ts - *origin.get_or_insert(ts);
                 let t_alloc = std::time::Instant::now();
                 let mut top_down = vec![0u8; need];
                 lap(8, &t_alloc);
@@ -853,7 +891,7 @@ pub mod win {
                             .ConvertToContiguousBuffer()
                             .map_err(|e| e.to_string())?,
                     };
-                    if std::env::var("SNIPMUNK_PROFILE").is_ok()
+                    if crate::capture::dev_env("SNIPMUNK_PROFILE").is_some()
                         && nv12
                         && !PROF_ONCE.swap(true, Ordering::Relaxed)
                     {
@@ -938,17 +976,32 @@ pub mod win {
     /// The first `max` pictures of a video (BGRA, top row first) and its size: used by the tests to look at what was written.
     #[cfg(test)]
     pub fn read_frames(path: &Path, max: usize) -> Result<(u32, u32, Vec<Vec<u8>>), String> {
+        let (w, h, timed) = read_timed_frames(path, max, 0)?;
+        Ok((w, h, timed.into_iter().map(|(_, p)| p).collect()))
+    }
+
+    /// A picture and the time (100 ns units) the export draws it at.
+    #[cfg(test)]
+    pub type TimedPicture = (i64, Vec<u8>);
+
+    /// Like `read_frames`, with every picture's time, from `seek_ticks` on.
+    #[cfg(test)]
+    pub fn read_timed_frames(
+        path: &Path,
+        max: usize,
+        seek_ticks: i64,
+    ) -> Result<(u32, u32, Vec<TimedPicture>), String> {
         let (tx, rx) = std::sync::mpsc::sync_channel::<Msg>(4);
         let stop = AtomicBool::new(false);
         std::thread::scope(|scope| {
-            let d = scope.spawn(|| decode(path, &tx, &stop, 0));
+            let d = scope.spawn(|| decode(path, &tx, &stop, seek_ticks));
             let (mut w, mut h) = (0, 0);
             let mut out = Vec::new();
             while let Ok(m) = rx.recv() {
                 match m {
                     Msg::Size(a, b) => (w, h) = (a, b),
-                    Msg::Frame(_, p) => {
-                        out.push(p);
+                    Msg::Frame(ts, p) => {
+                        out.push((ts, p));
                         if out.len() >= max {
                             break;
                         }
@@ -1449,7 +1502,7 @@ pub mod win {
                 }
                 progress(1.0);
                 exported.seconds = started.elapsed().as_secs_f64();
-                if std::env::var("SNIPMUNK_PROFILE").is_ok() {
+                if crate::capture::dev_env("SNIPMUNK_PROFILE").is_some() {
                     let s = |i: usize| PROF[i].swap(0, Ordering::Relaxed) as f64 / 1e9;
                     eprintln!(
                         "PROFILE total {:.1}s | wait-for-picture {:.1} (decoder: read {:.1} alloc {:.1} convert {:.1}) effects {:.1} scale {:.1} webcam {:.1} | flip {:.1} encoder {:.1} sound {:.1}",

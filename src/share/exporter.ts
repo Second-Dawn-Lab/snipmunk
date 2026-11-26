@@ -4,7 +4,6 @@ import type { Ctx } from "../annotate/render";
 import { ipc, type Capture, type Group, type Session } from "../ipc";
 import type { CopyMode, Naming, SaveFormat } from "../settings/defaults";
 import { cfHtml, imagesHtml, planCopy, tempFileNames } from "./clipboardPayload";
-import { layoutFor } from "./compose";
 import { exportNames, FORMAT_EXT, FORMAT_MIME, sanitizeName, dateTimeName } from "./fileNames";
 import { canvasBlob, drawCapture, finalSize, renderCapture } from "./renderCapture";
 
@@ -56,9 +55,6 @@ export async function copyCaptures(session: Session, captures: readonly Capture[
   const limited = await ipc.exportClipboard([path], cfHtml(imagesHtml([{ path, width, height, alt: plan.mode }])), path);
   return { status: "ok", count: captures.length, mode: plan.mode, limited };
 }
-
-/** The pictures of a stack or grid layout, for tests and tooltips. */
-export const layoutOf = layoutFor;
 
 export interface SaveOptions {
   format: SaveFormat;

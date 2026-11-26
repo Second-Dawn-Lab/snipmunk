@@ -34,7 +34,6 @@ export function apply(m: Matrix, x: number, y: number): { x: number; y: number }
 }
 
 export const translation = (x: number, y: number): Matrix => [1, 0, 0, 1, x, y];
-export const scaling = (x: number, y: number): Matrix => [x, 0, 0, y, 0, 0];
 
 /** The crop in effect: the document's, kept inside the picture; all of the picture when there is none. */
 export function effectiveCrop(crop: Rect | null, width: number, height: number): Rect {

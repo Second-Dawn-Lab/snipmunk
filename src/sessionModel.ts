@@ -16,13 +16,6 @@ export function groupOrFirst(session: Session, groupId: string | null): Group {
   return session.groups.find((g) => g.id === groupId) ?? session.groups[0];
 }
 
-/** Which capture to show after `deletedId` is removed from the list as shown: the next one, else the previous. */
-export function activeAfterDelete(shownIds: readonly string[], deletedId: string): string | null {
-  const i = shownIds.indexOf(deletedId);
-  if (i < 0) return shownIds[0] ?? null;
-  return shownIds[i + 1] ?? shownIds[i - 1] ?? null;
-}
-
 /**
  * What Del (or a trash icon) deletes: every selected capture, in session order; with no selection the capture on show.
  * `clicked` is the card whose trash icon was used: a selected card means "the selection", any other card only itself.
@@ -55,10 +48,6 @@ export function activeAfterDeleting(
 /** The active capture if it is still in the list, else the first one (or null for an empty list). */
 export function validActive(shownIds: readonly string[], activeId: string | null): string | null {
   return activeId !== null && shownIds.includes(activeId) ? activeId : (shownIds[0] ?? null);
-}
-
-export function totalCaptures(session: Session): number {
-  return session.groups.reduce((n, g) => n + g.captures.length, 0);
 }
 
 /** "14:05:09" for today, "17 Nov, 14:05" for other days. */
@@ -94,10 +83,4 @@ export function zoomIn(zoom: number): number {
 /** The next zoom step below `zoom` (stays at the smallest). */
 export function zoomOut(zoom: number): number {
   return [...ZOOM_STEPS].reverse().find((z) => z < zoom - 1e-6) ?? ZOOM_STEPS[0];
-}
-
-/** The zoom that fits an image into a box (never enlarges beyond 100 %). */
-export function fitZoom(image: { width: number; height: number }, box: { width: number; height: number }): number {
-  if (image.width <= 0 || image.height <= 0 || box.width <= 0 || box.height <= 0) return 1;
-  return Math.min(1, box.width / image.width, box.height / image.height);
 }

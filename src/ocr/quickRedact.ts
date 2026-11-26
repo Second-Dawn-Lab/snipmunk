@@ -1,7 +1,7 @@
 // Quick redact (no React): the boxes of the e-mail addresses and phone numbers found in recognized text, and the redaction
 // marks that cover them.
 import { newId, type RedactAnnotation } from "../annotate/schema";
-import { apply, invert, transformRect, type Matrix } from "../annotate/transform";
+import { invert, transformRect, type Matrix } from "../annotate/transform";
 import { findMatches, type FindOptions, type Match, type MatchKind } from "./pii";
 import type { Settings } from "../settings/defaults";
 import type { Line, OcrDoc, Rect, Word } from "./types";
@@ -110,9 +110,4 @@ export function redactionsFor(rects: readonly Rect[], matrix: Matrix, source: { 
     if (w > 0 && h > 0) out.push({ type: "redact", id: newId(), x, y, w, h, mode: "box", origin: "quick" });
   }
   return out;
-}
-
-/** A point of the original picture in the recognized picture (for tests and the text layer). */
-export function toRecognized(matrix: Matrix, x: number, y: number) {
-  return apply(matrix, x, y);
 }

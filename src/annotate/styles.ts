@@ -141,11 +141,6 @@ export function restyle(a: Annotation, patch: Partial<ToolValues>): Annotation {
   }
 }
 
-/** Does a change of tool values touch this mark at all? */
-export function isRestyled(a: Annotation, patch: Partial<ToolValues>): boolean {
-  return JSON.stringify(restyle(a, patch)) !== JSON.stringify(a);
-}
-
 /** The key that joins consecutive restyles of the same value into one undo step. */
 export function styleKey(patch: Partial<ToolValues>): string {
   return `style:${Object.keys(patch).sort().join(",")}`;

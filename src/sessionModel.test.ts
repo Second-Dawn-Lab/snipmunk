@@ -1,15 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { Capture, Session } from "./ipc";
 import {
-  activeAfterDelete,
   activeAfterDeleting,
   deleteTargets,
-  fitZoom,
   formatSize,
   formatTime,
   groupOrFirst,
   sortCaptures,
-  totalCaptures,
   validActive,
   zoomIn,
   zoomOut,
@@ -58,19 +55,9 @@ describe("groups", () => {
     expect(groupOrFirst(session, "gone").id).toBe("g1");
     expect(groupOrFirst(session, null).id).toBe("g1");
   });
-  it("counts all captures", () => {
-    expect(totalCaptures(session)).toBe(4);
-  });
 });
 
 describe("active capture", () => {
-  it("moves to the next, else the previous, after a delete", () => {
-    expect(activeAfterDelete(["a", "b", "c"], "b")).toBe("c");
-    expect(activeAfterDelete(["a", "b", "c"], "c")).toBe("b");
-    expect(activeAfterDelete(["a"], "a")).toBeNull();
-    expect(activeAfterDelete(["a", "b"], "x")).toBe("a");
-    expect(activeAfterDelete([], "x")).toBeNull();
-  });
   it("keeps a valid active id and replaces a missing one", () => {
     expect(validActive(["a", "b"], "b")).toBe("b");
     expect(validActive(["a", "b"], "gone")).toBe("a");
@@ -105,11 +92,6 @@ describe("zoom", () => {
   it("steps from a fit zoom that is between two steps", () => {
     expect(zoomIn(0.42)).toBe(0.5);
     expect(zoomOut(0.42)).toBe(0.33);
-  });
-  it("fits an image into a box but never enlarges", () => {
-    expect(fitZoom({ width: 2000, height: 1000 }, { width: 1000, height: 1000 })).toBe(0.5);
-    expect(fitZoom({ width: 100, height: 100 }, { width: 1000, height: 1000 })).toBe(1);
-    expect(fitZoom({ width: 0, height: 0 }, { width: 10, height: 10 })).toBe(1);
   });
 });
 

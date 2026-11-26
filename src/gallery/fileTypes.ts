@@ -65,9 +65,3 @@ export function planDrop<F extends FileLike>(content: DropContent<F>): DropPlan<
   const urls = webUrls(content);
   return urls.length > 0 ? { kind: "url", urls } : { kind: "none" };
 }
-
-/** The result of adding dropped files, for the one notice shown afterwards. */
-export interface ImportSummary {
-  added: number;
-  skipped: number;
-}

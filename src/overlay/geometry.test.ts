@@ -6,13 +6,11 @@ import {
   hitTestWindow,
   loupePlacement,
   loupeSource,
-  modeBarLeft,
   modeForKey,
   pixelRatio,
   readoutPosition,
   sizeLabel,
   thin,
-  toCss,
   toDesktop,
   toPhysical,
   windowToLocal,
@@ -41,7 +39,6 @@ describe("pixel ratio on monitors with different scaling", () => {
     const ratio = { x: 1.5, y: 1.5 };
     const p = toPhysical({ x: 100, y: 40 }, ratio);
     expect(p).toEqual({ x: 150, y: 60 });
-    expect(toCss(p, ratio)).toEqual({ x: 100, y: 40 });
     expect(boxToCss({ x: 150, y: 60, w: 300, h: 150 }, ratio)).toEqual({ x: 100, y: 40, w: 200, h: 100 });
   });
 });
@@ -122,11 +119,6 @@ describe("modes and keys", () => {
     expect(["1", "2", "3", "4", "5"].map(modeForKey)).toEqual(["rectangle", "window", "fullscreen", "freeform", "scrolling"]);
     expect(modeForKey("6")).toBeNull();
     expect(modeForKey("a")).toBeNull();
-  });
-
-  it("centers the mode bar at the top of the monitor", () => {
-    expect(modeBarLeft(1920, 400)).toBe(760);
-    expect(modeBarLeft(300, 400)).toBe(0);
   });
 });
 

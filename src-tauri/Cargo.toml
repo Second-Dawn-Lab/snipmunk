@@ -24,9 +24,8 @@ tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-autostart = "2"
 # A second launch focuses the running window instead of starting another tray icon.
 tauri-plugin-single-instance = "2"
-# Update checks against the latest GitHub release, and the restart after installing one.
+# Update checks against the latest GitHub release (the restart after installing one is Snipmunk's own, see updates.rs).
 tauri-plugin-updater = "2"
-tauri-plugin-process = "2"
 # Pixel loops that are optimized in development builds too.
 snipmunk-pixels = { path = "../crates/pixels" }
 serde.workspace = true
@@ -72,7 +71,6 @@ version = "0.61"
 features = [
   # The built-in text recognition (Windows.Media.Ocr), see src/ocr.rs.
   "Foundation",
-  "Foundation_Collections",
   "Globalization",
   "Graphics_Imaging",
   "Media_Ocr",
@@ -86,7 +84,6 @@ features = [
   "Storage",
   "Win32_System_DataExchange",
   "Win32_System_Memory",
-  "Win32_System_Ole",
   "Win32_System_Com",
   "Win32_Foundation",
   "Win32_Globalization",

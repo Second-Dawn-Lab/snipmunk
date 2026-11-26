@@ -8,7 +8,6 @@ import {
   GROUP_EMOJIS,
   isGroupColor,
   moveTargets,
-  needsDeleteChoice,
   planGroupDelete,
 } from "./groupRules";
 
@@ -65,11 +64,6 @@ describe("deleting a group", () => {
     expect(defaultMoveTarget(groups, "g3")).toBe("g2");
     expect(defaultMoveTarget([groups[0]], "g1")).toBeNull();
     expect(defaultMoveTarget(groups, "nope")).toBe("g1");
-  });
-
-  it("only asks when the group has captures", () => {
-    expect(needsDeleteChoice(groups[0])).toBe(true);
-    expect(needsDeleteChoice(groups[1])).toBe(false);
   });
 
   it("plans a delete with the captures, or a move to another group", () => {

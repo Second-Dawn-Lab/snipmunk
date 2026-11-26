@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { UpdatePhase, UpdateView } from "./ipc";
-import { dismissKey, showsNotice, updateMessage } from "./update";
+import { en } from "./locales/en";
+import { dismissKey, quitWording, showsNotice, updateMessage } from "./update";
 
 const view = (phase: UpdatePhase, supported = true): UpdateView => ({ supported, phase });
 
@@ -20,6 +21,16 @@ describe("the update notice", () => {
     expect(showsNotice(view({ kind: "available", version: "0.1.2" }), later)).toBe(true);
     expect(showsNotice(view({ kind: "downloading", version: "0.1.1", percent: 5 }), later)).toBe(true);
     expect(showsNotice(view({ kind: "ready", version: "0.1.1" }), later)).toBe(true);
+  });
+
+  it("asks about unsaved work in its own words, not as Quit does", () => {
+    const quit = quitWording(false);
+    const update = quitWording(true);
+    expect(en[update.title]).toBe("Update now?");
+    expect(en[update.cancel]).toBe("Later");
+    expect(en[update.discard]).toBe("Update without saving");
+    expect(en[quit.title]).toBe("Quit without saving?");
+    for (const k of ["title", "body", "cancel", "discard"] as const) expect(update[k]).not.toBe(quit[k]);
   });
 
   it("has a sentence for every phase", () => {

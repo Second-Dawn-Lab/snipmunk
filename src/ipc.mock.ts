@@ -157,7 +157,6 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       case "capture_finish":
       case "capture_overlay_ready":
       case "toast_open":
-      case "toast_close":
       case "capture_set_mode":
         return null;
       case "capture_overlay_info":
@@ -226,14 +225,6 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
             throw { code: "invalid", message: "the list does not match the group" };
           g.captures = ids.map((i) => byId.get(i)!);
         });
-      case "move_capture_to_group":
-        return updated((s) => {
-          const target = findGroup(s, args.groupId as string);
-          const { group, index } = findCapture(s, args.captureId as string);
-          const [capture] = group.captures.splice(index, 1);
-          const at = Math.min((args.index as number | null) ?? target.captures.length, target.captures.length);
-          target.captures.splice(at, 0, capture);
-        });
       case "move_captures":
         return updated((s) => {
           const target = findGroup(s, args.groupId as string);
@@ -290,23 +281,6 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
         return updated((s) => {
           const { group, index } = findCapture(s, args.captureId as string);
           group.captures[index].thumbRev += 1;
-        });
-      case "debug_seed_session":
-        return updated((s) => {
-          const n = Math.max(0, Number(args.count ?? 0));
-          const groupCount = Math.max(1, Number(args.groups ?? 1));
-          s.id = id("s");
-          s.groups = Array.from({ length: groupCount }, (_, gi) => ({
-            id: id("g"),
-            name: `Group ${gi + 1}`,
-            order: gi,
-            color: null,
-            emoji: null,
-            captures: [] as Capture[],
-          }));
-          for (let i = 0; i < n; i++) {
-            s.groups[i % groupCount].captures.push(fake(`Seed ${String(i + 1).padStart(3, "0")}`, n - i, 1280, 720));
-          }
         });
       default:
         throw { code: "unknown_command", message: cmd };

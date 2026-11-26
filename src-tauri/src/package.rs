@@ -509,61 +509,6 @@ pub async fn project_save(
     Ok(())
 }
 
-/// What a project file holds: its manifest and the length of every entry (nothing is extracted).
-#[tauri::command]
-pub async fn project_info(path: String) -> crate::error::CmdResult<serde_json::Value> {
-    tauri::async_runtime::spawn_blocking(move || -> io::Result<serde_json::Value> {
-        let p = open(Path::new(&path), KIND_RECORDING)?;
-        let mut entries: Vec<(&String, &(u64, u64))> = p.entries.iter().collect();
-        entries.sort();
-        Ok(serde_json::json!({
-            "manifest": p.manifest,
-            "entries": entries.iter().map(|(n, (o, l))| serde_json::json!({"name": n, "offset": o, "length": l})).collect::<Vec<_>>(),
-            "recording": serde_json::from_slice::<serde_json::Value>(&p.meta("recording.json")?).unwrap_or_default(),
-        }))
-    })
-    .await
-    .map_err(|e| crate::error::CmdError::new("io", e.to_string()))?
-    .map_err(|e| crate::error::CmdError::new("io", e.to_string()))
-}
-
-/// Save the effects of an open project: appended as a small new version, whatever the size of the project.
-#[tauri::command]
-pub async fn project_set_effects(
-    path: String,
-    effects: crate::effects::Effects,
-) -> crate::error::CmdResult<()> {
-    tauri::async_runtime::spawn_blocking(move || -> io::Result<()> {
-        let p = open(Path::new(&path), KIND_RECORDING)?;
-        let mut doc: serde_json::Value =
-            serde_json::from_slice(&p.meta("recording.json")?).unwrap_or_default();
-        doc["effects"] = serde_json::to_value(effects.cleaned()).map_err(io::Error::other)?;
-        drop(p);
-        append_meta(
-            Path::new(&path),
-            KIND_RECORDING,
-            &[(
-                "recording.json".into(),
-                serde_json::to_vec_pretty(&doc).map_err(io::Error::other)?,
-            )],
-        )
-    })
-    .await
-    .map_err(|e| crate::error::CmdError::new("io", e.to_string()))?
-    .map_err(|e| crate::error::CmdError::new("io", e.to_string()))
-}
-
-/// "Save as": a compact copy of a project (stale versions of small items are left out).
-#[tauri::command]
-pub async fn project_save_as(from: String, to: String) -> crate::error::CmdResult<()> {
-    tauri::async_runtime::spawn_blocking(move || {
-        compact(Path::new(&from), Path::new(&to), KIND_RECORDING)
-    })
-    .await
-    .map_err(|e| crate::error::CmdError::new("io", e.to_string()))?
-    .map_err(|e| crate::error::CmdError::new("io", e.to_string()))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

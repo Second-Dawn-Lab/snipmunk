@@ -164,16 +164,6 @@ export function removeBlocks(doc: GuideDoc, ids: ReadonlySet<string>): GuideDoc 
   return { ...doc, blocks: doc.blocks.filter((b) => !ids.has(b.id)) };
 }
 
-/** Move a block up (-1) or down (+1). */
-export function moveBlock(doc: GuideDoc, id: string, delta: number): GuideDoc {
-  const i = indexOfBlock(doc, id);
-  const j = i + delta;
-  if (i < 0 || j < 0 || j >= doc.blocks.length) return doc;
-  const blocks = [...doc.blocks];
-  [blocks[i], blocks[j]] = [blocks[j], blocks[i]];
-  return { ...doc, blocks };
-}
-
 /** Move a block so it sits before the block at `index` (of the list before the move). */
 export function moveBlockTo(doc: GuideDoc, id: string, index: number): GuideDoc {
   const from = indexOfBlock(doc, id);
@@ -225,17 +215,6 @@ export function stepNumbers(doc: GuideDoc): Map<string, number> {
   let n = 0;
   for (const b of doc.blocks) if (b.type === "step" && !b.numberHidden) m.set(b.id, ++n);
   return m;
-}
-
-/** The text of every step as a numbered list. */
-export function stepTexts(doc: GuideDoc, steps: ReadonlyMap<number, GuideStep>): string[] {
-  const out: string[] = [];
-  for (const b of doc.blocks) {
-    if (b.type !== "step") continue;
-    const parts = b.text ?? steps.get(b.n)?.text ?? [];
-    out.push(parts.map((p) => p.t).join(""));
-  }
-  return out;
 }
 
 // --- what a step shows ---------------------------------------------------------------------------------------------------------

@@ -1,6 +1,6 @@
-// The cursor track of a recording (no React): positions, shape changes, visibility and mouse buttons over time, and what the
-// player draws from them (the cursor, the halo, click effects). The screen is recorded without the cursor; this is drawn on top
-// when playing and when rendering, so it can be changed afterwards.
+// The cursor track of a recording (no React): positions, shape changes, visibility and mouse buttons over time, and the
+// clicks in it. The screen is recorded without the cursor; it is drawn on top when playing and when rendering (see `drawFx`),
+// so it can be changed afterwards.
 
 export interface CursorSample {
   /** Seconds since the start of the recording (pauses excluded). */
@@ -77,64 +77,4 @@ export function clicksOf(track: readonly CursorSample[]): ClickEvent[] {
     right = s.right;
   }
   return out;
-}
-
-export type ClickStyle = "off" | "ripple" | "burst";
-
-/** How long a click effect lasts (seconds). */
-export const CLICK_EFFECT_SECONDS = 0.6;
-
-export interface RingFrame {
-  kind: "ring";
-  x: number;
-  y: number;
-  radius: number;
-  alpha: number;
-  button: "left" | "right";
-}
-export interface DotFrame {
-  kind: "dot";
-  x: number;
-  y: number;
-  radius: number;
-  alpha: number;
-  button: "left" | "right";
-}
-export type EffectFrame = RingFrame | DotFrame;
-
-const easeOut = (k: number) => 1 - (1 - k) * (1 - k);
-
-/** The shapes to draw for the click effects alive at time `t`. `scale` is the cursor scale (1, 1.5 or 2). */
-export function clickEffects(clicks: readonly ClickEvent[], t: number, style: ClickStyle, scale = 1): EffectFrame[] {
-  if (style === "off") return [];
-  const out: EffectFrame[] = [];
-  for (const c of clicks) {
-    const age = t - c.t;
-    if (age < 0 || age > CLICK_EFFECT_SECONDS) continue;
-    const k = age / CLICK_EFFECT_SECONDS;
-    if (style === "ripple") {
-      out.push({ kind: "ring", x: c.x, y: c.y, radius: (8 + 34 * easeOut(k)) * scale, alpha: 1 - k, button: c.button });
-    } else {
-      // Burst: a ring and eight dots flying outwards.
-      out.push({ kind: "ring", x: c.x, y: c.y, radius: (6 + 22 * easeOut(k)) * scale, alpha: 1 - k, button: c.button });
-      for (let i = 0; i < 8; i++) {
-        const a = (i * Math.PI) / 4;
-        const d = (10 + 36 * easeOut(k)) * scale;
-        out.push({ kind: "dot", x: c.x + Math.cos(a) * d, y: c.y + Math.sin(a) * d, radius: Math.max(0.5, 3.5 * (1 - k)) * scale, alpha: 1 - k, button: c.button });
-      }
-    }
-  }
-  return out;
-}
-
-export interface HaloOptions {
-  enabled: boolean;
-  /** Radius in recording pixels at scale 1. */
-  radius?: number;
-}
-
-/** The halo around the cursor (a soft disc), or null. */
-export function halo(state: CursorState | null, options: HaloOptions, scale = 1): { x: number; y: number; radius: number } | null {
-  if (!state || !state.visible || !options.enabled) return null;
-  return { x: state.x, y: state.y, radius: (options.radius ?? 28) * scale };
 }

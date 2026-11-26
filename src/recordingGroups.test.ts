@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { groupsOfKind, hasRecordingGroup, isRecordingGroup, mergeGroupOrder } from "./recordingGroups";
+import { hasRecordingGroup, isRecordingGroup, mergeGroupOrder } from "./recordingGroups";
 
 const g = (id: string, kind?: "recording") => ({ id, kind: kind ?? null });
 
@@ -8,8 +8,6 @@ describe("screenshot and recording groups", () => {
   it("are told apart by their kind, and sessions of earlier versions (no kind) hold screenshots", () => {
     expect(all.map(isRecordingGroup)).toEqual([false, true, false, true, false]);
     expect(isRecordingGroup({ kind: undefined })).toBe(false);
-    expect(groupsOfKind(all, false).map((x) => x.id)).toEqual(["a", "b", "c"]);
-    expect(groupsOfKind(all, true).map((x) => x.id)).toEqual(["r1", "r2"]);
   });
   it("a reordered kind takes its places in the full order and the other kind stays put", () => {
     expect(mergeGroupOrder(all, ["c", "a", "b"])).toEqual(["c", "r1", "a", "r2", "b"]);

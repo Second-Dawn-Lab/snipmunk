@@ -352,29 +352,6 @@ html[lang="ur"] .tool--labelled {
   cursor: default;
 }
 
-.errorbar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 0 16px 8px;
-  padding: 8px 12px;
-  border-radius: var(--dw-radius-sm);
-  background: var(--dw-danger-soft);
-  color: var(--dw-danger);
-  flex: none;
-}
-.errorbar span {
-  flex: 1;
-}
-.errorbar__close {
-  display: grid;
-  place-items: center;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  padding: 2px;
-}
-
 /* --- Menus ------------------------------------------------------------------ */
 .menuitem {
   display: flex;
@@ -417,11 +394,6 @@ html[lang="ur"] .tool--labelled {
 }
 .menuitem__arrow {
   margin-inline-start: 8px;
-}
-.menu__sub {
-  margin-inline-start: 26px;
-  padding-inline-start: 6px;
-  border-inline-start: 2px solid var(--dw-border);
 }
 
 /* --- Panels ----------------------------------------------------------------- */
@@ -931,10 +903,6 @@ body.is-dragging * {
   box-shadow: var(--dw-shadow-pop);
   text-align: center;
 }
-.noticebar {
-  background: var(--dw-brand-soft);
-  color: var(--dw-brand-text);
-}
 
 /* Context menus */
 .ctxmenu {
@@ -959,11 +927,6 @@ body.is-dragging * {
   border: 0;
   border-top: 1px solid var(--dw-border);
 }
-.ctxmenu__sub {
-  margin-inline-start: 26px;
-  padding-inline-start: 6px;
-  border-inline-start: 2px solid var(--dw-border);
-}
 .ctxmenu__list {
   max-height: 220px;
   overflow-y: auto;
@@ -974,14 +937,8 @@ body.is-dragging * {
   color: var(--dw-text-3);
   transition: transform 0.12s;
 }
-.ctxmenu__caret--open {
-  transform: rotate(90deg);
-}
 :root[dir="rtl"] .ctxmenu__caret {
   transform: scaleX(-1);
-}
-:root[dir="rtl"] .ctxmenu__caret--open {
-  transform: scaleX(-1) rotate(90deg);
 }
 .menuitem--danger {
   color: var(--dw-danger);
@@ -1349,12 +1306,6 @@ body.is-dragging * {
 .preview__stage > .preview__none {
   margin: 16px;
 }
-.preview__image {
-  display: block;
-  max-width: none;
-  box-shadow: var(--dw-shadow);
-  background: #fff;
-}
 .preview__none {
   color: var(--dw-text-3);
   text-align: center;
@@ -1561,7 +1512,6 @@ body.is-dragging * {
 .savedlg { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
 .savedlg__row { display: grid; grid-template-columns: 120px 1fr auto; align-items: center; gap: 8px; }
 .savedlg__folder { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dw-text-muted, inherit); }
-.noticebar__action { margin-inline-start: 8px; text-decoration: underline; background: none; border: 0; color: inherit; cursor: pointer; font: inherit; }
 .searchbar { flex-wrap: wrap; }
 .searchbar__input { flex: 1 1 140px; }
 .searchbar .segmented { flex: 1 1 100%; display: flex; }
@@ -1614,8 +1564,7 @@ body.is-dragging * {
 .recopts { display: grid; gap: 10px; padding: 12px; min-width: 260px; }
 .recopts__row { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 10px; }
 .recopts__check { display: flex; align-items: center; gap: 8px; }
-.recopts__note, .recopts__soon em { margin: 0; font-size: 12px; opacity: 0.7; }
-.recopts__soon { display: flex; justify-content: space-between; gap: 10px; opacity: 0.55; padding-top: 4px; border-top: 1px solid var(--dw-border); }
+.recopts__note { margin: 0; font-size: 12px; opacity: 0.7; }
 .card__video { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; opacity: 0.8; }
 
 /* The text box being edited looks like a selected shape: the thin blue frame and the white handles are drawn on the picture. */
@@ -1626,10 +1575,6 @@ body.is-dragging * {
 [dir="rtl"] .recbar { transform: translateX(50%); }
 .recdot--live { background: #d32f2f; box-shadow: none; animation: recpulse 1.2s infinite; }
 @keyframes recpulse { 50% { opacity: .35; } }
-
-.recplaceholder { display: grid; justify-items: center; align-content: center; gap: 10px; height: 100%; padding: 24px; text-align: center; }
-.recplaceholder__thumb { max-width: min(100%, 520px); max-height: 50%; border-radius: 8px; border: 1px solid var(--dw-border); }
-.recplaceholder__meta { margin: 0; font-weight: 600; }
 
 /* The thin red frame around the recorded area: a transparent window with a red border (excluded from the recording). */
 html[data-window="recframe"], html[data-window="recframe"] body { background: transparent !important; }
@@ -1645,7 +1590,6 @@ html[data-window="recframe"] #root { background: transparent; }
 html[data-window="recbar"], html[data-window="recbar"] body, html[data-window="recbar"] #root { background: transparent !important; }
 .floatbar { display: flex; align-items: center; gap: 10px; height: 100%; padding: 0 8px 0 14px; border-radius: 26px; background: var(--dw-surface); color: var(--dw-text); border: 1px solid var(--dw-border-strong, var(--dw-border)); box-shadow: none; -webkit-user-select: none; user-select: none; }
 .floatbar__time { font-variant-numeric: tabular-nums; font-weight: 600; min-width: 48px; }
-.floatbar__sp { flex: 1; }
 .floatbar button { height: 32px; }
 
 /* B1/B2: the bar window is transparent; the capsule is as big as its content and nothing grows on hover. */
@@ -1653,7 +1597,6 @@ html[data-window="recbar"], html[data-window="recbar"] body, html[data-window="r
 html[data-window="guideframe"], html[data-window="guideframe"] body, html[data-window="guideframe"] #root { background: transparent !important; overflow: hidden; }
 .recframe--paused { opacity: .35; border-style: dashed; }
 .floatbar { width: max-content; height: 48px; box-sizing: border-box; white-space: nowrap; display: inline-flex; align-items: center; gap: 10px; padding: 0 8px 0 14px; border-radius: 24px; background: var(--dw-surface, #fff); color: var(--dw-text, #111); border: 1px solid var(--dw-border-strong, rgba(128,128,128,.5)); box-shadow: none; }
-.floatbar__count { font-size: 30px; font-weight: 700; min-width: 32px; text-align: center; font-variant-numeric: tabular-nums; }
 .floatbar__ask { font-size: 13px; }
 .floatbar__btn { flex: none; height: 32px; min-width: 32px; padding: 0 12px; border: 1px solid var(--dw-border-strong, rgba(128,128,128,.5)); border-radius: 16px; background: var(--dw-surface-2, transparent); color: inherit; font: inherit; font-size: 13px; cursor: pointer; transition: none; }
 .floatbar__btn:hover:not(:disabled) { background: var(--dw-hover, rgba(128,128,128,.2)); transform: none; }
@@ -1687,10 +1630,8 @@ html[data-window="guideframe"], html[data-window="guideframe"] body, html[data-w
 .recplayer__btn:hover { background: var(--dw-hover, rgba(128,128,128,.25)); }
 .recplayer__btn svg, .recplayer__vol svg { stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .recplayer__time { font-variant-numeric: tabular-nums; font-size: 13px; min-width: 38px; text-align: center; }
-.recplayer__seek { flex: 1; min-width: 120px; }
 .recplayer__vol { display: inline-flex; align-items: center; gap: 6px; }
 .recplayer__vol input { width: 80px; }
-.recplayer__studio { margin-inline-start: auto; padding: 6px 12px; border-radius: 16px; border: 1px solid var(--dw-border, rgba(128,128,128,.4)); background: transparent; color: inherit; font: inherit; font-size: 13px; opacity: .5; cursor: not-allowed; }
 
 /* M8: the progress of the rendering of a recording. */
 .renderbar { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-radius: 12px; background: var(--dw-surface, #fff); color: var(--dw-text, #111); border: 1px solid var(--dw-border-strong, rgba(128,128,128,.5)); box-shadow: 0 6px 24px rgba(0,0,0,.25); z-index: 50; }
@@ -1773,8 +1714,6 @@ html[data-window="guideframe"], html[data-window="guideframe"] body, html[data-w
 .panels--single > .panel--right { grid-column: 1 / -1; }
 .recheader { display: flex; align-items: center; gap: 8px; padding: 8px 4px 10px; flex-wrap: wrap; }
 .recheader__name { font-weight: 650; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.recheader__state { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; padding: 2px 8px; border-radius: 10px; background: rgba(128,128,128,.18); }
-.recheader__state--warn { background: rgba(245, 158, 11, .22); }
 .recheader__dot { width: 9px; height: 9px; border-radius: 50%; background: var(--dw-accent, #e5484d); display: inline-block; }
 .recempty { margin: auto; max-width: 560px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 24px; }
 .recempty h2 { margin: 4px 0 0; }
@@ -1882,7 +1821,7 @@ html[data-window="scrollframe"], html[data-window="scrollframe"] body, html[data
 
 /* Documents mode: the list of guides, the guide view and the recording bar. */
 .guides, .guide { position: relative; display: flex; flex-direction: column; min-height: 0; flex: 1; padding: 14px 18px; gap: 12px; overflow: hidden; }
-.guides__head, .guide__head { display: flex; align-items: center; gap: 12px; }
+.guides__head { display: flex; align-items: center; gap: 12px; }
 .guides__head h2 { margin: 0; flex: 1; font-size: 18px; }
 .guides__empty { flex: 1; display: grid; place-content: center; justify-items: center; gap: 10px; text-align: center; opacity: .75; }
 .guides__list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; overflow: auto; align-content: start; }
@@ -1894,27 +1833,11 @@ html[data-window="scrollframe"], html[data-window="scrollframe"] body, html[data
 .gcard__text { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; min-height: 44px; }
 .gcard__text strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .gcard__text small { opacity: .7; }
-.gcard__rename { position: absolute; left: 8px; right: 8px; bottom: 8px; height: 28px; padding: 0 8px; font: inherit; }
-.gcard__actions { position: absolute; top: 6px; inset-inline-end: 6px; display: flex; gap: 4px; opacity: 0; transition: opacity .12s; }
-.gcard:hover .gcard__actions, .gcard:focus-within .gcard__actions { opacity: 1; }
-.gcard__actions button, .gstep__btn { width: 28px; height: 28px; display: inline-grid; place-items: center; border: 0; border-radius: 6px; background: rgba(0,0,0,.55); color: #fff; cursor: pointer; }
-.gcard__actions svg, .gstep__btn svg { stroke: currentColor; fill: none; stroke-width: 1.8; }
-.guide__back { display: inline-flex; align-items: center; gap: 4px; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; padding: 4px 6px; border-radius: 6px; }
-.guide__back:hover { background: rgba(128,128,128,.18); }
-.guide__back svg { transform: rotate(90deg); stroke: currentColor; fill: none; stroke-width: 2; }
-[dir="rtl"] .guide__back svg { transform: rotate(-90deg); }
-.guide__title { flex: 1; min-width: 0; text-align: start; font: inherit; font-size: 18px; font-weight: 700; border: 0; background: none; color: inherit; cursor: text; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.guide__title--edit { border: 1px solid var(--dw-border-strong, rgba(128,128,128,.5)); border-radius: 6px; padding: 2px 6px; background: var(--dw-surface, transparent); }
-.guide__count { opacity: .7; white-space: nowrap; }
-.guide__list { flex: 1; min-height: 0; overflow-y: auto; scroll-behavior: smooth; display: flex; flex-direction: column; gap: 18px; padding: 4px 4px 40px; outline: none; }
+.gstep__btn { width: 28px; height: 28px; display: inline-grid; place-items: center; border: 0; border-radius: 6px; background: rgba(0,0,0,.55); color: #fff; cursor: pointer; }
+.gstep__btn svg { stroke: currentColor; fill: none; stroke-width: 1.8; }
 .guide__none { opacity: .7; }
 .gstep { outline: none; }
 .step__text { flex: 1; min-width: 0; }
-.gstep__pic { position: relative; width: 100%; overflow: hidden; border-radius: 8px; border: 1px solid var(--dw-border, rgba(128,128,128,.35)); background: rgba(128,128,128,.12); }
-.gstep__pic img { position: absolute; height: auto; max-width: none; display: block; user-select: none; }
-.gstep__marker { position: absolute; width: 34px; height: 34px; margin: -17px 0 0 -17px; border: 4px solid #ff5a36; border-radius: 50%; box-shadow: 0 0 0 2px rgba(255,255,255,.85), 0 0 8px rgba(0,0,0,.35); pointer-events: none; }
-.guide__undo { position: absolute; bottom: 18px; inset-inline-start: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 12px; padding: 8px 14px; border-radius: 20px; background: #1f2023; color: #fff; box-shadow: 0 6px 20px rgba(0,0,0,.4); }
-.guide__undo button { border: 0; background: none; color: #8ab4ff; font: inherit; font-weight: 600; cursor: pointer; }
 html[data-window="guidebar"], html[data-window="guidebar"] body, html[data-window="guidebar"] #root { background: transparent !important; overflow: hidden; }
 /* The guide bar uses the one bar style (.floatbar): theme colours, a thin border, no shadow. */
 .guidebar { height: auto; min-height: 48px; margin: 4px; padding: 6px 8px 6px 14px; flex-wrap: wrap; row-gap: 4px; font-size: 13px; min-width: 300px; box-sizing: border-box; }
@@ -1930,10 +1853,10 @@ html[data-window="guidebar"], html[data-window="guidebar"] body, html[data-windo
 /* --- Documents mode: the guide editor (7.5-B) --- */
 .guide--doc { padding: 0; gap: 0; overflow: hidden; }
 .geditor { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
-.gtools__sep, .rich__sep { width: 1px; align-self: stretch; margin: 2px 4px; background: rgba(128,128,128,.35); }
+.rich__sep { width: 1px; align-self: stretch; margin: 2px 4px; background: rgba(128,128,128,.35); }
 .gbar__sel { display: inline-flex; align-items: center; gap: 4px; }
-.gbar__btn, .gtools__btn, .rich__btn { min-width: 28px; height: 28px; padding: 0 8px; display: inline-grid; place-items: center; border: 1px solid transparent; border-radius: 6px; background: none; color: inherit; font: inherit; cursor: pointer; }
-.gbar__btn:hover:not(:disabled), .gtools__btn:hover, .rich__btn:hover { background: rgba(128,128,128,.18); }
+.gbar__btn, .rich__btn { min-width: 28px; height: 28px; padding: 0 8px; display: inline-grid; place-items: center; border: 1px solid transparent; border-radius: 6px; background: none; color: inherit; font: inherit; cursor: pointer; }
+.gbar__btn:hover:not(:disabled), .rich__btn:hover { background: rgba(128,128,128,.18); }
 .gbar__btn:disabled { opacity: .35; cursor: default; }
 .gbar__btn svg { stroke: currentColor; fill: none; stroke-width: 1.8; }
 .glist { overflow-anchor: none; flex: 1; min-height: 0; overflow-y: auto; padding: 8px 18px 60px; display: flex; flex-direction: column; }
@@ -1954,10 +1877,6 @@ html[data-window="guidebar"], html[data-window="guidebar"] body, html[data-windo
 .gblock__handle:hover { opacity: 1; background: rgba(128,128,128,.2); }
 .gstep__adddesc { border: 0; border-radius: 4px; color: inherit; font: inherit; cursor: pointer; }
 .gstep__blank { display: grid; place-items: center; height: 120px; border: 2px dashed rgba(128,128,128,.4); border-radius: 8px; opacity: .6; }
-.gtools__btn { border-color: rgba(128,128,128,.25); }
-.gtools__btn--on { background: var(--dw-brand, #3b82f6); color: #fff; }
-.gtools__swatch { width: 20px; height: 20px; padding: 0; border: 1px solid rgba(128,128,128,.6); border-radius: 50%; cursor: pointer; }
-.gtools__swatch--on { box-shadow: 0 0 0 2px var(--dw-brand, #3b82f6); }
 .gpic { position: relative; width: 100%; border-radius: 8px; border: 1px solid var(--dw-border, rgba(128,128,128,.35)); background: rgba(128,128,128,.12); user-select: none; touch-action: none; }
 .gpic__clip { position: absolute; inset: 0; overflow: hidden; border-radius: inherit; }
 /* callouts and magnifiers: over the picture, and beyond it */
@@ -2142,9 +2061,6 @@ html[data-window="guidebar"], html[data-window="guidebar"] body, html[data-windo
 .dw-dialog:has(.tplgallery) { width: min(700px, 92vw); max-width: none; }
 .tplgallery h4 { margin: 8px 0 6px; font-size: 12px; opacity: .7; text-transform: uppercase; }
 .tplgallery__list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 10px; }
-.tplgallery__name { display: flex; gap: 8px; align-items: end; margin-bottom: 8px; }
-.tplgallery__name label { display: flex; flex-direction: column; gap: 3px; flex: 1; font-size: 12px; }
-.tplgallery__name input { font: inherit; padding: 4px 8px; }
 .tplcard { position: relative; display: flex; flex-direction: column; gap: 4px; }
 .tplcard__delete { position: absolute; inset-block-start: 9px; inset-inline-end: 9px; width: 28px; height: 28px; display: grid; place-items: center; padding: 0; border: 1px solid var(--dw-border-strong, rgba(128,128,128,.5)); border-radius: 7px; background: var(--dw-surface, #fff); color: var(--dw-danger, #b91c1c); cursor: pointer; opacity: 0; }
 .tplcard:hover .tplcard__delete, .tplcard:focus-within .tplcard__delete { opacity: 1; }
@@ -2167,7 +2083,6 @@ html[data-window="guidebar"], html[data-window="guidebar"] body, html[data-windo
 
 /* page view and the export dialog */
 .glist[hidden] { display: none; }
-.gbar__btn--on { background: rgba(59,130,246,.2); border-color: var(--dw-brand, #3b82f6); }
 .pageview { flex: 1; min-height: 0; width: 100%; border: 0; border-radius: 8px; background: #6b7075; }
 .pageview--busy { display: grid; place-items: center; color: #fff; }
 /* the export dialog: two columns, every control as wide as its column */

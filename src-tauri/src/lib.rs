@@ -38,6 +38,8 @@ mod snpd;
 mod startup;
 mod steprec;
 mod steptext;
+// Only the parked scrolling screenshot uses it (see `scrollshot::experimental`).
+#[cfg(debug_assertions)]
 mod stitch;
 mod store;
 mod templates;
@@ -86,7 +88,6 @@ pub fn run() {
             MacosLauncher::LaunchAgent,
             Some(vec!["--hidden"]),
         ))
-        .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_dialog::init())
         .manage({
             // What a crash left in the temp folder (staged copies, drags, prints) goes now.
@@ -121,7 +122,6 @@ pub fn run() {
             commands::rename_capture,
             commands::delete_capture,
             commands::reorder_captures,
-            commands::move_capture_to_group,
             gallery::move_captures,
             gallery::duplicate_captures,
             gallery::reorder_groups,
@@ -137,7 +137,6 @@ pub fn run() {
             recording::pause_recording,
             render::render_recording,
             render::cancel_render,
-            commands::recordings_info,
             commands::default_folders,
             commands::audio_devices,
             commands::webcam_devices,
@@ -153,21 +152,16 @@ pub fn run() {
             projects::project_journal,
             bubble::bubble_resize,
             projects::cancel_quit,
-            projects::restart_app,
             projects::take_pending_open,
             projects::take_pending_guide,
             projects::take_pending_templates,
             templates::templates_peek,
             projects::current_recording,
             projects::discard_current_recording,
-            package::project_info,
-            package::project_set_effects,
-            package::project_save_as,
             render::export_recording,
             render::estimate_export,
             commands::take_settings_tab,
             commands::refresh_recordings,
-            commands::move_recordings,
             recording::unfinished_recordings,
             recording::recover_recording,
             recording::drop_unfinished_recording,
@@ -179,7 +173,6 @@ pub fn run() {
             export::export_save,
             export::export_zip,
             export::export_clipboard,
-            export::clipboard_formats,
             export::export_open_editor,
             export::open_folder,
             export::show_in_explorer,
@@ -203,6 +196,9 @@ pub fn run() {
             ocr::copy_text,
             ocr::copy_table,
             ocr::open_os_settings,
+            // A command with a `cfg` line is for development (and, where it says so, measurement) builds: a released
+            // program does not have it.
+            #[cfg(any(debug_assertions, feature = "measure-guard"))]
             gallery::debug_seed_session,
             steprec::guide_start,
             steprec::guide_record_more,
@@ -213,16 +209,19 @@ pub fn run() {
             steprec::guide_bar_fit,
             steprec::guide_stop,
             steprec::guide_cancel,
+            #[cfg(debug_assertions)]
             steprec::dev_guide_start,
+            #[cfg(debug_assertions)]
             steprec::dev_guide_inject,
-            steprec::dev_guide_hook_test,
+            #[cfg(all(windows, debug_assertions))]
             steprec::dev_guide_scenario,
-            steprec::dev_uia_probe,
+            #[cfg(debug_assertions)]
             steprec::dev_guide_bar,
             snpd::doc_state,
             snpd::doc_read,
             snpd::doc_write,
             snpd::doc_close,
+            #[cfg(debug_assertions)]
             snpd::doc_new,
             snpd::doc_open,
             snpd::doc_save,
@@ -247,23 +246,20 @@ pub fn run() {
             templates::templates_import,
             templates::templates_export_many,
             templates::pick_templates_open,
-            guides::guides_list,
-            guides::guide_get,
-            guides::guide_steps,
-            guides::guide_rename,
-            guides::guide_delete,
-            guides::guide_step_delete,
-            guides::guides_unfinished,
             guides::guide_recover,
-            guides::guide_text,
-            guides::guide_image_path,
+            #[cfg(any(debug_assertions, feature = "measure-guard"))]
             guides::dev_guide_seed,
+            #[cfg(debug_assertions)]
             scrollshot::experimental_scroll,
+            #[cfg(debug_assertions)]
             scrollshot::scroll_done,
+            #[cfg(debug_assertions)]
             scrollshot::scroll_cancel,
+            #[cfg(all(windows, debug_assertions))]
             scrollshot::dev_scroll_test,
             titlebar::set_maximize_rect,
             capture::start_capture,
+            #[cfg(any(debug_assertions, feature = "measure-guard"))]
             capture::dev_capture_guard,
             capture::capture_overlay_info,
             capture::capture_overlay_ready,
@@ -272,9 +268,9 @@ pub fn run() {
             capture::capture_set_delay,
             capture::capture_finish,
             popups::toast_open,
-            popups::toast_close,
             popups::countdown_value,
             popups::toast_info,
+            #[cfg(any(debug_assertions, feature = "measure-guard"))]
             capture::dev_overlay_timing,
             startup::app_ready,
             updates::update_state,

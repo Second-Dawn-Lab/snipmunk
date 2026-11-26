@@ -42,11 +42,6 @@ export function zoomAt(v: View, zoom: number, sx: number, sy: number): View {
   return { zoom: z, ox: sx - p.x * z, oy: sy - p.y * z };
 }
 
-/** The zoom after one wheel notch (`deltaY` > 0 zooms out): about 12 % per notch, proportional to how far it turned. */
-export function wheelZoom(zoom: number, deltaY: number): number {
-  return clampZoom(zoom * Math.exp(-Math.sign(deltaY) * Math.min(Math.abs(deltaY), 300) * 0.0012));
-}
-
 /** Pan so that part of the picture always stays visible in the stage. */
 export function clampPan(v: View, pic: { width: number; height: number }, stage: { width: number; height: number }, keep = 80): View {
   const w = pic.width * v.zoom;

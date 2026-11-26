@@ -36,10 +36,6 @@ export function toPhysical(css: Pt, ratio: Pt): Pt {
   return { x: css.x * ratio.x, y: css.y * ratio.y };
 }
 
-export function toCss(physical: Pt, ratio: Pt): Pt {
-  return { x: physical.x / ratio.x, y: physical.y / ratio.y };
-}
-
 export function boxToCss(b: Box, ratio: Pt): Box {
   return { x: b.x / ratio.x, y: b.y / ratio.y, w: b.w / ratio.x, h: b.h / ratio.y };
 }
@@ -144,9 +140,4 @@ export function loupeSource(pointerPhysical: Pt, cells: number, image: Size): Bo
   const x = clamp(Math.floor(pointerPhysical.x) - half, 0, Math.max(image.w - cells, 0));
   const y = clamp(Math.floor(pointerPhysical.y) - half, 0, Math.max(image.h - cells, 0));
   return { x, y, w: cells, h: cells };
-}
-
-/** The left edge of the mode bar: centered at the top of the monitor. */
-export function modeBarLeft(viewportWidth: number, barWidth: number): number {
-  return Math.max(Math.round((viewportWidth - barWidth) / 2), 0);
 }

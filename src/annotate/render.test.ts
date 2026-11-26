@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { drawAnnotation, FONT_STACK, isRtlText, labelColor, measureTextBox, prepareWork, renderDoc, textLines, workKey, type Ctx, type WorkCanvas } from "./render";
+import { drawAnnotation, FONT_STACK, isRtlText, labelColor, prepareWork, renderDoc, textLines, workKey, type Ctx, type WorkCanvas } from "./render";
 import { emptyDoc, type Annotation } from "./schema";
 
 // --- fakes ----------------------------------------------------------------------------------------------------------------
@@ -253,14 +253,6 @@ describe("text helpers", () => {
   });
   it("split lines on any line break", () => {
     expect(textLines("a\r\nb\rc\nd")).toEqual(["a", "b", "c", "d"]);
-  });
-  it("measure the box of a text: the widest line, the lines, the label padding", () => {
-    const m = (s: string) => s.length * 10;
-    expect(measureTextBox(m, "ab\nabcd", 20, false)).toEqual({ w: 40, h: 50 });
-    const label = measureTextBox(m, "ab\nabcd", 20, true);
-    expect(label.w).toBe(40 + 12);
-    expect(label.h).toBe(50 + 12);
-    expect(measureTextBox(m, "", 20, false).w).toBeGreaterThan(0);
   });
   it("put a white label behind dark text and a black one behind light text", () => {
     expect(labelColor("#000000")).toBe("#ffffff");

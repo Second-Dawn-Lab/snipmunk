@@ -477,7 +477,8 @@ impl SessionStore {
     }
 
     /// Start a new, empty session. The previous one stays on disk (until retention removes it), unless
-    /// `discard_previous` is set.
+    /// `discard_previous` is set. (Today only the tests and the generator of test data do.)
+    #[cfg(any(debug_assertions, test, feature = "measure-guard"))]
     pub fn new_session(
         &mut self,
         discard_previous: bool,
@@ -628,6 +629,7 @@ impl SessionStore {
 
     // --- groups ----------------------------------------------------------------
 
+    #[cfg(any(debug_assertions, test, feature = "measure-guard"))]
     pub fn create_group(&mut self, name: Option<String>) -> StoreResult<String> {
         self.create_group_of(name, false)
     }
@@ -676,23 +678,6 @@ impl SessionStore {
         }
     }
 
-    /// The recordings that are not where the recordings folder and their group say (the folder setting changed, or a group was
-    /// renamed while a folder could not be moved).
-    pub fn recordings_to_move(&self) -> Vec<String> {
-        let mut v = Vec::new();
-        for g in self.session.groups.iter().filter(|g| g.is_recording()) {
-            let parent = self.rec_root.join(crate::recstore::safe_name(&g.name));
-            for c in &g.captures {
-                if let Some(d) = c.video_dir.as_deref().map(PathBuf::from) {
-                    if d.parent() != Some(parent.as_path()) && d.exists() {
-                        v.push(c.id.clone());
-                    }
-                }
-            }
-        }
-        v
-    }
-
     /// Move the folder of one recording to where its group says. True when it moved.
     pub fn relocate_capture(&mut self, id: &str) -> bool {
         let Some((g, c)) = self.session.find_capture(id) else {
@@ -728,49 +713,6 @@ impl SessionStore {
             crate::recstore::remove_if_empty(p);
         }
         true
-    }
-
-    /// Recordings of an earlier version (in their session folder) move into the recordings folder, once. Returns how many.
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub fn migrate_recordings(&mut self) -> usize {
-        let dir = self.session_dir();
-        let mut done: Vec<(String, String)> = Vec::new();
-        for g in self.session.groups.iter().filter(|g| g.is_recording()) {
-            let parent = self.rec_root.join(crate::recstore::safe_name(&g.name));
-            for c in &g.captures {
-                let (None, Some(v)) = (&c.video_dir, &c.video_file) else {
-                    continue;
-                };
-                let Some(from) = Path::new(v)
-                    .parent()
-                    .filter(|p| is_safe_relative(&p.to_string_lossy()))
-                    .map(|p| dir.join(p))
-                else {
-                    continue;
-                };
-                if !from.exists() {
-                    continue;
-                }
-                let to = crate::recstore::unique_dir(&parent, &c.name);
-                if crate::recstore::move_dir(&from, &to).is_ok() {
-                    done.push((c.id.clone(), to.to_string_lossy().into_owned()));
-                }
-            }
-        }
-        let n = done.len();
-        if n > 0 {
-            let _ = self.change(|s| {
-                for (id, to) in &done {
-                    if let Some((g, c)) = s.find_capture(id) {
-                        let cap = &mut s.groups[g].captures[c];
-                        cap.video_dir = Some(to.clone());
-                        cap.video_file = Some("screen.mp4".into());
-                    }
-                }
-                Ok(())
-            });
-        }
-        n
     }
 
     /// Cards of recordings whose files were deleted or moved away (in Explorer) are removed. Returns how many.
@@ -1253,30 +1195,6 @@ impl SessionStore {
                 ));
             }
             group.captures = ordered;
-            Ok(())
-        })
-    }
-
-    /// Move a capture to another group (or within its group), to `index` (the end when `None`).
-    pub fn move_capture_to_group(
-        &mut self,
-        capture_id: &str,
-        group_id: &str,
-        index: Option<usize>,
-    ) -> StoreResult<()> {
-        self.change(|s| {
-            if !s.groups.iter().any(|g| g.id == group_id) {
-                return Err(StoreError::NotFound(format!("group {group_id}")));
-            }
-            let (g, c) = s
-                .find_capture(capture_id)
-                .ok_or_else(|| StoreError::NotFound(format!("capture {capture_id}")))?;
-            let capture = s.groups[g].captures.remove(c);
-            let target = s.group_mut(group_id)?;
-            let at = index
-                .unwrap_or(target.captures.len())
-                .min(target.captures.len());
-            target.captures.insert(at, capture);
             Ok(())
         })
     }
@@ -1777,25 +1695,6 @@ mod tests {
             ["c", "a", "b"],
             "a bad list changes nothing"
         );
-    }
-
-    #[test]
-    fn a_capture_moves_to_another_group_at_a_position() {
-        let (_d, mut store) = store();
-        let g1 = store.session().groups[0].id.clone();
-        let g2 = store.create_group(None).unwrap();
-        let a = add(&mut store, &g1, "a");
-        add(&mut store, &g2, "x");
-        add(&mut store, &g2, "y");
-        store.move_capture_to_group(&a.id, &g2, Some(1)).unwrap();
-        assert!(names(&store, 0).is_empty());
-        assert_eq!(names(&store, 1), ["x", "a", "y"]);
-        store.move_capture_to_group(&a.id, &g2, None).unwrap();
-        assert_eq!(names(&store, 1), ["x", "y", "a"]);
-        store.move_capture_to_group(&a.id, &g1, Some(99)).unwrap();
-        assert_eq!(names(&store, 0), ["a"]);
-        assert!(store.move_capture_to_group(&a.id, "nope", None).is_err());
-        assert_eq!(names(&store, 0), ["a"], "a failed move changes nothing");
     }
 
     #[test]
@@ -2873,34 +2772,15 @@ mod recording_storage_tests {
     }
 
     #[test]
-    fn recordings_of_an_earlier_version_move_into_the_recordings_folder_and_missing_ones_are_dropped(
-    ) {
+    fn the_card_of_a_recording_whose_files_are_gone_is_dropped() {
         let dir = crate::testdir::new();
         let (mut s, g) = store(dir.path());
-        let png = {
-            let mut bytes = Vec::new();
-            image::RgbaImage::new(2, 2)
-                .write_to(&mut io::Cursor::new(&mut bytes), image::ImageFormat::Png)
-                .unwrap();
-            bytes
-        };
-        let c = s
-            .add_capture(&g, Some("Old rec".into()), &png, None, 2, 2, None)
-            .unwrap();
-        let legacy = s.session_dir().join("recordings").join("r1");
-        fs::create_dir_all(&legacy).unwrap();
-        fs::write(legacy.join("screen.mp4"), b"v").unwrap();
-        s.set_video(&c.id, "recordings/r1/screen.mp4", 500).unwrap();
-        assert_eq!(s.migrate_recordings(), 1);
-        let folder = s.recording_dir(&c.id).unwrap();
-        assert!(folder.starts_with(dir.path().join("Rec")));
-        assert!(folder.join("screen.mp4").exists());
-        assert!(!legacy.exists());
-        assert_eq!(s.migrate_recordings(), 0);
+        let (id, folder) = recording(&mut s, &g, "A");
+        assert_eq!(s.prune_missing_recordings(), 0);
         // Deleted in Explorer: the card goes at the next check.
         fs::remove_dir_all(&folder).unwrap();
         assert_eq!(s.prune_missing_recordings(), 1);
-        assert!(s.session().find_capture(&c.id).is_none());
+        assert!(s.session().find_capture(&id).is_none());
     }
 
     #[test]
@@ -2910,10 +2790,9 @@ mod recording_storage_tests {
         let (a, old) = recording(&mut s, &g, "A");
         s.set_recordings_root(dir.path().join("New"));
         assert_eq!(s.recording_dir(&a), Some(old.clone()));
-        assert_eq!(s.recordings_to_move(), vec![a.clone()]);
         assert!(s.relocate_capture(&a));
         let now = s.recording_dir(&a).unwrap();
         assert!(now.starts_with(dir.path().join("New")) && now.join("screen.mp4").exists());
-        assert!(s.recordings_to_move().is_empty());
+        assert!(!s.relocate_capture(&a), "it is where it belongs");
     }
 }

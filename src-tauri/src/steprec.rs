@@ -2118,6 +2118,7 @@ impl Pipe {
 // --- development-only entry points (the tests) --------------------------------------------------------------------------------------
 
 /// One synthetic event for `dev_guide_inject`.
+#[cfg(debug_assertions)]
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", tag = "type")]
 pub enum Inject {
@@ -2220,47 +2221,6 @@ pub fn dev_guide_bar(app: AppHandle, show: bool) {
             close_bar(&app);
         }
     });
-}
-
-#[cfg(not(debug_assertions))]
-#[tauri::command]
-pub fn dev_guide_bar() -> CmdResult<()> {
-    Err(CmdError::new("unavailable", "development builds only"))
-}
-
-/// Development only: install both hooks and take them away again at once (the events they see are thrown away unread).
-#[cfg(all(windows, debug_assertions))]
-#[tauri::command]
-pub fn dev_guide_hook_test() -> serde_json::Value {
-    let (tx, rx) = std::sync::mpsc::channel::<Raw>();
-    let paused = Arc::new(AtomicBool::new(true));
-    // Paused: the callbacks drop every event, so nothing of the user's input is even copied.
-    match hooks::Hooks::install(tx, paused) {
-        Ok(h) => {
-            std::thread::sleep(Duration::from_millis(200));
-            drop(h);
-            serde_json::json!({ "installed": true, "uninstalled": true, "events": rx.try_iter().count() })
-        }
-        Err(e) => serde_json::json!({ "installed": false, "error": e }),
-    }
-}
-
-#[cfg(not(all(windows, debug_assertions)))]
-#[tauri::command]
-pub fn dev_guide_hook_test() -> CmdResult<()> {
-    Err(CmdError::new("unavailable", "development builds only"))
-}
-
-#[cfg(not(debug_assertions))]
-#[tauri::command]
-pub fn dev_guide_start() -> CmdResult<()> {
-    Err(CmdError::new("unavailable", "development builds only"))
-}
-
-#[cfg(not(debug_assertions))]
-#[tauri::command]
-pub fn dev_guide_inject() -> CmdResult<()> {
-    Err(CmdError::new("unavailable", "development builds only"))
 }
 
 // --- Windows: hooks, UI Automation, window facts ---------------------------------------------------------------------------------
@@ -2461,9 +2421,10 @@ mod facts {
         UIA_ValuePatternId,
     };
     use windows::Win32::UI::Input::KeyboardAndMouse::{
-        GetKeyboardLayout, LoadKeyboardLayoutW, MapVirtualKeyExW, ToUnicodeEx, HKL,
-        KLF_NOTELLSHELL, MAPVK_VK_TO_VSC,
+        GetKeyboardLayout, MapVirtualKeyExW, ToUnicodeEx, HKL, MAPVK_VK_TO_VSC,
     };
+    #[cfg(debug_assertions)]
+    use windows::Win32::UI::Input::KeyboardAndMouse::{LoadKeyboardLayoutW, KLF_NOTELLSHELL};
     use windows::Win32::UI::WindowsAndMessaging::{
         EnumChildWindows, GetAncestor, GetClassNameW, GetForegroundWindow, GetWindowRect,
         GetWindowTextW, GetWindowThreadProcessId, SendMessageTimeoutW, WindowFromPoint, GA_ROOT,
@@ -2866,6 +2827,7 @@ mod facts {
     }
 
     /// The handle of a keyboard layout for the tests ("de", "en"); 0 = the one of the current thread.
+    #[cfg(debug_assertions)]
     pub fn layout_handle(name: &str) -> isize {
         let id = match name {
             "de" => "00000407",
@@ -3419,6 +3381,7 @@ mod facts {
     pub fn is_iconic(_: isize) -> bool {
         false
     }
+    #[cfg(debug_assertions)]
     pub fn layout_handle(_: &str) -> isize {
         0
     }
@@ -3702,54 +3665,6 @@ button,input,select{font:inherit} [role=tab]{padding:4px 10px;border:1px solid #
     }
 
     /// Scenario "native" / "web" / "manual": see the report of the session. Returns the steps that were written.
-    /// See `dev_uia_probe`.
-    pub async fn uia_probe(app: AppHandle) -> CmdResult<serde_json::Value> {
-        let file = std::env::temp_dir().join("snipmunk-guide-probe.html");
-        std::fs::write(&file, PAGE).map_err(|e| CmdError::new("io", e.to_string()))?;
-        let url = format!(
-            "file:///{}",
-            file.to_string_lossy()
-                .replace(std::path::MAIN_SEPARATOR, "/")
-        )
-        .parse::<tauri::Url>()
-        .map_err(|e| CmdError::new("io", e.to_string()))?;
-        let win = crate::webview::window(&app, "uiaprobe", tauri::WebviewUrl::External(url))
-            .title("UIA probe page")
-            .inner_size(640.0, 480.0)
-            .position(60.0, 60.0)
-            .always_on_top(true)
-            .focused(false)
-            .decorations(false)
-            .build()
-            .map_err(|e| CmdError::new("io", e.to_string()))?;
-        pause(1200).await;
-        let dpr = win.scale_factor().unwrap_or(1.0);
-        let pos = win.inner_position().map(|p| (p.x, p.y)).unwrap_or((60, 60));
-        let hwnd = win
-            .hwnd()
-            .map_err(|e| CmdError::new("io", e.to_string()))?
-            .0 as isize;
-        let (x, y) = page_targets(pos, dpr)["save"];
-        let a2 = app.clone();
-        let out = tauri::async_runtime::spawn_blocking(move || {
-            let _ = &a2;
-            let uia = facts::Uia::start();
-            let show = |f: Option<UiaFacts>| match f {
-                Some(f) => serde_json::json!({ "name": f.name, "control": f.control }),
-                None => serde_json::Value::Null,
-            };
-            let before = show(uia.at_point(x, y, Duration::from_millis(1500)));
-            let asked = uia.prime(hwnd, Some(Duration::from_millis(3000)));
-            std::thread::sleep(Duration::from_millis(800));
-            let after = show(uia.at_point(x, y, Duration::from_millis(1500)));
-            serde_json::json!({ "before": before, "renderHostsAsked": asked, "after": after })
-        })
-        .await
-        .map_err(|e| CmdError::new("io", e.to_string()))?;
-        let _ = win.close();
-        Ok(out)
-    }
-
     pub async fn scenario(
         app: AppHandle,
         kind: String,
@@ -3935,20 +3850,6 @@ button,input,select{font:inherit} [role=tab]{padding:4px 10px;border:1px solid #
     }
 }
 
-/// Development only: what UI Automation says about a button of an OWN WebView2 test window (generated page) before and after the
-/// window was asked to build its accessibility tree (the Chromium priming of `facts::Uia::prime`). Nothing else is looked at.
-#[cfg(all(windows, debug_assertions))]
-#[tauri::command]
-pub async fn dev_uia_probe(app: AppHandle) -> CmdResult<serde_json::Value> {
-    devtest::uia_probe(app).await
-}
-
-#[cfg(not(all(windows, debug_assertions)))]
-#[tauri::command]
-pub fn dev_uia_probe() -> CmdResult<()> {
-    Err(CmdError::new("unavailable", "development builds only"))
-}
-
 /// Development only: run a scenario against a test window ("native", "web" or "manual"); returns the steps that were written.
 #[cfg(all(windows, debug_assertions))]
 #[tauri::command]
@@ -3958,12 +3859,6 @@ pub async fn dev_guide_scenario(
     lang: Option<String>,
 ) -> CmdResult<serde_json::Value> {
     devtest::scenario(app, kind, lang).await
-}
-
-#[cfg(not(all(windows, debug_assertions)))]
-#[tauri::command]
-pub fn dev_guide_scenario() -> CmdResult<()> {
-    Err(CmdError::new("unavailable", "development builds only"))
 }
 
 #[cfg(all(test, windows))]

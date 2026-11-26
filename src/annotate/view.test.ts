@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { centred, clampPan, clampZoom, fitZoom, MAX_ZOOM, MIN_ZOOM, toPicture, toStage, wheelZoom, zoomAt } from "./view";
+import { centred, clampPan, clampZoom, fitZoom, MAX_ZOOM, MIN_ZOOM, toPicture, toStage, zoomAt } from "./view";
 
 const stage = { width: 800, height: 600 };
 
@@ -41,14 +41,6 @@ describe("the zoom limits and the wheel", () => {
     expect(clampZoom(0.001)).toBe(MIN_ZOOM);
     expect(clampZoom(99)).toBe(MAX_ZOOM);
     expect(zoomAt({ zoom: 1, ox: 0, oy: 0 }, 1000, 0, 0).zoom).toBe(MAX_ZOOM);
-  });
-  it("zooms in for a wheel turned away and out for one turned towards you", () => {
-    expect(wheelZoom(1, -100)).toBeGreaterThan(1);
-    expect(wheelZoom(1, 100)).toBeLessThan(1);
-    expect(wheelZoom(1, -100) * wheelZoom(1, 100)).toBeCloseTo(1);
-  });
-  it("a very large wheel step is limited", () => {
-    expect(wheelZoom(1, -100000)).toBeCloseTo(wheelZoom(1, -300));
   });
 });
 

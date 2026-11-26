@@ -15,10 +15,6 @@ export function made(ids: readonly string[]): LockState {
   return { live: new Set(ids) };
 }
 
-export function isLive(state: LockState, id: string): boolean {
-  return state.live.has(id);
-}
-
 /** Only the ids that can still be edited (a selection can never hold a committed mark). */
 export function restrict(state: LockState, ids: Iterable<string>): string[] {
   return [...ids].filter((id) => state.live.has(id));
@@ -32,28 +28,4 @@ export function selectable<T extends { id: string }>(state: LockState, items: re
 /** Commit everything: nothing can be edited any more. */
 export function commitAll(state: LockState): LockState {
   return state.live.size === 0 ? state : unlocked;
-}
-
-export type LockEvent =
-  /** A press on the picture; `onLive` is true on a live mark or one of its handles. */
-  | { type: "press"; onLive: boolean }
-  | { type: "toolChanged"; keep?: boolean }
-  | { type: "key"; key: string }
-  | { type: "captureChanged" }
-  /** Undo or redo: what was live is gone or changed. */
-  | { type: "history" };
-
-export function lockStep(state: LockState, ev: LockEvent): LockState {
-  switch (ev.type) {
-    case "press":
-      return ev.onLive ? state : commitAll(state);
-    case "toolChanged":
-      // The Text tool hands over to Select with the finished box still live: that is the one change that keeps it.
-      return ev.keep ? state : commitAll(state);
-    case "key":
-      return ev.key === "Escape" || ev.key === "Enter" ? commitAll(state) : state;
-    case "captureChanged":
-    case "history":
-      return commitAll(state);
-  }
 }

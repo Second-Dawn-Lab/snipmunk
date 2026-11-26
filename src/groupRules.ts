@@ -57,8 +57,3 @@ export function activeAfterGroupDelete(
   if (moveTo) return moveTo;
   return defaultMoveTarget(groups, deletedId) ?? activeId;
 }
-
-/** What the page offers when a group is deleted: nothing to ask for an empty group. */
-export function needsDeleteChoice(group: Group): boolean {
-  return group.captures.length > 0;
-}

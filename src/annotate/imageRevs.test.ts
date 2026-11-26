@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hasRedactions, ImageRevisions, planImageSync, withoutRedactions, type EditState } from "./imageRevs";
+import { hasRedactions, ImageRevisions, planImageSync, type EditState } from "./imageRevs";
 import { History } from "./history";
 import { emptyDoc, type Annotation, type AnnotationDoc } from "./schema";
 import { redact, type PixelBuffer } from "./redact";
@@ -56,16 +56,7 @@ describe("the versions of the stored picture", () => {
   });
 });
 
-describe("the document after a permanent redaction", () => {
-  it("has no redactions and keeps every other mark, the crop and the rotation", () => {
-    const doc = { ...emptyDoc(), crop: { x: 1, y: 1, w: 5, h: 5 }, rotation: 90 as const, flipH: true, items: [line, cut, { ...cut, id: "r2" }] };
-    const baked = withoutRedactions(doc);
-    expect(baked.items).toEqual([line]);
-    expect(baked.crop).toEqual(doc.crop);
-    expect(baked.rotation).toBe(90);
-    expect(baked.flipH).toBe(true);
-    expect(doc.items).toHaveLength(3);
-  });
+describe("a permanent redaction", () => {
   it("knows whether there is something to burn in", () => {
     expect(hasRedactions({ items: [line] })).toBe(false);
     expect(hasRedactions({ items: [line, cut] })).toBe(true);
@@ -92,7 +83,8 @@ describe("burning in, undo and redo with the history", () => {
     revs.remember(rev, new Uint8Array(baked.data));
     file = baked;
     revs.setDisk(rev);
-    history.push({ doc: withoutRedactions(history.current.doc), rev });
+    // (the editor takes the burned-in redactions out of the document)
+    history.push({ doc: { ...history.current.doc, items: [line] }, rev });
 
     const inArea = (f: PixelBuffer) => f.data[(4 * 10 + 4) * 4];
     expect(inArea(file)).toBe(0);

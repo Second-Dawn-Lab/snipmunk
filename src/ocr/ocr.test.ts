@@ -2,8 +2,7 @@ import { describe, expect, it } from "vitest";
 import { emptyDoc, type Annotation } from "../annotate/schema";
 import { docGeometry } from "../annotate/transform";
 import { apply } from "../annotate/transform";
-import { toStage } from "../annotate/view";
-import { fitScale, fontSizeFor, selectedNumbers, selectionText, stageRect, wordAt } from "./layer";
+import { fitScale, fontSizeFor, selectedNumbers, selectionText } from "./layer";
 import { buildDocument, isEmpty, isRtlLine, joinWords, textOfWords } from "./layout";
 import { docKey, ocrKey } from "./key";
 import { detectTable, toHtml, toTsv } from "./table";
@@ -398,27 +397,6 @@ describe("redaction from matches", () => {
 // --- the text layer ---------------------------------------------------------------------------------------------------------
 
 describe("the text layer", () => {
-  it("puts a word where the picture is on the stage, at any zoom and pan", () => {
-    const view = { zoom: 0.5, ox: 30, oy: 20 };
-    expect(stageRect({ x: 100, y: 40, w: 80, h: 20 }, view)).toEqual({ x: 80, y: 40, w: 40, h: 10 });
-    const v2 = { zoom: 2, ox: -10, oy: 5 };
-    expect(stageRect({ x: 0, y: 0, w: 10, h: 10 }, v2)).toEqual({ x: -10, y: 5, w: 20, h: 20 });
-  });
-
-  it("follows the picture after crop, rotation and flip: a word on an original pixel lies on that pixel on the stage", () => {
-    const view = { zoom: 0.7, ox: 12, oy: 9 };
-    for (const d of [
-      { crop: { x: 40, y: 30, w: 200, h: 120 }, rotation: 90 as const, flipH: false, flipV: false },
-      { crop: null, rotation: 270 as const, flipH: true, flipV: false },
-    ]) {
-      const m = docGeometry(d, 400, 300).matrix;
-      const p = apply(m, 120, 80); // where the OCR sees that pixel (the final picture)
-      const stage = stageRect({ x: p.x, y: p.y, w: 0, h: 0 }, view);
-      const direct = toStage(view, p.x, p.y);
-      expect([stage.x, stage.y]).toEqual([direct.x, direct.y]);
-    }
-  });
-
   it("sizes the invisible text to the word", () => {
     expect(fontSizeFor({ h: 20 })).toBeCloseTo(17.2);
     expect(fontSizeFor({ h: 1 })).toBe(4);
@@ -434,12 +412,5 @@ describe("the text layer", () => {
     expect(selectionText(doc, [3])).toBe("four");
     expect(selectionText(doc, [])).toBe("");
     expect(selectedNumbers([2, null, undefined, 0, NaN])).toEqual([0, 2]);
-  });
-
-  it("finds the word under a point", () => {
-    const doc = buildDocument(result([row("one two", 10, 10)]));
-    expect(wordAt(doc, 15, 15)?.text).toBe("one");
-    expect(wordAt(doc, 50, 15)?.text).toBe("two");
-    expect(wordAt(doc, 500, 500)).toBeNull();
   });
 });

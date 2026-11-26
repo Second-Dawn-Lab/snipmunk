@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { activeClicks, burstShape, clickMax, haloRadius, rippleShape } from "./drawFx";
-import { effectsFromSettings, readEffects, trimRange, webcamCentre } from "./effects";
+import { effectsFromSettings, readEffects, trimRange } from "./effects";
 import { defaultSettings } from "../settings/defaults";
 
 describe("click effects", () => {
@@ -45,13 +45,9 @@ describe("effects", () => {
     expect(readEffects(null, base)).toEqual(base);
   });
 
-  it("trim ranges stay inside the recording and the webcam sits in its corner", () => {
+  it("trim ranges stay inside the recording", () => {
     expect(trimRange({ startMs: 1000, endMs: 4000 }, 10)).toEqual([1, 4]);
     expect(trimRange({ startMs: 0, endMs: null }, 10)).toEqual([0, 10]);
     expect(trimRange({ startMs: 20000, endMs: 30000 }, 10)).toEqual([10, 10]);
-    const c = webcamCentre({ ...base.webcam, position: "top-left" }, 0.2, 1);
-    expect(c.x).toBeLessThan(0.2);
-    expect(c.y).toBeLessThan(0.3);
-    expect(webcamCentre({ ...base.webcam, position: "free", x: 0.3, y: 0.4 }, 0.2, 1)).toEqual({ x: 0.3, y: 0.4 });
   });
 });

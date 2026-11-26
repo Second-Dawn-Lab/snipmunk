@@ -5,6 +5,7 @@ import { ipc, projectCapture, type Capture, type OpenProject, type RecentProject
 import { formatTime } from "../recording/timeline";
 import { sessionStore } from "../sessionStore";
 import type { Settings } from "../settings/defaults";
+import { quitWording } from "../update";
 import { AppIcon } from "./AppIcons";
 import { recordingEntries, type FileEntry } from "./fileEntries";
 
@@ -201,6 +202,9 @@ export function useRecordingMode(args: {
   // Quit while a recording runs: "Stop and keep the recording?", then the usual list. A scrolling capture is thrown away on quit.
   const [stopAsk, setStopAsk] = useState(false);
   const [quitScrolling, setQuitScrolling] = useState(false);
+  // The same question comes before the restart that installs an update, in words of its own.
+  const [quitForUpdate, setQuitForUpdate] = useState(false);
+  const quitWords = quitWording(quitForUpdate);
   const discardCurrent = useCallback(
     () =>
       ipc
@@ -257,6 +261,7 @@ export function useRecordingMode(args: {
   useEffect(() => {
     const p = ipc.onQuitRequested((what) => {
       setQuitScrolling(what.scrolling);
+      setQuitForUpdate(what.update);
       // A running recording is asked about first; then the list of what is not saved.
       if (what.recording) setStopAsk(true);
       else setQuitAsk(true);
@@ -674,15 +679,15 @@ export function useRecordingMode(args: {
       </Dialog>
       <Dialog
         open={quitAsk}
-        title={t("proj.quitTitle")}
+        title={t(quitWords.title)}
         onClose={() => (setQuitAsk(false), void ipc.cancelQuit())}
         footer={
           <>
             <Button variant="ghost" onClick={() => (setQuitAsk(false), void ipc.cancelQuit())}>
-              {t("session.cancel")}
+              {t(quitWords.cancel)}
             </Button>
             <Button variant="danger" onClick={() => void ipc.quitApp()}>
-              {t("proj.quitDont")}
+              {t(quitWords.discard)}
             </Button>
             <Button
               variant="primary"
@@ -700,7 +705,7 @@ export function useRecordingMode(args: {
           </>
         }
       >
-        <p>{t("proj.quitBody")}</p>
+        <p>{t(quitWords.body)}</p>
         <ul>
           {currentUnsaved && current && <li>{t("proj.quitItemCurrent", { name: current.name })}</li>}
           {dirtyTabs.map((p) => (

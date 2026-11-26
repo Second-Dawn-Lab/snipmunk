@@ -20,6 +20,11 @@ pub struct DeviceInfo {
 /// The id of the generated test camera (listed in debug builds only).
 pub const SYNTHETIC: &str = "__synthetic__";
 
+/// Is this the generated test camera? A release build knows none: there the id is just a camera that does not exist.
+pub fn is_synthetic(device: &str) -> bool {
+    cfg!(any(debug_assertions, test, feature = "measure-guard")) && device == SYNTHETIC
+}
+
 /// A moving test pattern for the generated camera: a colour that shifts, a white disc that circles and a dark stripe.
 pub fn pattern(w: usize, h: usize, i: usize) -> Vec<u8> {
     let mut f = vec![255u8; w * h * 4];
@@ -332,7 +337,7 @@ mod win {
             let start_ms = Arc::new(std::sync::atomic::AtomicU64::new(0));
             let start_for_thread = start_ms.clone();
             let stop = Arc::new(AtomicBool::new(false));
-            let use_synthetic = synthetic || device == SYNTHETIC;
+            let use_synthetic = synthetic || super::is_synthetic(device);
             let fps = 30u32;
             type Opened = Result<(u32, u32, bool, Arc<Mutex<Segments>>), &'static str>;
             let (tx, rx) = std::sync::mpsc::channel::<Opened>();
@@ -397,6 +402,12 @@ mod win {
             })
         }
 
+        /// How many pictures are in the recording so far.
+        #[cfg(test)]
+        pub fn pictures(&self) -> u64 {
+            self.segments.lock().unwrap().sent
+        }
+
         /// A pause ends the segment; no pictures are kept until the resume.
         pub fn pause(&self) {
             self.segments.lock().unwrap().pause();
@@ -429,7 +440,7 @@ mod win {
     /// Open the camera `device` for the bubble (`__synthetic__` or `synthetic`: the generated pattern). `Err` is a notice for the page.
     pub fn start_preview(device: &str, synthetic: bool) -> Result<Preview, &'static str> {
         let stop = Arc::new(AtomicBool::new(false));
-        let use_synthetic = synthetic || device == SYNTHETIC;
+        let use_synthetic = synthetic || super::is_synthetic(device);
         let (tx, rx) = std::sync::mpsc::channel::<Result<(), &'static str>>();
         let (stop2, device2) = (stop.clone(), device.to_string());
         let thread = std::thread::spawn(move || {

@@ -6,7 +6,6 @@ import type { ToolValues } from "./styles";
 
 /** The tool values that are sizes (in screen pixels in the settings and in the popovers). */
 export const SIZE_VALUE_KEYS = ["lastPenSize", "lastHighlighterSize", "lastOutlineSize", "lastTextSize"] as const;
-export type SizeKey = (typeof SIZE_VALUE_KEYS)[number];
 
 /** The size of an emoji sticker on the screen when it is placed. */
 export const EMOJI_SCREEN_SIZE = 40;

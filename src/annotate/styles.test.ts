@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { defaultSettings } from "../settings/defaults";
-import { isBoxShape, isRestyled, newEmoji, newHighlighter, newLine, newPen, newShape, newText, pickValues, restyle, styleKey, TOOL_VALUE_KEYS } from "./styles";
+import { isBoxShape, newEmoji, newHighlighter, newLine, newPen, newShape, newText, pickValues, restyle, styleKey, TOOL_VALUE_KEYS } from "./styles";
 
 const v = pickValues(defaultSettings);
 
@@ -49,8 +49,6 @@ describe("changing a value restyles the selected marks", () => {
   it("the pen colour changes pen strokes only", () => {
     expect(restyle(pen, { lastPenColor: "#00ff00" })).toMatchObject({ color: "#00ff00", size: pen.size });
     expect(restyle(rect, { lastPenColor: "#00ff00" })).toEqual(rect);
-    expect(isRestyled(rect, { lastPenColor: "#00ff00" })).toBe(false);
-    expect(isRestyled(pen, { lastPenColor: "#00ff00" })).toBe(true);
   });
   it("fill and outline change shapes", () => {
     expect(restyle(rect, { lastFillColor: "#ff00ff", lastFillOpacity: 30 })).toMatchObject({ fill: "#ff00ff", fillOpacity: 30 });

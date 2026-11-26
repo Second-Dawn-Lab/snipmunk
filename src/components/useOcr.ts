@@ -16,11 +16,6 @@ const cache = new Map<string, Cached>();
 const inFlight = new Map<string, Promise<OcrDoc | null>>();
 const CACHED = 20;
 
-/** Forget what was recognized for a capture (its picture changed). */
-export function forgetOcr(captureId: string): void {
-  cache.delete(captureId);
-}
-
 /** Forget every text held in memory: it is read from the session folder again when it is needed. */
 export function dropOcrCache(): void {
   cache.clear();

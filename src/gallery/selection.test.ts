@@ -9,7 +9,6 @@ import {
   pruneTo,
   rangeBetween,
   selectEvery,
-  selectedInOrder,
   stepTarget,
   toggleSelect,
   type Selection,
@@ -111,10 +110,6 @@ describe("select all, clear and prune", () => {
     const p = pruneTo(s, new Set(["a", "c"]));
     expect(ids(p)).toEqual(["a", "c"]);
     expect(p.anchor).toBeNull();
-  });
-
-  it("lists the selection in list order", () => {
-    expect(selectedInOrder(sel(["e", "a", "c"]), order)).toEqual(["a", "c", "e"]);
   });
 });
 

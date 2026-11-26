@@ -1509,6 +1509,9 @@ pub(crate) mod win {
         files: Vec<std::path::PathBuf>,
         /// The start of the segment names: `screen` (`screen-000.mp4`) or `webcam`.
         prefix: &'static str,
+        /// How many pictures went into the segments through `send_buffer` (for tests that wait for them).
+        #[cfg(test)]
+        pub(crate) sent: u64,
     }
 
     impl Segments {
@@ -1534,6 +1537,8 @@ pub(crate) mod win {
                 finishing: Vec::new(),
                 files: Vec::new(),
                 prefix: "screen",
+                #[cfg(test)]
+                sent: 0,
             }
         }
 
@@ -1597,6 +1602,10 @@ pub(crate) mod win {
         pub fn send_buffer(&mut self, buffer: &[u8], ts: i64) -> Result<(), Error> {
             if let Some(e) = self.current()? {
                 e.send_frame_buffer(buffer, ts)?;
+                #[cfg(test)]
+                {
+                    self.sent += 1;
+                }
             }
             Ok(())
         }
@@ -2169,8 +2178,9 @@ mod segment_tests {
             joined.segments, joined.samples, joined.duration_ms, took
         );
         assert_eq!(joined.samples as usize, total);
+        // 150 pictures at 30 a second are 5 s, to the picture.
         assert!(
-            (4_800..=5_400).contains(&joined.duration_ms),
+            (4_980..=5_020).contains(&joined.duration_ms),
             "{}",
             joined.duration_ms
         );
@@ -2228,7 +2238,7 @@ mod render_tests {
     use crate::audio::{TrackWriter, TICKS};
     use std::sync::atomic::AtomicBool;
     use std::sync::Arc;
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
     /// A generated recording of `secs` seconds (no screen, no real sound): moving test pattern in 2 s segments, a tone for each
     /// track, a generated cursor track. Returns the folder's `RecordingInfo` that was written.
@@ -2693,13 +2703,93 @@ mod render_tests {
         assert_eq!((small.width, small.height), (640, 360));
     }
 
+    /// The cursor, the halo and the click effects are drawn by the time of each picture, so that time has to be the one the
+    /// picture was recorded at. An encoder that reorders pictures (B-frames: Windows' software H.264 encoder, used where there
+    /// is no hardware one) writes every picture one picture late in the file. This holds with either encoder.
+    #[test]
+    fn a_picture_is_drawn_at_the_time_it_was_recorded_at_also_after_a_join_and_a_seek() {
+        let _encoder = super::encoder_lock();
+        let dir = crate::testdir::new();
+        let (w, h, fps) = (320usize, 180usize, 30i64);
+        let frame_ticks = TICKS / fps;
+        // 3 s in two segments (so there is a join). Every picture carries its number as eight black or white bars.
+        let mut seg = win::Segments::new(
+            dir.path(),
+            w as u32,
+            h as u32,
+            fps as u32,
+            "standard",
+            Duration::from_secs(600),
+        );
+        for n in 0..3 * fps {
+            let mut f = vec![255u8; w * h * 4];
+            for (i, px) in f.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+                if n >> (i % w * 8 / w) & 1 == 0 {
+                    px[..3].fill(0);
+                }
+            }
+            seg.send_buffer(&f, n * frame_ticks).unwrap();
+            // (a pause ends a segment: the second one begins here)
+            if n == 2 * fps - 1 {
+                seg.pause();
+                seg.resume();
+            }
+        }
+        let files = seg.finish_all().unwrap();
+        assert!(files.len() >= 2, "{files:?}");
+        let video = dir.path().join("screen.mp4");
+        crate::mp4join::join(&files, &video).unwrap();
+
+        let number = |p: &[u8]| -> i64 {
+            (0..8)
+                .filter(|bit| p[(h / 2 * w + bit * w / 8 + w / 16) * 4] > 127)
+                .map(|bit| 1i64 << bit)
+                .sum()
+        };
+        for seek in [0, 15 * TICKS / 10] {
+            let (_, _, pictures) =
+                crate::render::win::read_timed_frames(&video, 200, seek).unwrap();
+            assert!(pictures.len() >= 30, "{} pictures", pictures.len());
+            for (ts, p) in &pictures {
+                let n = number(p);
+                // Windows' transcoder shows a segment's second picture in the place of its first one; that one is left out.
+                if [0, 2 * fps]
+                    .iter()
+                    .any(|first| (ts - first * frame_ticks).abs() < frame_ticks / 2)
+                {
+                    continue;
+                }
+                assert!(
+                    (ts - n * frame_ticks).abs() < TICKS / 500,
+                    "after a seek to {seek}: picture {n} is drawn at {} ms, it was recorded at {} ms",
+                    ts / 10_000,
+                    n * frame_ticks / 10_000
+                );
+            }
+        }
+    }
+
     #[test]
     fn the_generated_webcam_is_recorded_across_a_pause_joined_and_drawn_over_the_export() {
         let _encoder = super::encoder_lock();
         use crate::effects::Effects;
         let dir = crate::testdir::new();
         generated(dir.path(), 640, 360, 15, 3);
-        // 1.5 s of webcam, a pause of 1 s, 1.5 s again: 3 s of video, in 3 segments (one of them after the pause).
+        // 30 pictures of webcam (a second), a pause of 2 s, 30 pictures again: a segment before the pause and one after it. How
+        // long that takes differs (opening an encoder can take a second or more on a busy PC), so the test waits for the
+        // pictures, not for a time, and judges the length by the times measured here.
+        let wait_for = |cam: &crate::webcam::Webcam, pictures: u64| {
+            let until = Instant::now() + Duration::from_secs(30);
+            while cam.pictures() < pictures {
+                assert!(
+                    Instant::now() < until,
+                    "only {} pictures arrived",
+                    cam.pictures()
+                );
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        };
+        let started = Instant::now();
         let cam = crate::webcam::Webcam::start(
             dir.path(),
             crate::webcam::SYNTHETIC,
@@ -2707,11 +2797,16 @@ mod render_tests {
             Arc::new(|| true),
         )
         .unwrap();
-        std::thread::sleep(Duration::from_millis(1500));
+        wait_for(&cam, 30);
         cam.pause();
-        std::thread::sleep(Duration::from_millis(1000));
+        let paused = Instant::now();
+        let before_pause = cam.pictures();
+        std::thread::sleep(Duration::from_millis(2000));
+        assert_eq!(cam.pictures(), before_pause, "nothing is kept while paused");
+        let resumed = Instant::now();
         cam.resume();
-        std::thread::sleep(Duration::from_millis(1500));
+        wait_for(&cam, before_pause + 30);
+        let stopped = Instant::now();
         let segments = cam.finish();
         assert!(segments.len() >= 2, "{segments:?}");
         let name = join_webcam(dir.path(), &segments).unwrap();
@@ -2723,14 +2818,16 @@ mod render_tests {
         let (cw, ch, frames) =
             crate::render::win::read_frames(&dir.path().join("webcam.mp4"), 1000).unwrap();
         assert_eq!((cw, ch), (640, 360));
-        // The pause is cut out: the camera took 3 s of pictures in two stretches. (Opening a segment's encoder takes up to a second
-        // on this PC, and a camera does not deliver what it missed, so the number of pictures is not the length: the length of
-        // the video track is, and it counts from the first to the last picture.)
+        // The pause is cut out. The length of the video track counts from the first to the last picture of each stretch: at
+        // least the 29 intervals of 30 pictures a second twice (a camera does not deliver what it missed, so gaps only make it
+        // longer), and at most the time the camera was running and not paused. With the pause left in it would be 2 s longer.
         let (len_ms, _) = track_lengths_ms(&dir.path().join("webcam.mp4"));
-        assert!(frames.len() >= 30, "{} pictures", frames.len());
+        assert!(frames.len() >= 55, "{} pictures", frames.len());
+        let running = (paused - started) + (stopped - resumed);
+        let most = running.as_millis() as u64 + 200;
         assert!(
-            (1500..=3600).contains(&len_ms),
-            "{len_ms} ms of webcam (the pause is cut out)"
+            (1900..=most).contains(&len_ms),
+            "{len_ms} ms of webcam; the camera ran {running:?} outside the pause"
         );
         // The recording knows the webcam; with it shown the export has a disc in the corner, without it not.
         let mut info: RecordingInfo =

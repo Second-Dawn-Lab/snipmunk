@@ -84,7 +84,7 @@ impl Capture {
 
 /// `SNIPMUNK_TRACE=1` prints the timings of a capture to the console (used to measure how fast the overlay appears).
 fn trace(msg: &str) {
-    if std::env::var_os("SNIPMUNK_TRACE").is_some() {
+    if dev_env("SNIPMUNK_TRACE").is_some() {
         let epoch = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis())
@@ -263,10 +263,21 @@ pub fn real_capture_blocked() -> bool {
     blocked
 }
 
-/// Is the guard of a test instance active? A test script asks this before it clicks anything; it grabs nothing.
+/// Is the guard of a test instance active? A test script asks this before it clicks anything; it grabs nothing. (A release
+/// build does not have the command.)
+#[cfg(any(debug_assertions, feature = "measure-guard"))]
 #[tauri::command]
 pub fn dev_capture_guard() -> bool {
     guard_active()
+}
+
+/// An override for development, tests and measurements (`SNIPMUNK_*`): a release build never reads it.
+pub fn dev_env(name: &str) -> Option<std::ffi::OsString> {
+    if cfg!(any(debug_assertions, test, feature = "measure-guard")) {
+        std::env::var_os(name)
+    } else {
+        None
+    }
 }
 
 /// Start a capture (from the shortcut, the button or the tray). Does nothing while another capture is running.
@@ -453,6 +464,7 @@ pub fn cancel(app: &AppHandle) {
 /// For scripts/measure-memory.ps1: how long the selection overlay takes from the start of a capture until its picture
 /// is on screen, with a generated screenshot on an overlay far off every monitor that never takes the focus. `fresh`
 /// destroys a kept overlay first. Answers only in a guarded instance.
+#[cfg(any(debug_assertions, feature = "measure-guard"))]
 #[tauri::command]
 pub async fn dev_overlay_timing(app: AppHandle, fresh: bool) -> CmdResult<u64> {
     if !guard_active() {
@@ -774,6 +786,7 @@ pub fn recording_area(rects: &[Rect], index: usize, args: &FinishArgs) -> Option
 }
 
 /// The area of a scrolling capture on the virtual desktop: the visible part of the chosen window or rectangle.
+#[cfg(debug_assertions)]
 fn recording_area_scrolling(rects: &[Rect], index: usize, args: &FinishArgs) -> Option<Rect> {
     let monitor = *rects.get(index)?;
     let [rx, ry, rw, rh] = args.rect;
@@ -883,33 +896,37 @@ pub fn capture_finish(app: AppHandle, args: FinishArgs) -> CmdResult<()> {
         });
         return Ok(());
     }
-    if args.mode == "scrolling" && crate::scrollshot::experimental() {
-        // Pictures are taken fresh after every scroll step; the frozen screenshots are not needed.
-        let area = recording_area_scrolling(&run.rects, index, &args);
-        let title = args
-            .window_title
-            .clone()
-            .filter(|t| !t.trim().is_empty())
-            .or_else(|| {
-                area.and_then(|a| {
-                    winlist::hit_test(&run.windows, a.center()).map(|w| w.title.clone())
-                })
+    // The parked scrolling screenshot: development builds only.
+    #[cfg(debug_assertions)]
+    {
+        if args.mode == "scrolling" && crate::scrollshot::experimental() {
+            // Pictures are taken fresh after every scroll step; the frozen screenshots are not needed.
+            let area = recording_area_scrolling(&run.rects, index, &args);
+            let title = args
+                .window_title
+                .clone()
+                .filter(|t| !t.trim().is_empty())
+                .or_else(|| {
+                    area.and_then(|a| {
+                        winlist::hit_test(&run.windows, a.center()).map(|w| w.title.clone())
+                    })
+                });
+            let hwnd = args.window_hwnd.map(|h| h as isize).or_else(|| {
+                area.and_then(|a| winlist::hit_test(&run.windows, a.center()).map(|w| w.hwnd))
             });
-        let hwnd = args.window_hwnd.map(|h| h as isize).or_else(|| {
-            area.and_then(|a| winlist::hit_test(&run.windows, a.center()).map(|w| w.hwnd))
-        });
-        drop(run);
-        if let Some(area) = area {
-            // The overlays are gone before the first picture is taken.
-            std::thread::spawn(move || {
-                std::thread::sleep(Duration::from_millis(150));
-                crate::scrollshot::begin(&app, area, hwnd, title);
-                app.state::<Capture>().busy.store(false, Ordering::SeqCst);
-            });
-        } else {
-            capture.busy.store(false, Ordering::SeqCst);
+            drop(run);
+            if let Some(area) = area {
+                // The overlays are gone before the first picture is taken.
+                std::thread::spawn(move || {
+                    std::thread::sleep(Duration::from_millis(150));
+                    crate::scrollshot::begin(&app, area, hwnd, title);
+                    app.state::<Capture>().busy.store(false, Ordering::SeqCst);
+                });
+            } else {
+                capture.busy.store(false, Ordering::SeqCst);
+            }
+            return Ok(());
         }
-        return Ok(());
     }
     trace(&format!(
         "selection finished {} ms after the start",

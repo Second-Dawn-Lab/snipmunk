@@ -92,8 +92,6 @@ export function pruneTo(sel: Selection, alive: ReadonlySet<string>): Selection {
 
 // --- keyboard ----------------------------------------------------------------------------------------------------
 
-export type NavKey = "ArrowUp" | "ArrowDown" | "ArrowLeft" | "ArrowRight" | "PageUp" | "PageDown" | "Home" | "End";
-
 export interface NavLayout {
   /** 1 in the list view. */
   columns: number;
@@ -179,9 +177,4 @@ export function contextTargets(sel: Selection, order: readonly string[], clicked
     return { ids, selection: sel, canRename: ids.length === 1 };
   }
   return { ids: [clicked], selection: make([clicked], clicked), canRename: true };
-}
-
-/** What Del deletes and what the bottom bar counts: the selection in list order. */
-export function selectedInOrder(sel: Selection, order: readonly string[]): string[] {
-  return order.filter((id) => sel.ids.has(id));
 }

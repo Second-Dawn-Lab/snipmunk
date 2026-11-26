@@ -20,8 +20,6 @@
     "@seconddawn/settings": "link:../dawn-core/packages/settings",
     "@seconddawn/ui": "link:../dawn-core/packages/ui",
     "@tauri-apps/api": "^2.0.0",
-    "@tauri-apps/plugin-process": "^2",
-    "@tauri-apps/plugin-updater": "^2",
     "@tiptap/core": "^3.35.0",
     "@tiptap/extension-highlight": "^3.35.0",
     "@tiptap/extension-image": "^3.35.0",

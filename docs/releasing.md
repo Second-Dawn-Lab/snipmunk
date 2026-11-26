@@ -149,7 +149,7 @@ Do this in order:
 2. Make a small real fix (or a harmless one, for example a spelling correction in the app) and commit it with the Summary `fix: ...`; push. Wait for CI, merge **"chore: release 0.1.1"**, test the draft's files exist, **Publish release**.
 3. Start the installed 0.1.0: **Settings → About → Check for updates**. It must say "Snipmunk 0.1.1 is available". (The quiet check after a start also finds it, at most once a day; if you checked in the last 24 hours it waits until tomorrow.)
 4. Press **Update and restart**: progress, then Snipmunk closes, the installer runs without questions, and 0.1.1 starts. **About** shows 0.1.1; settings, screenshots and the Start menu shortcut are as before.
-5. Repeat once with unsaved work (an unsaved recording): the question comes first; **Cancel** keeps 0.1.0 running and the notice stays; **Update and restart** again installs it.
+5. Repeat once with unsaved work (an unsaved recording): the question **Update now?** comes first; **Later** keeps 0.1.0 running and the notice stays; **Update and restart** again asks again, and **Update without saving** (or **Save…**) installs it.
 6. With the network off, a start shows nothing; **Check for updates** says the server could not be reached.
 
 ## 6. dawn-core releases

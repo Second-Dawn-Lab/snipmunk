@@ -4,6 +4,9 @@ target/
 target-*/
 *.log
 
+# Scratch folders (test instances, generated test data)
+_scratch*/
+
 # Secrets, certificates and keys
 .env
 .env.*
@@ -16,6 +19,9 @@ target-*/
 *.exe
 *.dll
 *.msi
+*.msix
+*.msixbundle
+*.msixupload
 *.zip
 *.tar.gz
 *.7z

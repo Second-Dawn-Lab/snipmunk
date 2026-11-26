@@ -122,7 +122,8 @@ function Root({ label }: { label: string }) {
   if (label === "guideframe") return <GuideFrame />;
   if (label === "recbar") return <RecBar />;
   if (label === "webcambubble") return <WebcamBubble />;
-  if (label === "scrollpill") return <ScrollPill />;
+  // (the parked scrolling screenshot exists in development builds only)
+  if (import.meta.env.DEV && label === "scrollpill") return <ScrollPill />;
   if (label === "guidebar") return <GuideBar />;
   if (label === "scrollframe") return <div className="recframe recframe--scroll" />;
   return <MainWindow />;

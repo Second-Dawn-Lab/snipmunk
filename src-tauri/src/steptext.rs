@@ -915,7 +915,8 @@ pub fn step_text(kind: Kind, m: &Meta, lang: &str) -> Vec<Part> {
     parts
 }
 
-/// The step text as plain text (for "Copy all as text"): the parts joined.
+/// The step text as plain text, the parts joined (for the tests; the page writes its own text from the parts).
+#[cfg(any(debug_assertions, test))]
 pub fn plain(parts: &[Part]) -> String {
     parts.iter().map(|p| p.t.as_str()).collect()
 }

@@ -103,20 +103,6 @@ export function trimRange(trim: Effects["trim"], duration: number): [number, num
   return [start, end];
 }
 
-/** The centre of the webcam picture as a fraction of the video (0..1) for a corner or a dragged position; `size` is its width as a fraction. */
-export function webcamCentre(w: Effects["webcam"], width: number, aspect: number): { x: number; y: number } {
-  if (w.position === "free") return { x: w.x, y: w.y };
-  const margin = 0.02;
-  const half = width / 2;
-  const halfH = (width / aspect) / 2;
-  const left = margin + half;
-  const top = margin * 1.78 + halfH;
-  return {
-    x: w.position.endsWith("left") ? left : 1 - left,
-    y: w.position.startsWith("top") ? top : 1 - top,
-  };
-}
-
 /** The width of the webcam border as a fraction of the shorter side of the bubble. */
 export const BORDER_WIDTH = { off: 0, thin: 0.02, medium: 0.04, thick: 0.07 } as const;
 
@@ -128,6 +114,3 @@ export const CURSOR_SCALE = { "1": 1, "1.5": 1.5, "2": 2 } as const;
 
 /** The click effect's radius as a fraction of the video height. */
 export const CLICK_RADIUS = { small: 0.03, medium: 0.05, large: 0.08 } as const;
-
-/** How long a click effect lasts, in milliseconds. */
-export const CLICK_MS = 600;

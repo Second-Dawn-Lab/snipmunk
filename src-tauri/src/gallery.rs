@@ -306,13 +306,3 @@ fn hsl(h: f32, s: f32, l: f32) -> [u8; 3] {
     let m = l - c / 2.0;
     [r, g, b].map(|v| ((v + m) * 255.0).round().clamp(0.0, 255.0) as u8)
 }
-
-/// Release builds have no generator: the command exists so the page's call fails with a clear error.
-#[cfg(not(any(debug_assertions, feature = "measure-guard")))]
-#[tauri::command]
-pub fn debug_seed_session() -> CmdResult<()> {
-    Err(CmdError::new(
-        "unavailable",
-        "test data can only be created in a development build",
-    ))
-}

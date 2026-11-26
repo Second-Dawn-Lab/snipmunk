@@ -3,7 +3,8 @@ rem ----------------------------------------------------------------------------
 rem Builds the Snipmunk installer (a release NSIS setup) and opens the folder it is in.
 rem
 rem   * Needs pnpm and cargo (Rust) on the PATH.
-rem   * The first build downloads the NSIS tools once into %LOCALAPPDATA%\tauri; later builds reuse them.
+rem   * The first build downloads the NSIS tools once into target-release\.tauri (on E:, not into %LOCALAPPDATA%: that is what
+rem     src-tauri\tauri.local-build.conf.json asks Tauri for); later builds reuse them.
 rem   * Cargo's build folder is kept on E: (this drive has the room; C: is almost full): E:\SecondDawn\snipmunk\target-release.
 rem     Delete that folder to start from scratch; it is not part of the project.
 rem   * Run it from anywhere: it goes to the project folder first.
@@ -56,7 +57,7 @@ if errorlevel 1 (
 
 echo.
 echo Building the release installer ^(this takes a while the first time^)...
-call pnpm tauri build --bundles nsis
+call pnpm tauri build --bundles nsis --config src-tauri\tauri.local-build.conf.json
 if errorlevel 1 (
   set "RESULT=!errorlevel!"
   set "STEP=pnpm tauri build"

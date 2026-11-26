@@ -24,16 +24,6 @@ function clampSlot(slot: number, count: number): number {
   return Math.min(count, Math.max(0, Math.round(slot)));
 }
 
-/**
- * The position to give the backend: where the moved captures go in the target group's list *without* them.
- * For a drop in the group the captures come from, `slot` counts items of the current list.
- */
-export function insertIndexWithout(order: readonly string[], moving: readonly string[], slot: number): number {
-  const set = new Set(moving);
-  const at = clampSlot(slot, order.length);
-  return at - order.slice(0, at).filter((id) => set.has(id)).length;
-}
-
 /** Dropping would not change the list. */
 export function isNoopMove(order: readonly string[], moving: readonly string[], slot: number): boolean {
   if (moving.length === 0) return true;
