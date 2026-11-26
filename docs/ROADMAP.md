@@ -1,6 +1,6 @@
 # Snipmunk roadmap
 
-Status: Phases 1 to 7.5 are done (Phase 7 ✅; the scrolling screenshot is parked for v0.2). The product has three modes: Screenshots (one clipboard list), Recording (current recording + project tabs) and Documents (step recorder, guide editor, templates, export and `.snpd` files: Phase 7.5 ✅, up to 7.5-D). Phase 8, polish and the first release for Windows, is in progress: 8-A (fixes, close = quit, lightweight) and 8-B (release setup) are done, 8-C (documentation) is next.
+Status: Phases 1 to 7.5 are done (Phase 7 ✅; the scrolling screenshot is parked for v0.2). The product has three modes: Screenshots (one clipboard list), Recording (current recording + project tabs) and Documents (step recorder, guide editor, templates, export and `.snpd` files: Phase 7.5 ✅, up to 7.5-D). Phase 8, polish and the first release for Windows, is done (8-A to 8-D), and **v0.1.0 and v0.1.1 are released**. Next: the Microsoft Store submission and an AlternativeTo listing, then v0.2.
 
 ## Phase 1: Repo setup ✅
 Project folder, README, license, `.gitignore`, roadmap and icon placeholder.
@@ -112,19 +112,25 @@ A free, offline, account-free step guide recorder for any Windows app: each step
 - Later: Stack/Grid options.
 - Later for guide marks: move, resize, rotate and order for the other marks (arrows, boxes, texts); callout, magnifier and spotlight have their handles since 7.5-D.
 
-## Phase 8: Polish and the first release (v0.1.0, Windows) — in progress
+## Phase 8: Polish and the first release (v0.1.0, Windows) ✅
 - **8-A Fixes, close = quit, lightweight ✅**: a step's chosen picture area survives saving and reopening; Quick redact also masks the words of callouts and text marks; closing the window quits (the tray icon only with "Keep running in the tray"), the web view's caches are cleared on quit and the window appears with its first painted frame; every window made only when needed and destroyed after use, one web view environment with one renderer process, code loaded per mode; a repeatable memory and start-up measurement (`docs/performance.md`); unused `windows` crate features removed. Tests in `docs/manual-tests-phase-8.md`.
-- **8-B Release setup ✅** (waiting for the updater key and the first release): the release pipeline as Owl-L's (Node 24 actions, both Cargo.lock entries, version **0.1.0**); the **in-app updater** (Settings → About, a quiet daily check, "Update and restart" through the unsaved-changes dialog); the installer with `.snpt` files (import after a question), one data question at uninstall and no registry left behind; the **Microsoft Store variant** and MSIX script (`docs/store.md`); `PRIVACY.md`. Not done here: code signing (SignPath application), the Store submission and its sideload test, Node 24 in the other repositories. Tests in `docs/manual-tests-phase-8.md`.
-- **8-C Documentation — next**: README with screenshots, full user documentation, the Second Dawn main README; a full manual test pass.
-- **8-D Clean-up**.
-- Still open from the Phase 8 list: a GPU export path everywhere; avoid reading text twice (OCR).
+- **8-B Release setup ✅** (v0.1.0 and v0.1.1 released): the release pipeline as Owl-L's (Node 24 actions, both Cargo.lock entries, version **0.1.0**); the **in-app updater** (Settings → About, a quiet daily check, "Update and restart" through the unsaved-changes dialog); the installer with `.snpt` files (import after a question), one data question at uninstall and no registry left behind; the **Microsoft Store variant** and MSIX script (`docs/store.md`); `PRIVACY.md`. Not done here: code signing (SignPath application), the Store submission and its sideload test, Node 24 in the other repositories. Tests in `docs/manual-tests-phase-8.md`.
+- **8-C Documentation ✅**: the README with screenshots, the user guide (`docs/user-guide/`), its pictures made by `scripts/make-docs-media.mjs` from generated content, and the Second Dawn main README.
+- **8-D Clean-up ✅**: unused dependencies, code, texts and styles removed; development commands and the parked scrolling screenshot are no longer compiled into released builds; the update restart has its own wording; in exports, the cursor stays in step with the picture (also with the software encoder and in long recordings).
+- Still open from the Phase 8 list: a GPU export path everywhere; avoid reading text twice (OCR); code signing (SignPath application).
+
+## Next
+- **Microsoft Store submission**: the MSIX sideload test, then Partner Center (see `docs/store.md`).
+- **AlternativeTo listing**.
 
 ## v0.2: after the first release
-- **Webcam bubble resize during recording** (failed in the hand test of 7-B6).
-- **Scrolling screenshot, rebuilt** (parked in 7-B8 after it failed real tests; the code is kept behind `SNIPMUNK_EXPERIMENTAL_SCROLL=1` in debug builds):
+- **Scrolling screenshot, rebuilt** on a browser extension and the real scroll position (parked in 7-B8 after it failed real tests; the code is kept behind `SNIPMUNK_EXPERIMENTAL_SCROLL=1` in debug builds):
   - (a) A **Snipmunk browser extension for Chrome/Edge** that renders the full page in the browser (like Safari's full-page screenshot on iPhone) and sends it to Snipmunk.
   - (b) For **other apps**: read the real scroll position (scrollbar info / UI Automation) to place the frames, frame-to-frame matching only for fine-tuning, and per-frame detection of rows that stay still (sticky bars wherever they appear, floating decorations).
   - (c) **Test windows that copy the real failures**: a sticky bar that sticks mid-page, floating images, a GitHub-like sticky tab bar, a code editor with repetitive lines (YAML).
+- **Webcam bubble resize during recording** (failed in the hand test of 7-B6).
+- **Quick redact**: the remaining edge cases without a callout, if any turn up.
+- **What users report** after the first release.
 
-## Phase 9: macOS (after the Windows release)
+## Phase 9: macOS (later)
 macOS support (ScreenCaptureKit behind the platform abstraction). **Linux is dropped for now.**
