@@ -67,7 +67,7 @@ export const tr: Record<Key, string> = {
   "captures.rename": "Yakalamayı yeniden adlandır",
   "captures.emptyTitle": "Henüz yakalama yok",
   "captures.emptyBody":
-    "Ekran görüntüsü almak için {hotkey} tuşlarına basın. Yakalama, Snipmunk’ın sonraki sürümünde gelecek.",
+    "Ekran görüntüsü almak için {hotkey} tuşlarına basın.",
 
   "delete.title": "{count, plural, one {# yakalama silinsin mi?} other {# yakalama silinsin mi?}}",
   "delete.body":
@@ -521,6 +521,7 @@ export const tr: Record<Key, string> = {
   "rec.notice.webcamFallback": "Seçilen kamera bağlı değil. İlk kamera kullanılıyor.",
   "ctx.export": "Dışa aktar…",
   "export.tip": "Bu kaydı MP4 veya GIF olarak dışa aktar",
+  "export.recTitle": "Kaydı dışa aktar",
   "export.mp4": "MP4 (H.264 + AAC)",
   "export.gif": "GIF (sessiz)",
   "export.qHigh": "Yüksek",

@@ -65,7 +65,7 @@ export const zhHant: Record<Key, string> = {
   "captures.deleteSelected": "{count, plural, other {刪除已選取的 # 張擷取畫面}}",
   "captures.rename": "重新命名擷取畫面",
   "captures.emptyTitle": "尚無擷取畫面",
-  "captures.emptyBody": "按 {hotkey} 擷取螢幕畫面。擷取功能將在 Snipmunk 的下一個版本推出。",
+  "captures.emptyBody": "按 {hotkey} 擷取螢幕畫面。",
 
   "delete.title": "{count, plural, other {要刪除 # 張擷取畫面嗎？}}",
   "delete.body": "{count, plural, other {將從這台電腦刪除，且無法復原。}}",
@@ -513,6 +513,7 @@ export const zhHant: Record<Key, string> = {
   "rec.notice.webcamFallback": "所選攝影機未連接，將使用第一個攝影機。",
   "ctx.export": "匯出…",
   "export.tip": "將此錄製匯出為 MP4 或 GIF",
+  "export.recTitle": "匯出錄製",
   "export.mp4": "MP4（H.264 + AAC）",
   "export.gif": "GIF（無聲音）",
   "export.qHigh": "高",

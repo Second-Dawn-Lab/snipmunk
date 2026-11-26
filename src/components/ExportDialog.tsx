@@ -141,7 +141,7 @@ export function ExportDialog(props: {
   return (
     <Dialog
       open
-      title={t("export.title")}
+      title={t("export.recTitle")}
       onClose={busy ? () => undefined : onClose}
       footer={
         finished ? (
@@ -190,8 +190,8 @@ export function ExportDialog(props: {
           ))}
         </fieldset>
         <label className="exportdlg__row">
-          <span>{t("export.quality")}</span>
-          <Select label={t("export.quality")} value={settings.quality} disabled={busy} onChange={(quality) => set({ quality: quality as ExportSettings["quality"] })} options={qualities} />
+          <span>{t("rec.quality")}</span>
+          <Select label={t("rec.quality")}value={settings.quality} disabled={busy} onChange={(quality) => set({ quality: quality as ExportSettings["quality"] })} options={qualities} />
         </label>
         <label className="exportdlg__row">
           <span>{t("export.resolution")}</span>

@@ -67,7 +67,7 @@ export const fr: Record<Key, string> = {
   "captures.rename": "Renommer la capture",
   "captures.emptyTitle": "Aucune capture pour l’instant",
   "captures.emptyBody":
-    "Appuyez sur {hotkey} pour faire une capture d’écran. La capture arrivera dans la prochaine version de Snipmunk.",
+    "Appuyez sur {hotkey} pour faire une capture d’écran.",
 
   "delete.title": "{count, plural, one {Supprimer # capture ?} other {Supprimer # captures ?}}",
   "delete.body":
@@ -521,6 +521,7 @@ export const fr: Record<Key, string> = {
   "rec.notice.webcamFallback": "La caméra choisie n’est pas connectée. La première caméra est utilisée.",
   "ctx.export": "Exporter…",
   "export.tip": "Exporter cet enregistrement en MP4 ou GIF",
+  "export.recTitle": "Exporter l’enregistrement",
   "export.mp4": "MP4 (H.264 + AAC)",
   "export.gif": "GIF (sans son)",
   "export.qHigh": "Haute",

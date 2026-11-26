@@ -67,7 +67,7 @@ export const ar: Record<Key, string> = {
     "{count, plural, zero {حذف # لقطة محددة} one {حذف اللقطة المحددة} two {حذف اللقطتين المحددتين} few {حذف # لقطات محددة} many {حذف # لقطة محددة} other {حذف # لقطة محددة}}",
   "captures.rename": "إعادة تسمية اللقطة",
   "captures.emptyTitle": "لا توجد لقطات بعد",
-  "captures.emptyBody": "اضغط {hotkey} لالتقاط لقطة شاشة. سيتوفر الالتقاط في الإصدار القادم من Snipmunk.",
+  "captures.emptyBody": "اضغط {hotkey} لالتقاط لقطة شاشة.",
 
   "delete.title":
     "{count, plural, zero {حذف # لقطة؟} one {حذف لقطة واحدة؟} two {حذف لقطتين؟} few {حذف # لقطات؟} many {حذف # لقطة؟} other {حذف # لقطة؟}}",
@@ -521,6 +521,7 @@ export const ar: Record<Key, string> = {
   "rec.notice.webcamFallback": "الكاميرا المحددة غير متصلة. تُستخدم الكاميرا الأولى.",
   "ctx.export": "تصدير…",
   "export.tip": "تصدير هذا التسجيل بصيغة MP4 أو GIF",
+  "export.recTitle": "تصدير التسجيل",
   "export.mp4": "MP4 (H.264 + AAC)",
   "export.gif": "GIF (بدون صوت)",
   "export.qHigh": "عالية",

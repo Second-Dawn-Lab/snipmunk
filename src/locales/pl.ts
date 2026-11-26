@@ -68,7 +68,7 @@ export const pl: Record<Key, string> = {
   "captures.rename": "Zmień nazwę zrzutu",
   "captures.emptyTitle": "Brak zrzutów",
   "captures.emptyBody":
-    "Naciśnij {hotkey}, aby zrobić zrzut ekranu. Przechwytywanie pojawi się w następnej wersji Snipmunka.",
+    "Naciśnij {hotkey}, aby zrobić zrzut ekranu.",
 
   "delete.title":
     "{count, plural, one {Usunąć # zrzut?} few {Usunąć # zrzuty?} many {Usunąć # zrzutów?} other {Usunąć # zrzutu?}}",
@@ -524,6 +524,7 @@ export const pl: Record<Key, string> = {
   "rec.notice.webcamFallback": "Wybrana kamera nie jest podłączona. Używana jest pierwsza kamera.",
   "ctx.export": "Eksportuj…",
   "export.tip": "Eksportuj to nagranie jako MP4 lub GIF",
+  "export.recTitle": "Eksportuj nagranie",
   "export.mp4": "MP4 (H.264 + AAC)",
   "export.gif": "GIF (bez dźwięku)",
   "export.qHigh": "Wysoka",

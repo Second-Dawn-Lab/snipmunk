@@ -67,7 +67,7 @@ export const nl: Record<Key, string> = {
   "captures.rename": "Opname hernoemen",
   "captures.emptyTitle": "Nog geen opnamen",
   "captures.emptyBody":
-    "Druk op {hotkey} om een schermafbeelding te maken. Vastleggen komt in de volgende versie van Snipmunk.",
+    "Druk op {hotkey} om een schermafbeelding te maken.",
 
   "delete.title": "{count, plural, one {# opname verwijderen?} other {# opnamen verwijderen?}}",
   "delete.body":
@@ -522,6 +522,7 @@ export const nl: Record<Key, string> = {
   "rec.notice.webcamFallback": "De gekozen camera is niet verbonden. De eerste camera wordt gebruikt.",
   "ctx.export": "Exporteren…",
   "export.tip": "Deze opname exporteren als MP4 of GIF",
+  "export.recTitle": "Opname exporteren",
   "export.mp4": "MP4 (H.264 + AAC)",
   "export.gif": "GIF (zonder geluid)",
   "export.qHigh": "Hoog",

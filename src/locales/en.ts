@@ -68,7 +68,7 @@ export const en = {
   "captures.rename": "Rename capture",
   "captures.emptyTitle": "No captures yet",
   "captures.emptyBody":
-    "Press {hotkey} to take a screenshot. Capturing arrives in the next version of Snipmunk.",
+    "Press {hotkey} to take a screenshot.",
 
   "delete.title": "{count, plural, one {Delete # capture?} other {Delete # captures?}}",
   "delete.body":
@@ -522,6 +522,7 @@ export const en = {
   "rec.notice.webcamFallback": "The chosen camera is not connected. The first camera is used.",
   "ctx.export": "Export…",
   "export.tip": "Export this recording as MP4 or GIF",
+  "export.recTitle": "Export recording",
   "export.mp4": "MP4 (H.264 + AAC)",
   "export.gif": "GIF (no sound)",
   "export.qHigh": "High",

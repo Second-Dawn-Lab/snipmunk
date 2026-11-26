@@ -65,7 +65,7 @@ export const zhHans: Record<Key, string> = {
   "captures.deleteSelected": "{count, plural, other {删除已选中的 # 张截图}}",
   "captures.rename": "重命名截图",
   "captures.emptyTitle": "还没有截图",
-  "captures.emptyBody": "按 {hotkey} 截图。截图功能将在 Snipmunk 的下一个版本中推出。",
+  "captures.emptyBody": "按 {hotkey} 截图。",
 
   "delete.title": "{count, plural, other {删除 # 张截图？}}",
   "delete.body": "{count, plural, other {将从此电脑中删除，且无法撤销。}}",
@@ -513,6 +513,7 @@ export const zhHans: Record<Key, string> = {
   "rec.notice.webcamFallback": "所选摄像头未连接，将使用第一个摄像头。",
   "ctx.export": "导出…",
   "export.tip": "将此录制导出为 MP4 或 GIF",
+  "export.recTitle": "导出录制",
   "export.mp4": "MP4（H.264 + AAC）",
   "export.gif": "GIF（无声音）",
   "export.qHigh": "高",

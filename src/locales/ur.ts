@@ -66,7 +66,7 @@ export const ur: Record<Key, string> = {
     "{count, plural, one {منتخب کیا گیا # کیپچر حذف کریں} other {منتخب کیے گئے # کیپچرز حذف کریں}}",
   "captures.rename": "کیپچر کا نام بدلیں",
   "captures.emptyTitle": "ابھی کوئی کیپچر نہیں",
-  "captures.emptyBody": "اسکرین شاٹ لینے کے لیے {hotkey} دبائیں۔ کیپچر کرنا Snipmunk کے اگلے ورژن میں آئے گا۔",
+  "captures.emptyBody": "اسکرین شاٹ لینے کے لیے {hotkey} دبائیں۔",
 
   "delete.title": "{count, plural, one {# کیپچر حذف کریں؟} other {# کیپچرز حذف کریں؟}}",
   "delete.body":
@@ -520,6 +520,7 @@ export const ur: Record<Key, string> = {
   "rec.notice.webcamFallback": "منتخب کیمرا منسلک نہیں۔ پہلا کیمرا استعمال ہو رہا ہے۔",
   "ctx.export": "ایکسپورٹ…",
   "export.tip": "اس ریکارڈنگ کو MP4 یا GIF کے طور پر ایکسپورٹ کریں",
+  "export.recTitle": "ریکارڈنگ ایکسپورٹ کریں",
   "export.mp4": "MP4 (H.264 + AAC)",
   "export.gif": "GIF (بغیر آواز)",
   "export.qHigh": "اعلیٰ",

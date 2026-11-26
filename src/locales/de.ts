@@ -67,7 +67,7 @@ export const de: Record<Key, string> = {
   "captures.rename": "Aufnahme umbenennen",
   "captures.emptyTitle": "Noch keine Aufnahmen",
   "captures.emptyBody":
-    "Drücke {hotkey}, um einen Screenshot zu machen. Das Aufnehmen kommt mit der nächsten Version von Snipmunk.",
+    "Drücke {hotkey}, um einen Screenshot zu machen.",
 
   "delete.title": "{count, plural, one {# Aufnahme löschen?} other {# Aufnahmen löschen?}}",
   "delete.body":
@@ -521,6 +521,7 @@ export const de: Record<Key, string> = {
   "rec.notice.webcamFallback": "Die gewählte Kamera ist nicht verbunden. Die erste Kamera wird verwendet.",
   "ctx.export": "Exportieren …",
   "export.tip": "Diese Aufnahme als MP4 oder GIF exportieren",
+  "export.recTitle": "Aufnahme exportieren",
   "export.mp4": "MP4 (H.264 + AAC)",
   "export.gif": "GIF (ohne Ton)",
   "export.qHigh": "Hoch",
