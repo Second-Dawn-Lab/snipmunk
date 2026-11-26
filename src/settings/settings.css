@@ -195,6 +195,8 @@
 .wordlist__list li { display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px 2px 10px; border-radius: 12px; background: var(--dw-hover, rgba(128,128,128,.18)); }
 .wordlist__remove { background: none; border: 0; color: inherit; cursor: pointer; padding: 2px; display: inline-flex; }
 
-.foldersetting { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; max-width: 100%; }
-.foldersetting__path { max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; opacity: .8; }
+.foldersetting { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; min-width: 0; max-width: 100%; }
+.foldersetting__path { min-width: 0; max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; opacity: .8; }
+/* In a dialog row the path gives way and the button stays beside it (the full path is the tooltip). */
+.exportdlg__row .foldersetting { flex-wrap: nowrap; }
 .foldersetting__move { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 12px; font-size: 13px; }

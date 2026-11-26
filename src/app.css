@@ -1557,7 +1557,8 @@ body.is-dragging * {
 }
 
 /* --- Phase 6: save dialog, search, copy bar --------------------------------------------------------------------------- */
-.savedlg { display: grid; gap: 12px; min-width: min(420px, 80vw); }
+/* (no width of its own: the dialog sets it. A minimum wider than the dialog's inside pushed the rows past its edge.) */
+.savedlg { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
 .savedlg__row { display: grid; grid-template-columns: 120px 1fr auto; align-items: center; gap: 8px; }
 .savedlg__folder { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dw-text-muted, inherit); }
 .noticebar__action { margin-inline-start: 8px; text-decoration: underline; background: none; border: 0; color: inherit; cursor: pointer; font: inherit; }
