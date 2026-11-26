@@ -6,10 +6,10 @@ import type { CursorFile } from "../recording/cursorFile";
 import { activeClicks, clickMax, drawBurst, drawHalo, drawRipple, haloRadius } from "../recording/drawFx";
 import { BORDER_WIDTH, CURSOR_SCALE, WEBCAM_WIDTH, trimRange, webcamOffset, type Effects } from "../recording/effects";
 import { EditHistory, addSplit, cutEndAt, editedTime, keptMs, segmentAt, segments, toggleSegment, type Cut, type EditState } from "../recording/cuts";
-import { clampTrim, formatTime } from "../recording/timeline";
+import { clampTrim, formatTime, videoClock } from "../recording/timeline";
 import { AppIcon } from "./AppIcons";
 
-/** What recording.json says that the player needs. */
+/** What the player needs to know: from recording.json, and where the video files begin (read from the files). */
 export interface RecInfo {
   systemFile?: string | null;
   micFile?: string | null;
@@ -17,6 +17,9 @@ export interface RecInfo {
   webcamFile?: string | null;
   webcamStartMs?: number;
   fps?: number;
+  /** Where the screen video and the webcam video begin on their own clocks (see `videoClock`). */
+  screenStartMs?: number;
+  webcamVideoStartMs?: number;
 }
 
 /** Where each tab left its playhead (seconds), so switching tabs comes back to the same picture. */
@@ -123,6 +126,11 @@ export function RecPlayer(props: {
 
   const media = useCallback(() => [sys.current, mic.current].filter((a): a is HTMLAudioElement => a !== null), []);
   const camOffset = webcamOffset(info?.webcamStartMs, effects);
+  // Every time here is the recording's (the cursor, the sound, the trim, the cuts); only the video elements have their own.
+  const clock = useMemo(() => videoClock(info?.screenStartMs), [info?.screenStartMs]);
+  const camClock = useMemo(() => videoClock(info?.webcamVideoStartMs), [info?.webcamVideoStartMs]);
+  const timeRef = useRef(time);
+  timeRef.current = time;
 
   /** Where the video lies in the stage. */
   const measure = useCallback((): Box | null => {
@@ -159,14 +167,15 @@ export function RecPlayer(props: {
     const scale = (b.vw / v.videoWidth) * ratio;
     const ox = b.vx * ratio;
     const oy = b.vy * ratio;
-    const state = cursorAt(cursor.samples, v.currentTime);
+    const at = clock.recorded(v.currentTime);
+    const state = cursorAt(cursor.samples, at);
     const cs = CURSOR_SCALE[e.cursor.size];
     if (e.cursor.show && state?.visible && e.cursor.halo) {
       drawHalo(g, ox + state.x * scale, oy + state.y * scale, haloRadius(v.videoHeight, e.cursor.size) * scale, e.cursor.haloColor);
     }
     if (e.click.kind !== "off") {
       const max = clickMax(v.videoHeight, e.click.size) * scale;
-      for (const { click, age } of activeClicks(clicks, v.currentTime)) {
+      for (const { click, age } of activeClicks(clicks, at)) {
         const color = click.button === "left" ? e.click.left : e.click.right;
         const x = ox + click.x * scale;
         const y = oy + click.y * scale;
@@ -186,17 +195,24 @@ export function RecPlayer(props: {
     }
     if (!img.complete || img.naturalWidth === 0) return;
     g.drawImage(img, ox + (state.x - shape.hx * cs) * scale, oy + (state.y - shape.hy * cs) * scale, shape.w * cs * scale, shape.h * cs * scale);
-  }, [cursor, clicks, session, capture, measure]);
+  }, [cursor, clicks, session, capture, measure, clock]);
 
   // The webcam picture follows the video.
   const syncCam = useCallback(() => {
     const v = video.current;
     const c = cam.current;
     if (!v || !c) return;
-    const want = v.currentTime - camOffset;
-    if (want < 0) return;
+    const since = clock.recorded(v.currentTime) - camOffset;
+    if (since < 0) return;
+    const want = camClock.video(since);
     if (Math.abs(c.currentTime - want) > DRIFT) c.currentTime = Math.min(want, Number.isFinite(c.duration) ? c.duration : want);
-  }, [camOffset]);
+  }, [camOffset, clock, camClock]);
+
+  // The video can be there before its info: the same moment is then shown again, on the video's own clock.
+  useEffect(() => {
+    const v = video.current;
+    if (v && v.readyState > 0) v.currentTime = clock.video(timeRef.current);
+  }, [clock]);
 
   // A picture or sound element that left the page (the player was closed, another mode) lets its buffers go at once.
   useEffect(() => {
@@ -212,26 +228,27 @@ export function RecPlayer(props: {
     const tick = () => {
       const v = video.current;
       if (v) {
-        if (v.currentTime >= trimRef.current.end) {
+        let at = clock.recorded(v.currentTime);
+        if (at >= trimRef.current.end) {
           v.pause();
           for (const a of media()) a.pause();
           cam.current?.pause();
-          v.currentTime = trimRef.current.end;
+          v.currentTime = clock.video(trimRef.current.end);
           setTime(trimRef.current.end);
           setPlaying(false);
           draw();
           return;
         }
         // A part that is cut out is jumped over (the sound and the webcam follow at once).
-        const skipTo = cutEndAt(v.currentTime * 1000 + 15, cutsRef.current);
+        const skipTo = cutEndAt(at * 1000 + 15, cutsRef.current);
         if (skipTo !== null) {
-          const to = Math.min(skipTo / 1000, trimRef.current.end);
-          v.currentTime = to;
-          for (const a of media()) a.currentTime = to;
+          at = Math.min(skipTo / 1000, trimRef.current.end);
+          v.currentTime = clock.video(at);
+          for (const a of media()) a.currentTime = at;
           syncCam();
         }
-        setTime(v.currentTime);
-        for (const a of media()) if (Math.abs(a.currentTime - v.currentTime) > DRIFT) a.currentTime = v.currentTime;
+        setTime(at);
+        for (const a of media()) if (Math.abs(a.currentTime - at) > DRIFT) a.currentTime = at;
         syncCam();
       }
       draw();
@@ -239,7 +256,7 @@ export function RecPlayer(props: {
     };
     id = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(id);
-  }, [playing, draw, media, syncCam]);
+  }, [playing, draw, media, syncCam, clock]);
 
   // Redraw when the effects change (also while paused).
   useEffect(() => draw(), [effects, draw]);
@@ -290,8 +307,13 @@ export function RecPlayer(props: {
     if (!v) return;
     const { start, end } = trimRef.current;
     if (v.paused || v.ended) {
-      if (v.ended || v.currentTime >= end - 0.05 || v.currentTime < start) v.currentTime = start;
-      for (const a of media()) a.currentTime = v.currentTime;
+      let at = clock.recorded(v.currentTime);
+      // (a seek to the start can come out a hair before it)
+      if (v.ended || at >= end - 0.05 || at < start - 0.001) {
+        at = start;
+        v.currentTime = clock.video(start);
+      }
+      for (const a of media()) a.currentTime = at;
       syncCam();
       void v.play().catch(() => setFailed(true));
       for (const a of media()) void a.play().catch(() => undefined);
@@ -301,7 +323,7 @@ export function RecPlayer(props: {
       for (const a of media()) a.pause();
       cam.current?.pause();
     }
-  }, [media, syncCam]);
+  }, [media, syncCam, clock]);
 
   // Space plays and pauses (not while typing in a field).
   useEffect(() => {
@@ -320,7 +342,7 @@ export function RecPlayer(props: {
     const v = video.current;
     if (!v) return;
     const at = Math.min(trimRef.current.end, Math.max(trimRef.current.start, to));
-    v.currentTime = at;
+    v.currentTime = clock.video(at);
     for (const a of media()) a.currentTime = at;
     syncCam();
     setTime(at);
@@ -342,7 +364,7 @@ export function RecPlayer(props: {
   const doSplit = () => {
     const v = video.current;
     if (!v) return;
-    const at = Math.round(v.currentTime * 1000);
+    const at = Math.round(clock.recorded(v.currentTime) * 1000);
     const next = addSplit(edit.splits, at, Math.round(trimRef.current.start * 1000), Math.round(trimRef.current.end * 1000));
     if (next === edit.splits) return;
     edit.history.push(state());
@@ -418,7 +440,7 @@ export function RecPlayer(props: {
     if (!v) return;
     if (!v.paused) toggle();
     const d = e.shiftKey ? 1 : 1 / (info?.fps || 30);
-    seek(v.currentTime + (e.key === "ArrowLeft" ? -d : d));
+    seek(clock.recorded(v.currentTime) + (e.key === "ArrowLeft" ? -d : d));
   };
   const secondsAt = (clientX: number): number => {
     const r = track.current?.getBoundingClientRect();
@@ -446,7 +468,7 @@ export function RecPlayer(props: {
       setDragTrim(latest);
       // The picture follows the handle.
       const v = video.current;
-      if (v) v.currentTime = which === "start" ? latest.start : latest.end;
+      if (v) v.currentTime = clock.video(which === "start" ? latest.start : latest.end);
     };
     const up = () => {
       el.removeEventListener("pointermove", move);
@@ -570,12 +592,12 @@ export function RecPlayer(props: {
             // The preview starts at the trim start.
             const resume = playheads.get(capture.id);
             const at = resume !== undefined && resume >= trimRef.current.start && resume <= trimRef.current.end ? resume : trimRef.current.start;
-            e.currentTarget.currentTime = at;
+            e.currentTarget.currentTime = clock.video(at);
             setTime(at);
             draw();
           }}
           onSeeked={() => draw()}
-          onTimeUpdate={(e) => playheads.set(capture.id, e.currentTarget.currentTime)}
+          onTimeUpdate={(e) => playheads.set(capture.id, clock.recorded(e.currentTarget.currentTime))}
           onPlay={() => setPlaying(true)}
           onPause={() => setPlaying(false)}
           onEnded={() => {

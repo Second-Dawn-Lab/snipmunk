@@ -6,7 +6,7 @@
 //! as soon as its encoder is finished; only the segment being written when the program dies is lost.
 
 use std::fs::File;
-use std::io::{BufReader, BufWriter};
+use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 use mp4::{
@@ -23,7 +23,7 @@ pub struct Joined {
     pub duration_ms: u64,
 }
 
-fn video_track(r: &Mp4Reader<BufReader<File>>) -> Result<u32, String> {
+fn video_track<R: Read + Seek>(r: &Mp4Reader<R>) -> Result<u32, String> {
     r.tracks()
         .iter()
         .find(|(_, t)| t.track_type().ok() == Some(TrackType::Video))
@@ -44,6 +44,69 @@ pub fn readable(segments: &[PathBuf]) -> Vec<PathBuf> {
         .filter(|p| open(p).is_ok())
         .cloned()
         .collect()
+}
+
+/// A part of a file read as if it were a file of its own: a video stored inside a project file.
+struct Part {
+    file: File,
+    base: u64,
+    len: u64,
+    at: u64,
+}
+
+impl Read for Part {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        let left = self.len.saturating_sub(self.at);
+        let wanted = (buffer.len() as u64).min(left) as usize;
+        self.file.seek(SeekFrom::Start(self.base + self.at))?;
+        let got = self.file.read(&mut buffer[..wanted])?;
+        self.at += got as u64;
+        Ok(got)
+    }
+}
+
+impl Seek for Part {
+    fn seek(&mut self, to: SeekFrom) -> std::io::Result<u64> {
+        let at = match to {
+            SeekFrom::Start(n) => Some(n),
+            SeekFrom::End(d) => self.len.checked_add_signed(d),
+            SeekFrom::Current(d) => self.at.checked_add_signed(d),
+        };
+        self.at = at.ok_or_else(|| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
+        Ok(self.at)
+    }
+}
+
+/// When the video shows its first picture, on its own clock (milliseconds): 0 for most, but an encoder that reorders
+/// pictures (B-frames, as Windows' software H.264 encoder does) writes every picture that much later than it was taken.
+/// The video is the `len` bytes of `path` from `base` on (`None`: all that follows). `None` when it cannot be read.
+pub fn first_picture_ms(path: &Path, base: u64, len: Option<u64>) -> Option<f64> {
+    let file = File::open(path).ok()?;
+    let len = match len {
+        Some(len) => len,
+        None => file.metadata().ok()?.len().checked_sub(base)?,
+    };
+    let part = Part {
+        file,
+        base,
+        len,
+        at: 0,
+    };
+    let mut r = Mp4Reader::read_header(BufReader::new(part), len).ok()?;
+    let id = video_track(&r).ok()?;
+    let track = r.tracks().get(&id)?;
+    let scale = track.timescale().max(1) as f64;
+    // An edit list can take the lead off again (an entry with "no media time" only delays, and holds -1).
+    let skipped = track
+        .trak
+        .edts
+        .as_ref()
+        .and_then(|e| e.elst.as_ref())
+        .and_then(|list| list.entries.iter().find(|e| e.media_time < u32::MAX as u64))
+        .map_or(0, |e| e.media_time as i64);
+    let first = r.read_sample(id, 1).ok()??;
+    let ticks = first.start_time as i64 + first.rendering_offset as i64 - skipped;
+    Some(ticks.max(0) as f64 * 1000.0 / scale)
 }
 
 /// The finest clock of a joined file (ticks a second); the video encoder uses 30,000 or 60,000.

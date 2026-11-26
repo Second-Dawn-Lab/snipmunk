@@ -1320,6 +1320,37 @@ fn write_info(dir: &Path, info: &RecordingInfo) -> CmdResult<()> {
     Ok(())
 }
 
+/// Where the videos of a recording begin on their own clocks (milliseconds; see `mp4join::first_picture_ms`). The player
+/// takes this off a video's time, so the cursor, the clicks and the sound belong to the picture on show.
+#[derive(Debug, Clone, Copy, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VideoStarts {
+    pub screen_ms: f64,
+    pub webcam_ms: f64,
+}
+
+/// The videos of a recording of the session, or of an open project (`capture_id` "proj:<id>"). A video that is not there,
+/// or cannot be read, counts as beginning at 0.
+#[tauri::command]
+pub async fn video_starts(app: AppHandle, session_id: String, capture_id: String) -> VideoStarts {
+    let start = |name: &str| {
+        let (path, base, len) = match crate::projects::as_project(&capture_id) {
+            Some(project) => crate::projects::entry_range(project, name)?,
+            None => {
+                let state = app.state::<AppState>();
+                let sessions = state.sessions.lock().unwrap();
+                let file = format!("rec/{capture_id}/{name}");
+                (sessions.recording_file(&session_id, &file)?, 0, None)
+            }
+        };
+        crate::mp4join::first_picture_ms(&path, base, len)
+    };
+    VideoStarts {
+        screen_ms: start("screen.mp4").unwrap_or(0.0),
+        webcam_ms: start("webcam.mp4").unwrap_or(0.0),
+    }
+}
+
 /// Is a recording running? (The page asks when it starts.) Reads atomics: it never waits for the recorder.
 #[tauri::command]
 pub fn recording_state(recorder: State<'_, Recorder>) -> RecordingState {
@@ -2739,6 +2770,25 @@ mod render_tests {
         assert!(files.len() >= 2, "{files:?}");
         let video = dir.path().join("screen.mp4");
         crate::mp4join::join(&files, &video).unwrap();
+
+        // The player is told where the video begins: what the video engine says, also for a video inside a project file.
+        let begins = crate::render::win::first_picture_time_of(&video).unwrap() as f64 / 10_000.0;
+        let ms = crate::mp4join::first_picture_ms(&video, 0, None).unwrap();
+        assert!(
+            (ms - begins).abs() < 0.1,
+            "{ms} ms, the engine says {begins}"
+        );
+        let stored = dir.path().join("project.bin");
+        let bytes = std::fs::read(&video).unwrap();
+        std::fs::write(
+            &stored,
+            [&[7u8; 1000][..], &bytes, &[9u8; 500][..]].concat(),
+        )
+        .unwrap();
+        let inside =
+            crate::mp4join::first_picture_ms(&stored, 1000, Some(bytes.len() as u64)).unwrap();
+        assert_eq!(inside, ms);
+        assert_eq!(crate::mp4join::first_picture_ms(&stored, 0, None), None);
 
         let number = |p: &[u8]| -> i64 {
             (0..8)

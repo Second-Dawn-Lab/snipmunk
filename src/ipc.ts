@@ -356,6 +356,8 @@ export const ipc = {
   onRecordingState: (cb: (s: RecState) => void) => on<RecState>("recording-state", cb),
   defaultFolders: () => call<{ recordings: string; pictures: string; guides: string }>("default_folders"),
   refreshRecordings: () => call<Session>("refresh_recordings"),
+  /** Where the videos of a recording begin on their own clocks, in milliseconds (see `videoClock`). */
+  videoStarts: (sessionId: string, captureId: string) => call<{ screenMs: number; webcamMs: number }>("video_starts", { sessionId, captureId }),
   /** Change how a recording looks (cursor, click effects, webcam overlay, trim); written to its recording.json before this returns. */
   setEffects: (captureId: string, effects: Effects) => call<Effects>("set_effects", { captureId, effects }),
   /** Export with the settings of the export dialog into a folder (a taken name gets " (2)"); progress comes as render-progress. */

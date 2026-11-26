@@ -39,8 +39,10 @@ export function RecordingView(props: { session: Session; capture: Capture; setti
     void (async () => {
       try {
         const i = (await (await fetch(recordingUrl(session, capture, "recording.json"))).json()) as RecInfo & { effects?: unknown };
+        // Where the videos begin on their own clocks (a video of the software encoder begins a picture late).
+        const starts = await ipc.videoStarts(session.id, capture.id).catch(() => null);
         if (!alive) return;
-        setInfo(i);
+        setInfo({ ...i, screenStartMs: starts?.screenMs, webcamVideoStartMs: starts?.webcamMs });
         setEffects(readEffects(i.effects, effectsFromSettings(defaultSettings)));
         if (i.cursorFile) {
           const text = await (await fetch(recordingUrl(session, capture, i.cursorFile))).text();

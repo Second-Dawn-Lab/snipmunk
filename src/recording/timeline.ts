@@ -1,4 +1,19 @@
-// Time math of a recording (no React): trim in and out, and times as text.
+// Time math of a recording (no React): the video's clock, trim in and out, and times as text.
+
+/**
+ * A video's own clock against the recording's. An encoder that reorders pictures (B-frames, as Windows' software H.264
+ * encoder does) writes every picture a picture later than it was taken: such a video begins `startMs` after 0. The cursor,
+ * the clicks, the sound, the trim and the cuts are on the recording's clock.
+ */
+export function videoClock(startMs: number | null | undefined) {
+  const start = typeof startMs === "number" && Number.isFinite(startMs) ? Math.max(0, startMs) / 1000 : 0;
+  return {
+    /** The recorded time (seconds) of the picture the video shows at `videoTime`. */
+    recorded: (videoTime: number) => Math.max(0, videoTime - start),
+    /** The video's time that shows the picture recorded at `t` (seconds). */
+    video: (t: number) => t + start,
+  };
+}
 
 export interface Trim {
   start: number;

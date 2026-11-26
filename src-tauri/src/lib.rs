@@ -168,6 +168,7 @@ pub fn run() {
             recording::cancel_countdown,
             recording::recbar_fit,
             recording::recording_state,
+            recording::video_starts,
             export::export_begin,
             export::export_stage,
             export::export_save,

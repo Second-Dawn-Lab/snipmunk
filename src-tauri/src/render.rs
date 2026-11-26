@@ -813,6 +813,13 @@ pub mod win {
         None
     }
 
+    /// For the tests: the time the file gives its first picture (100 ns units).
+    #[cfg(test)]
+    pub fn first_picture_time_of(path: &Path) -> Option<i64> {
+        let _mf = Mf::start().ok()?;
+        first_picture_time(&open_reader(path).ok()?.reader)
+    }
+
     /// Read the pictures of `path` on this thread and send them on; stops at the end, on an error, or when `cancel` is set.
     /// `seek_ticks` and the times sent count from the first picture: the cursor, the clicks, the sound and the webcam were
     /// recorded on that clock.
