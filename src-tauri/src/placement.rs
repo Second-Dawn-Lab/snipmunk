@@ -76,7 +76,7 @@ pub fn fit(saved: Bounds, monitors: &[Monitor]) -> Option<Bounds> {
 }
 
 fn path() -> PathBuf {
-    dawn_core::app_dir("snipmunk").join("window.json")
+    crate::store::app_dir().join("window.json")
 }
 
 fn monitors(window: &WebviewWindow) -> Vec<Monitor> {

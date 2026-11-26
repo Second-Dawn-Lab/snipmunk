@@ -17,7 +17,7 @@ use crate::package::{self, KIND_RECORDING};
 pub fn temp_base() -> PathBuf {
     std::env::var_os("SNIPMUNK_TEMP_DIR")
         .map(PathBuf::from)
-        .unwrap_or_else(std::env::temp_dir)
+        .unwrap_or_else(crate::store::temp_root)
         .join("Snipmunk")
 }
 
@@ -157,7 +157,7 @@ pub struct Recent {
 }
 
 fn recent_file() -> PathBuf {
-    dawn_core::app_dir("snipmunk").join("recent-projects.json")
+    crate::store::app_dir().join("recent-projects.json")
 }
 
 fn read_recent() -> Vec<Recent> {
@@ -412,28 +412,47 @@ pub fn discard_current_recording(
 
 static PENDING_OPEN: Mutex<Option<String>> = Mutex::new(None);
 static PENDING_GUIDE: Mutex<Option<String>> = Mutex::new(None);
+/// Template files waiting for the person's yes, in the order they came (several can be opened at once).
+static PENDING_TEMPLATES: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// The files of one kind (`.snpr`, …) among the arguments, the program's own name left out.
+fn files_given<'a>(args: &'a [String], kind: &'a str) -> impl Iterator<Item = &'a String> {
+    args.iter()
+        .skip(1)
+        .filter(move |a| a.to_lowercase().ends_with(kind) && Path::new(a).is_file())
+}
 
 /// A `.snpr` file given on the command line (double-click in Explorer, "Open with Snipmunk"): the page opens it. Also called by the
 /// single-instance plugin with the arguments of a second launch.
 pub fn handle_args(app: &tauri::AppHandle, args: &[String]) {
     use tauri::Emitter;
-    if let Some(path) = args
-        .iter()
-        .skip(1)
-        .find(|a| a.to_lowercase().ends_with(".snpr") && Path::new(a).is_file())
-    {
+    if let Some(path) = files_given(args, ".snpr").next() {
         *PENDING_OPEN.lock().unwrap_or_else(|e| e.into_inner()) = Some(path.clone());
         let _ = app.emit("open-project", path);
     }
     // A guide file opens in Documents mode (the page asks about the guide that is open).
-    if let Some(path) = args
-        .iter()
-        .skip(1)
-        .find(|a| a.to_lowercase().ends_with(".snpd") && Path::new(a).is_file())
-    {
+    if let Some(path) = files_given(args, ".snpd").next() {
         *PENDING_GUIDE.lock().unwrap_or_else(|e| e.into_inner()) = Some(path.clone());
         let _ = app.emit("open-guide", path);
     }
+    // Template files are imported after a question (the page takes them from the list).
+    if queue_templates(args) > 0 {
+        let _ = app.emit("open-template", ());
+    }
+}
+
+/// Put the template files of a command line into the waiting list; returns how many there were.
+fn queue_templates(args: &[String]) -> usize {
+    let mut waiting = PENDING_TEMPLATES.lock().unwrap_or_else(|e| e.into_inner());
+    let before = waiting.len();
+    waiting.extend(files_given(args, ".snpt").cloned());
+    waiting.len() - before
+}
+
+/// The template files that were opened and not yet asked about (each is given once).
+#[tauri::command]
+pub fn take_pending_templates() -> Vec<String> {
+    std::mem::take(&mut *PENDING_TEMPLATES.lock().unwrap_or_else(|e| e.into_inner()))
 }
 
 /// The guide file that was asked for before the page was ready (once).
@@ -476,13 +495,7 @@ pub static RESTART: AtomicBool = AtomicBool::new(false);
 
 /// Leave: quit, or restart when one was asked for.
 pub fn leave(app: &tauri::AppHandle) {
-    // A clean exit (saved, or "Don't save") removes the working copy of the open guide; a crash or a shutdown leaves it for recovery.
-    crate::snpd::discard_open();
-    if RESTART.swap(false, Ordering::SeqCst) {
-        app.restart();
-    } else {
-        app.exit(0);
-    }
+    crate::lifecycle::quit(app, RESTART.swap(false, Ordering::SeqCst));
 }
 
 /// What Snipmunk holds that Quit has to ask about.
@@ -573,6 +586,31 @@ pub fn has_unsaved(state: &crate::commands::AppState) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn template_files_of_a_start_wait_their_turn_and_are_given_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = |name: &str| {
+            let path = dir.path().join(name);
+            std::fs::write(&path, b"x").unwrap();
+            path.to_string_lossy().into_owned()
+        };
+        let (one, two) = (file("A.snpt"), file("B.SNPT"));
+        let args = vec![
+            "snipmunk.exe".to_string(),
+            one.clone(),
+            file("C.snpd"),
+            "missing.snpt".into(),
+            "--hidden".into(),
+        ];
+        assert_eq!(queue_templates(&args), 1);
+        // A second launch while the first file still waits.
+        assert_eq!(queue_templates(&["snipmunk.exe".into(), two.clone()]), 1);
+        assert_eq!(take_pending_templates(), [one, two]);
+        assert!(take_pending_templates().is_empty());
+        // The program's own path is never taken for a file to open.
+        assert_eq!(queue_templates(std::slice::from_ref(&file("D.snpt"))), 0);
+    }
 
     #[test]
     fn quit_exits_at_once_only_when_nothing_is_running_or_unsaved() {

@@ -8,6 +8,14 @@ license.workspace = true
 [lib]
 name = "snipmunk_lib"
 
+[features]
+# Only for scripts/measure-memory.ps1: a release build that never touches the real machine (no screen, sound, camera, input
+# hook or autostart entry) and can make generated test data. Never part of a release.
+measure-guard = []
+# The Microsoft Store build (scripts/build-msix.ps1): no in-app updater, the package's start-up task, data in the package's
+# folders. See docs/store.md.
+store = []
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
@@ -71,6 +79,10 @@ features = [
   "Storage_Streams",
   # Clipboard with several formats, the Windows share sheet.
   "ApplicationModel_DataTransfer",
+  # The start-up task of the Microsoft Store build.
+  "ApplicationModel",
+  # The package's data and temp folders in the Store build (the windows crate puts them behind this feature).
+  "Storage_Search",
   "Storage",
   "Win32_System_DataExchange",
   "Win32_System_Memory",
@@ -96,13 +108,12 @@ features = [
   "Win32_UI_Input_KeyboardAndMouse",
   "Win32_UI_Shell",
   "Win32_UI_WindowsAndMessaging",
-  # The scrolling screenshot: UI Automation scroll patterns, drawing a window into a bitmap, DPI of a monitor.
+  # The guide recorder: what is under a click (UI Automation).
   "Win32_UI_Accessibility",
   # The display name of a Microsoft Store (MSIX) app: the AppUserModelId of a process.
   "Win32_Storage_Packaging_Appx",
   "Win32_Security",
-  "Win32_Storage_Xps",
+  # The DPI of a monitor (the live pictures of the guide recorder).
   "Win32_UI_HiDpi",
-  "Win32_UI_Controls",
   "Win32_System_LibraryLoader",
 ]

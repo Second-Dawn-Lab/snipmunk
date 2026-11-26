@@ -22,6 +22,16 @@ export interface RecInfo {
 /** Where each tab left its playhead (seconds), so switching tabs comes back to the same picture. */
 const playheads = new Map<string, number>();
 
+/** Stop and empty the media elements that are no longer in the page: the decoder and its buffers are freed. */
+function releaseMedia(elements: (HTMLMediaElement | null)[]): void {
+  for (const el of elements) {
+    if (!el || el.isConnected) continue;
+    el.pause();
+    el.removeAttribute("src");
+    el.load();
+  }
+}
+
 /** The splits and the undo history of each recording (the cuts themselves are in the effects), so a tab comes back as it was left. */
 const edits = new Map<string, { splits: number[]; history: EditHistory }>();
 
@@ -187,6 +197,12 @@ export function RecPlayer(props: {
     if (want < 0) return;
     if (Math.abs(c.currentTime - want) > DRIFT) c.currentTime = Math.min(want, Number.isFinite(c.duration) ? c.duration : want);
   }, [camOffset]);
+
+  // A picture or sound element that left the page (the player was closed, another mode) lets its buffers go at once.
+  useEffect(() => {
+    const elements = [video.current, cam.current, sys.current, mic.current];
+    return () => releaseMedia(elements);
+  });
 
   // While playing: the cursor follows every picture, tracks that drifted are brought back, and the end of the trim stops playback.
   useEffect(() => {

@@ -300,6 +300,18 @@ function on<T>(event: string, handler: (payload: T) => void): Promise<() => void
   return isTauri ? listen<T>(event, (e) => handler(e.payload)) : mockListen(event, handler);
 }
 
+/** Where the search for a newer version stands (`Phase` in updates.rs). */
+export type UpdatePhase =
+  | { kind: "idle" | "checking" | "upToDate" | "offline" | "noRelease" }
+  | { kind: "available" | "ready" | "failed"; version: string }
+  | { kind: "downloading"; version: string; percent: number | null };
+
+export interface UpdateView {
+  /** `false` in the Microsoft Store build, which the Store updates. */
+  supported: boolean;
+  phase: UpdatePhase;
+}
+
 /** The state of the recorder: the timer counts `elapsedMs` (pauses not counted) as of the moment the state was made. */
 export interface RecState {
   recording: boolean;
@@ -329,6 +341,12 @@ export const ipc = {
   cancelQuit: () => call<void>("cancel_quit"),
   /** Restart (for an update); asks about unsaved work first, like Quit. */
   restartApp: () => call<void>("restart_app"),
+  // updates (src-tauri/src/updates.rs)
+  updateState: () => call<UpdateView>("update_state"),
+  updateCheck: () => call<UpdateView>("update_check"),
+  /** Download (once) and restart into the new version; unsaved work is asked about first. */
+  updateInstall: () => call<void>("update_install"),
+  onUpdateState: (cb: (view: UpdateView) => void) => on<UpdateView>("update-state", cb),
   closeAction: (action: "background" | "quit", remember: boolean) =>
     call<void>("close_action", { action, remember }),
   onCloseRequested: (cb: () => void) => on<null>("close-requested", cb),
@@ -380,6 +398,9 @@ export const ipc = {
   startCapture: (mode?: string) => call<void>("start_capture", { mode: mode ?? null }),
   /** The capture shortcut was pressed inside a Snipmunk window (the backend ignores it if the hook saw it too). */
   shortcutFired: (name: "capture" | "record") => call<void>("shortcut_fired", { name }),
+  /** The main window's first frame is on screen. `pageMs`: the time since the page began to load; `frame`: an animation
+      frame (not the fallback timer) reported it. */
+  appReady: (pageMs: number, frame: boolean) => call<void>("app_ready", { pageMs, frame }),
   /** The overlay's delay dropdown: remember the delay; a delay above 0 closes the overlay, counts down and grabs again. */
   captureSetDelay: (delay: number) => call<void>("capture_set_delay", { delay }),
   setActiveGroup: (groupId: string | null) => call<void>("set_active_group", { groupId }),
@@ -417,6 +438,12 @@ export const ipc = {
   templatesDelete: (id: string) => call<void>("templates_delete", { id }),
   templatesExport: (id: string, path: string) => call<void>("templates_export", { id, path }),
   templatesImport: (path: string) => call<unknown>("templates_import", { path }),
+  /** The name in a template file (before it is imported). */
+  templatesPeek: (path: string) => call<string>("templates_peek", { path }),
+  /** Template files that were opened (double-click) and wait for their question. */
+  takePendingTemplates: () => call<string[]>("take_pending_templates"),
+  onOpenTemplate: (cb: () => void) => on<null>("open-template", () => cb()),
+  onTemplatesChanged: (cb: () => void) => on<null>("templates-changed", () => cb()),
   templatesExportMany: (ids: string[], folder: string) => call<number>("templates_export_many", { ids, folder }),
   pickTemplatesOpen: () => call<string[]>("pick_templates_open"),
   docAddStepImage: (base64Data: string) => call<GuideStep>("doc_add_step_image", { base64Data }),
@@ -461,8 +488,13 @@ export const ipc = {
   captureFinish: (args: FinishArgs) => call<void>("capture_finish", { args }),
   onCountdown: (cb: (n: number) => void) => on<number>("countdown-tick", cb),
   onToast: (cb: (info: ToastInfo) => void) => on<ToastInfo>("toast-show", cb),
+  /** What the countdown badge and the toast show now: their windows are made on demand and ask once they have loaded. */
+  countdownValue: () => call<number | null>("countdown_value"),
+  toastInfo: () => call<ToastInfo | null>("toast_info"),
   toastOpen: () => call<void>("toast_open"),
   toastClose: () => call<void>("toast_close"),
+  /** The main window was minimized or put away to the tray (false), or is back (true). */
+  onMainVisible: (cb: (visible: boolean) => void) => on<boolean>("main-visible", cb),
 
   // session
   getCurrentSession: () => call<Session>("get_current_session"),

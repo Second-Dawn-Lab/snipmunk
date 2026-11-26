@@ -12,10 +12,17 @@ pub struct Settings {
     pub theme: String,
     /// "system" or one of `LANGUAGES`
     pub language: String,
-    /// Start with Windows (hidden, in the tray).
+    /// Start with Windows (in the tray when closing keeps Snipmunk there, else minimized).
     pub launch_at_login: bool,
-    /// What the window's close button does: "background" | "quit" | "ask"
+    /// What the window's close button does: "quit" | "background" (keep running in the tray) | "ask"
     pub close_action: String,
+    /// What the settings file was last brought up to date to (see `migrate`); 0 in a file from before.
+    #[serde(default)]
+    pub settings_version: u32,
+    /// Look for a newer version after a start, at most once a day (not in the Store build, which the Store updates).
+    pub auto_update_check: bool,
+    /// Unix time (seconds) of the last update check; 0 = never.
+    pub last_update_check: u64,
     /// The capture shortcut. Only stored in Phase 2; the keyboard hook is wired in Phase 3.
     pub capture_hotkey: String,
     pub always_on_top: bool,
@@ -167,6 +174,9 @@ pub struct Settings {
 }
 
 /// The interface languages (the language setting may also be "system").
+/// The version of the settings file this program writes.
+const SETTINGS_VERSION: u32 = 1;
+
 pub const LANGUAGES: [&str; 12] = [
     "en", "de", "es", "fr", "it", "nl", "pl", "tr", "zh-Hans", "zh-Hant", "ar", "ur",
 ];
@@ -177,7 +187,10 @@ impl Default for Settings {
             theme: "system".into(),
             language: "system".into(),
             launch_at_login: false,
-            close_action: "background".into(),
+            close_action: "quit".into(),
+            settings_version: SETTINGS_VERSION,
+            auto_update_check: true,
+            last_update_check: 0,
             capture_hotkey: "Ctrl+Alt+PrintScreen".into(),
             always_on_top: false,
             export_folder: String::new(),
@@ -308,13 +321,27 @@ fn color_or(value: &mut String, allow_none: bool, fallback: &str) {
 
 impl Settings {
     pub fn path() -> PathBuf {
-        dawn_core::app_dir("snipmunk").join("settings.json")
+        crate::store::app_dir().join("settings.json")
     }
 
     pub fn load() -> Self {
         let mut s: Self = dawn_core::read_json(&Self::path());
         s.normalize();
+        if s.migrate() {
+            let _ = s.save();
+        }
         s
+    }
+
+    /// One-time changes to a settings file of an earlier version; `true` when something was changed. 1 (8-A): the close
+    /// button quits (it kept Snipmunk running in the tray before; nothing was released with that default).
+    pub fn migrate(&mut self) -> bool {
+        if self.settings_version >= SETTINGS_VERSION {
+            return false;
+        }
+        self.close_action = "quit".into();
+        self.settings_version = SETTINGS_VERSION;
+        true
     }
 
     /// Replace values a hand-edited or newer settings file could hold that this version cannot use.
@@ -546,10 +573,12 @@ mod tests {
     fn defaults_match_the_spec() {
         let s = Settings::default();
         assert_eq!(s.capture_hotkey, "Ctrl+Alt+PrintScreen");
-        assert_eq!(s.close_action, "background");
+        assert_eq!(s.close_action, "quit");
         assert_eq!(s.retention_days, 30);
         assert_eq!(s.default_copy_mode, "separate");
         assert!(!s.clear_on_exit && !s.launch_at_login && !s.always_on_top);
+        assert!(s.auto_update_check);
+        assert_eq!(s.last_update_check, 0);
     }
 
     #[test]
@@ -692,6 +721,27 @@ mod tests {
     }
 
     #[test]
+    fn a_settings_file_from_before_is_set_to_quit_once() {
+        // A file without the version: whatever its close button did, it quits now, once.
+        let mut old: Settings =
+            serde_json::from_value(serde_json::json!({ "closeAction": "background" })).unwrap();
+        assert_eq!(old.settings_version, 0);
+        assert!(old.migrate());
+        assert_eq!(old.close_action, "quit");
+        assert!(!old.migrate());
+        // A choice made afterwards stays, also in a file that is read again.
+        old.merge(serde_json::json!({ "closeAction": "background" }))
+            .unwrap();
+        let mut again: Settings =
+            serde_json::from_value(serde_json::to_value(&old).unwrap()).unwrap();
+        assert!(!again.migrate());
+        assert_eq!(again.close_action, "background");
+        // New settings need no change.
+        assert!(!Settings::default().migrate());
+        assert!(!Settings::default().launch_at_login);
+    }
+
+    #[test]
     fn merge_applies_a_patch_and_ignores_unknown_keys() {
         let mut s = Settings::default();
         s.merge(serde_json::json!({"retentionDays": 0, "nope": 1, "theme": "light"}))
@@ -705,7 +755,7 @@ mod tests {
         let mut s = Settings::default();
         s.merge(serde_json::json!({"closeAction": "explode", "defaultCopyMode": "x", "captureHotkey": " ", "language": "xx"}))
             .unwrap();
-        assert_eq!(s.close_action, "background");
+        assert_eq!(s.close_action, "quit");
         assert_eq!(s.default_copy_mode, "separate");
         assert_eq!(s.capture_hotkey, "Ctrl+Alt+PrintScreen");
         assert_eq!(s.language, "system");

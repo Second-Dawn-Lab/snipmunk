@@ -2,7 +2,6 @@ import { I18nProvider } from "@seconddawn/i18n";
 import { useSettings } from "@seconddawn/settings";
 import { applyTheme } from "@seconddawn/ui";
 import { useEffect, useState } from "react";
-import { MainWindow } from "./components/MainWindow";
 import { GuideBar } from "./components/GuideBar";
 import { GuideFrame } from "./components/GuideFrame";
 import { ScrollPill } from "./components/ScrollPill";
@@ -15,9 +14,15 @@ import { dictionaries } from "./i18n";
 import { directionOf, resolveLocale } from "./language";
 import { ipc, windowLabel } from "./ipc";
 import { sessionStore } from "./sessionStore";
-import { SettingsWindow } from "./settings/SettingsWindow";
 import { isEditable, ShortcutRouter } from "./settings/shortcutRouter";
 import { settingsStore } from "./settings/store";
+import { preloadMode } from "./lazyViews";
+import { loadable } from "./loadable";
+
+// The two large windows load their code when they are the window; the small ones (overlay, countdown, notice, bars) are
+// part of the first file, so they are there quickly.
+const MainWindow = loadable(() => import("./components/MainWindow").then((m) => m.MainWindow));
+const SettingsWindow = loadable(() => import("./settings/SettingsWindow").then((m) => m.SettingsWindow));
 
 const label = windowLabel();
 
@@ -28,8 +33,14 @@ export function App() {
 
   useEffect(() => {
     const loads = [settingsStore.init()];
+    if (label === "settings") loads.push(SettingsWindow.preload());
     // Only the main window shows the session.
-    if (label === "main") loads.push(sessionStore.init());
+    if (label === "main") {
+      // Its code is fetched while the settings and the session are read.
+      loads.push(MainWindow.preload());
+      loads.push(sessionStore.init());
+      loads.push(loads[0].then(() => preloadMode(settingsStore.getState().captureKind)));
+    }
     Promise.all(loads).finally(() => setReady(true));
   }, []);
 
@@ -74,8 +85,31 @@ export function App() {
   return (
     <I18nProvider locale={locale} dictionaries={dictionaries}>
       {ready && <Root label={label} />}
+      {ready && label === "main" && <Painted />}
     </I18nProvider>
   );
+}
+
+/** Shown beside the main window's content once that is there. When its first frame is painted, the backend is told, and
+    shows the window (start-up). A window that is still hidden may get no animation frames, so a short timer reports it
+    too. */
+function Painted() {
+  useEffect(() => {
+    let reported = false;
+    const report = (byFrame: boolean) => {
+      if (reported) return;
+      reported = true;
+      void ipc.appReady(performance.now(), byFrame);
+    };
+    let frame = requestAnimationFrame(() => (frame = requestAnimationFrame(() => report(true))));
+    // (in a hidden window frames can be slow to come: 50 ms is the longest the start waits for them)
+    const timer = window.setTimeout(() => report(false), 50);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.clearTimeout(timer);
+    };
+  }, []);
+  return null;
 }
 
 /** Every window loads this page; the window's label says which one it is. */

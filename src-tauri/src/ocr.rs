@@ -231,13 +231,20 @@ mod win {
         OcrEngine::MaxImageDimension().unwrap_or(10_000)
     }
 
+    thread_local! {
+        static ENGINES: std::cell::RefCell<std::collections::HashMap<String, OcrEngine>> =
+            Default::default();
+    }
+
+    /// Let this thread's engines go (the background reader does so when it has nothing left to read; the threads of a
+    /// guide's scan end by themselves).
+    pub fn release_engines() {
+        ENGINES.with(|cache| cache.borrow_mut().clear());
+    }
+
     /// Recognize an RGBA picture in one language.
     /// The engine of a language, made once per thread and used again (the scan of a guide reads many pictures).
     fn engine(tag: &str) -> Result<OcrEngine> {
-        thread_local! {
-            static ENGINES: std::cell::RefCell<std::collections::HashMap<String, OcrEngine>> =
-                Default::default();
-        }
         ENGINES.with(|cache| {
             if let Some(e) = cache.borrow().get(tag) {
                 return Ok(e.clone());
@@ -302,6 +309,7 @@ mod win {
     pub fn recognize(_: &[u8], _: u32, _: u32, _: &str) -> Result<Vec<OcrLine>> {
         Err(anyhow!("text recognition needs Windows"))
     }
+    pub fn release_engines() {}
 }
 
 /// Rows of a tall picture read one after the other: each tile is at most `tile` rows, neighbours overlap by `overlap` rows, and
@@ -793,9 +801,13 @@ pub fn queue(app: &AppHandle, capture_id: &str) {
             lower_priority();
             while let Ok(job) = rx.recv() {
                 run_job(&app, &job);
-                {
+                let left = {
                     let mut p = PENDING.lock().unwrap();
                     *p = p.saturating_sub(1);
+                    *p
+                };
+                if left == 0 {
+                    win::release_engines();
                 }
                 announce(&app);
             }

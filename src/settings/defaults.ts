@@ -5,6 +5,12 @@ export interface Settings {
   language: string;
   launchAtLogin: boolean;
   closeAction: "background" | "quit" | "ask";
+  /** Which one-time changes this settings file has had (see `migrate` in settings.rs). */
+  settingsVersion: number;
+  /** Look for a newer version after a start, at most once a day. */
+  autoUpdateCheck: boolean;
+  /** Unix time (seconds) of the last update check; 0 = never. */
+  lastUpdateCheck: number;
   /** Stored only until Phase 3 wires the keyboard hook. */
   captureHotkey: string;
   alwaysOnTop: boolean;
@@ -141,7 +147,10 @@ export const defaultSettings: Settings = {
   theme: "system",
   language: "system",
   launchAtLogin: false,
-  closeAction: "background",
+  closeAction: "quit",
+  settingsVersion: 1,
+  autoUpdateCheck: true,
+  lastUpdateCheck: 0,
   captureHotkey: "Ctrl+Alt+PrintScreen",
   alwaysOnTop: false,
   exportFolder: "",

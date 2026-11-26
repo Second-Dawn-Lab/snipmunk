@@ -20,11 +20,22 @@
   WriteRegStr SHCTX "Software\Classes\Snipmunk.GuideDocument\shell" "" "open"
   WriteRegStr SHCTX "Software\Classes\Snipmunk.GuideDocument\shell\open" "" "Open with Snipmunk"
   WriteRegStr SHCTX "Software\Classes\Snipmunk.GuideDocument\shell\open\command" "" '"$INSTDIR\${MAINBINARYNAME}.exe" "%1"'
+  ; The template files (.snpt): the app icon with a layout badge, installed as snpt.ico. Opening one asks before importing it.
+  WriteRegStr SHCTX "Software\Classes\.snpt" "" "Snipmunk.Template"
+  WriteRegStr SHCTX "Software\Classes\.snpt" "Content Type" "application/x-snipmunk-template"
+  WriteRegStr SHCTX "Software\Classes\Snipmunk.Template" "" "Snipmunk template"
+  WriteRegStr SHCTX "Software\Classes\Snipmunk.Template\DefaultIcon" "" "$INSTDIR\snpt.ico"
+  WriteRegStr SHCTX "Software\Classes\Snipmunk.Template\shell" "" "open"
+  WriteRegStr SHCTX "Software\Classes\Snipmunk.Template\shell\open" "" "Open with Snipmunk"
+  WriteRegStr SHCTX "Software\Classes\Snipmunk.Template\shell\open\command" "" '"$INSTDIR\${MAINBINARYNAME}.exe" "%1"'
   System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'
 !macroend
 
-; Snipmunk's own settings and kept screenshots (%AppData%\SecondDawn\snipmunk) are removed only when the user agrees.
-; The shared Second Dawn model folder (%AppData%\SecondDawn\models) is never touched: other Second Dawn apps may use it.
+; Uninstalling removes the file types and everything Snipmunk wrote to the registry. Its data (settings, kept screenshots,
+; templates, guides being worked on, an unsaved recording) goes only when the "Delete the application data" box of the
+; uninstaller was ticked (it is not, at first; a silent uninstall keeps everything). Files the user saved anywhere else are
+; never touched, nor is the shared Second Dawn model folder (%AppData%\SecondDawn\models): other Second Dawn apps may use
+; it. During an update nothing of this happens.
 !macro NSIS_HOOK_POSTUNINSTALL
   DeleteRegKey SHCTX "Software\Classes\Snipmunk.RecordingProject"
   ReadRegStr $0 SHCTX "Software\Classes\.snpr" ""
@@ -36,12 +47,24 @@
   ${If} $0 == "Snipmunk.GuideDocument"
     DeleteRegKey SHCTX "Software\Classes\.snpd"
   ${EndIf}
+  DeleteRegKey SHCTX "Software\Classes\Snipmunk.Template"
+  ReadRegStr $0 SHCTX "Software\Classes\.snpt" ""
+  ${If} $0 == "Snipmunk.Template"
+    DeleteRegKey SHCTX "Software\Classes\.snpt"
+  ${EndIf}
   System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'
-  ; Not when the uninstaller runs as part of an update, and not in silent mode.
   ${If} $UpdateMode <> 1
-    IfSilent snipmunk_keep_data
-    MessageBox MB_YESNO|MB_ICONQUESTION "Also delete Snipmunk's settings and saved screenshots?$\r$\n$\r$\nThis removes every kept session and cannot be undone." /SD IDNO IDNO snipmunk_keep_data
+    ; Where it was installed and the installer's language; Windows' note on the "Start with Windows" entry.
+    DeleteRegKey HKCU "${MANUPRODUCTKEY}"
+    DeleteRegKey /ifempty HKCU "${MANUKEY}"
+    DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run" "${PRODUCTNAME}"
+  ${EndIf}
+  ${If} $DeleteAppDataCheckboxState = 1
+  ${AndIf} $UpdateMode <> 1
+    SetShellVarContext current
     RMDir /r "$APPDATA\SecondDawn\snipmunk"
-    snipmunk_keep_data:
+    RMDir /r "$TEMP\Snipmunk"
+    ; (only when nothing of another Second Dawn app is left in it)
+    RMDir "$APPDATA\SecondDawn"
   ${EndIf}
 !macroend

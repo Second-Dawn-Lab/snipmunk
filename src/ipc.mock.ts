@@ -140,6 +140,16 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
         return null;
       case "start_capture":
       case "shortcut_fired":
+      case "app_ready":
+      case "update_install":
+        return null;
+      case "take_pending_templates":
+        return [];
+      case "update_state":
+      case "update_check":
+        return { supported: true, phase: { kind: cmd === "update_check" ? "upToDate" : "idle" } };
+      case "countdown_value":
+      case "toast_info":
       case "capture_set_delay":
       case "set_active_group":
       case "open_url":

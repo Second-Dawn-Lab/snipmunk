@@ -324,22 +324,21 @@ fn overlay_window(
     (w, h): (u32, u32),
     through: bool,
 ) {
-    let built =
-        tauri::WebviewWindowBuilder::new(app, label, tauri::WebviewUrl::App("index.html".into()))
-            .title(match label {
-                "scrollpill" => "Snipmunk – Scrolling pill",
-                _ => "Snipmunk – Scrolling frame",
-            })
-            .decorations(false)
-            .transparent(true)
-            .background_color(tauri::window::Color(0, 0, 0, 0))
-            .shadow(false)
-            .always_on_top(true)
-            .skip_taskbar(true)
-            .focused(false)
-            .resizable(false)
-            .visible(false)
-            .build();
+    let built = crate::webview::window(app, label, tauri::WebviewUrl::App("index.html".into()))
+        .title(match label {
+            "scrollpill" => "Snipmunk – Scrolling pill",
+            _ => "Snipmunk – Scrolling frame",
+        })
+        .decorations(false)
+        .transparent(true)
+        .background_color(tauri::window::Color(0, 0, 0, 0))
+        .shadow(false)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .focused(false)
+        .resizable(false)
+        .visible(false)
+        .build();
     if let Ok(win) = built {
         let _ = win.set_size(tauri::PhysicalSize::new(w, h));
         let _ = win.set_position(tauri::PhysicalPosition::new(x, y));
@@ -835,17 +834,16 @@ mod devtest {
         )
         .parse::<tauri::Url>()
         .map_err(|e| e.to_string())?;
-        let win =
-            tauri::WebviewWindowBuilder::new(&app, "scrolltest", tauri::WebviewUrl::External(url))
-                .title("Snipmunk scroll test")
-                .inner_size(640.0, 480.0)
-                .position(60.0, 60.0)
-                .always_on_top(true)
-                .focused(false)
-                .decorations(false)
-                .visible(true)
-                .build()
-                .map_err(|e| e.to_string())?;
+        let win = crate::webview::window(&app, "scrolltest", tauri::WebviewUrl::External(url))
+            .title("Snipmunk scroll test")
+            .inner_size(640.0, 480.0)
+            .position(60.0, 60.0)
+            .always_on_top(true)
+            .focused(false)
+            .decorations(false)
+            .visible(true)
+            .build()
+            .map_err(|e| e.to_string())?;
         let dpr = win.scale_factor().unwrap_or(1.0);
         let hwnd = win.hwnd().map_err(|e| e.to_string())?.0 as isize;
         pause(1500).await;

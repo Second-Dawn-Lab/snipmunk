@@ -8,6 +8,7 @@ import { installedFonts, storeImage } from "../RichText";
 import { changeTemplate, templateOf } from "./apply";
 import { templateVars } from "./css";
 import { hasPosition } from "./background";
+import { useTemplateName } from "./name";
 import { ACROSS, BUILT_INS, COLOR_PRESETS, COVER_FIELDS, DOWN, LOGO_PLACES, SIDES, SLOTS, TOC_LEADERS, TOC_STYLES, badgeColors, colorsOf, type Across, type CoverField, type Template } from "./model";
 import type { Templates } from "./useTemplates";
 import { clearCoverAlign } from "../CoverBlock";
@@ -15,20 +16,12 @@ import { CoverGallery } from "./CoverSettings";
 import { hasArt } from "./background";
 
 type Change = (fn: (d: GuideDoc) => GuideDoc, key?: string) => void;
-type Key = Parameters<ReturnType<typeof useT>["t"]>[0];
-
 const row = (label: string, control: React.ReactNode, id = label) => (
   <div className="fxrow" key={id}>
     <span className="fxrow__label">{label}</span>
     <span className="fxrow__control">{control}</span>
   </div>
 );
-
-/** The name of a template for people (the built-in ones are translated). */
-export function useTemplateName() {
-  const { t } = useT();
-  return (tpl: Template) => (BUILT_INS.some((b) => b.id === tpl.id) ? t(`template.builtin.${tpl.id}` as Key) : tpl.name);
-}
 
 /** The two colours of the step numbers: each follows the template until one of its own is chosen. */
 export function BadgeColorRows(props: { doc: GuideDoc; change: Change }) {

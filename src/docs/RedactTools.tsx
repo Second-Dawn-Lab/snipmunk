@@ -225,6 +225,7 @@ export function RedactDialog(props: { open: boolean; onClose: () => void; doc: G
     if (b.type === "step") ++stepCount;
     numbers.set(b.id, b.type === "step" ? (shown.get(b.id) ?? stepCount) : ++others);
   }
+  // ("Step 4 callout: …"; the same place may hold several items)
   const place = (f: Finding) => (f.where === "cover" ? t("redact.item.cover") : t(`redact.item.${f.where}`, { n: numbers.get(f.block) ?? 0 }));
 
   const start = async () => {

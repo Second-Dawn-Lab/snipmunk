@@ -11,13 +11,28 @@ interface Cached {
   doc: OcrDoc;
 }
 
-// Recognized texts of this run, by capture (the stored ones are in the session folder, `ocr_get`).
+// Recognized texts of this run, by capture (the stored ones are in the session folder, `ocr_get`). The latest ones only.
 const cache = new Map<string, Cached>();
 const inFlight = new Map<string, Promise<OcrDoc | null>>();
+const CACHED = 20;
 
 /** Forget what was recognized for a capture (its picture changed). */
 export function forgetOcr(captureId: string): void {
   cache.delete(captureId);
+}
+
+/** Forget every text held in memory: it is read from the session folder again when it is needed. */
+export function dropOcrCache(): void {
+  cache.clear();
+}
+
+function remember(captureId: string, entry: Cached): void {
+  cache.delete(captureId);
+  cache.set(captureId, entry);
+  for (const oldest of cache.keys()) {
+    if (cache.size <= CACHED) break;
+    cache.delete(oldest);
+  }
 }
 
 /**
@@ -63,7 +78,7 @@ export function useOcr(options: {
           result = await ipc.ocrRecognize(o.captureId, wanted, png);
         }
         const doc = buildDocument(result);
-        cache.set(o.captureId, { key: wanted, doc });
+        remember(o.captureId, { key: wanted, doc });
         return doc;
       } catch (e) {
         const message = (e as { message?: string })?.message ?? String(e);

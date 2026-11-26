@@ -132,7 +132,8 @@ fn start_camera(app: &AppHandle) {
             .unwrap()
             .webcam_device
             .clone();
-        (s, false)
+        // (a test instance shows a generated camera)
+        (s, crate::capture::guard_active())
     };
     match crate::webcam::start_preview(&device, synthetic) {
         Ok(p) => *cam = Some(p),
@@ -169,7 +170,7 @@ pub fn close(app: &AppHandle) {
 
 fn ensure_window(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("webcambubble") {
-        show_without_focus(&w);
+        crate::webview::show_without_focus(&w);
         return;
     }
     let Some(area) = *AREA.lock().unwrap_or_else(|e| e.into_inner()) else {
@@ -186,7 +187,7 @@ fn ensure_window(app: &AppHandle) {
     };
     // The bubble starts where the settings say (a corner of the recorded area) and as big as the overlay will be.
     let (x, y, w, h) = fx.webcam_rect(area.w, area.h);
-    let built = tauri::WebviewWindowBuilder::new(
+    let built = crate::webview::window(
         app,
         "webcambubble",
         tauri::WebviewUrl::App("index.html".into()),
@@ -225,7 +226,7 @@ fn ensure_window(app: &AppHandle) {
     });
     crate::webview::exclude_from_capture(&win);
     style_window(&win);
-    show_without_focus(&win);
+    crate::webview::show_without_focus(&win);
 }
 
 /// Not in Alt+Tab (a tool window) and never activated by a click.
@@ -251,23 +252,6 @@ fn style_window(win: &tauri::WebviewWindow) {
 
 #[cfg(not(windows))]
 fn style_window(_: &tauri::WebviewWindow) {}
-
-#[cfg(windows)]
-fn show_without_focus(win: &tauri::WebviewWindow) {
-    use windows::Win32::Foundation::HWND;
-    use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_SHOWNOACTIVATE};
-    if let Ok(hwnd) = win.hwnd() {
-        // SAFETY: a valid window handle of this process.
-        unsafe {
-            let _ = ShowWindow(HWND(hwnd.0), SW_SHOWNOACTIVATE);
-        }
-    }
-}
-
-#[cfg(not(windows))]
-fn show_without_focus(win: &tauri::WebviewWindow) {
-    let _ = win.show();
-}
 
 /// The page of the bubble asks for a new width (CSS pixels) while its corner is dragged: the window follows around its centre.
 #[tauri::command]

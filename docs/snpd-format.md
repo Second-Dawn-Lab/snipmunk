@@ -83,6 +83,10 @@ and headings (`start`, `center`, `end`, so it follows the writing direction). A 
   window: *Expand area*). On save the stored picture is cut to that area, so only the shown area is in the file (unless "Keep full
   screenshots" is on), and a step whose full frame is not in the file (its picture is smaller than its monitor) cannot be expanded.
 - Not stored: `crop` and `redact`. They are applied when the file is written (section 4) and only the result is in the file.
+- `areaChoice` (optional, in a step block, since 8-A, no version change): `screen`, `window` or `custom`, written for a step that
+  had an area of its own. The stored picture is exactly that area, so a reader shows the **whole stored picture** for such a step
+  (Snipmunk sets `crop` to it when opening) and names the choice. For a file without it (written before 8-A), an unframed step
+  of a guide of windows whose stored picture is not just its window had an area of its own and is read the same way.
 
 Unknown fields — at any level — are kept by Snipmunk when it saves a file again.
 

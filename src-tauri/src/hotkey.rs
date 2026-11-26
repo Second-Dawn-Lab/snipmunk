@@ -133,6 +133,11 @@ pub fn apply(app: &AppHandle, capture: &str, record: &str, extra: &[(&str, &str)
     let manager = app.state::<HotkeyManager>();
     let cap = parse(capture);
     let list = shortcut_list(capture, record, extra);
+    // A test instance observes no keys at all: no hook is installed.
+    if crate::capture::guard_active() {
+        *manager.status.lock().unwrap() = HotkeyStatus::ok(capture);
+        return;
+    }
     let status = {
         let mut hook = manager.hook.lock().unwrap();
         if let Some(h) = hook.as_ref() {

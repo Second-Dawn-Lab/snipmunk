@@ -137,7 +137,7 @@ export function SettingsWindow() {
           {tab === "sessions" && <SessionsPage settings={settings} set={set} />}
           {tab === "copy" && <CopyPage settings={settings} set={set} />}
           {tab === "ocr" && <OcrPage settings={settings} set={set} />}
-          {tab === "about" && <AboutPage />}
+          {tab === "about" && <AboutPage settings={settings} set={set} />}
         </main>
       </div>
     </div>

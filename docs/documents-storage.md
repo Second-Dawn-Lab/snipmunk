@@ -62,7 +62,7 @@ step picture**, so a later editor can crop and annotate without touching the pic
 | `click` | where the click was (none for `type` and `key`) |
 | `window` | `{ rect, title, process }` of the window the step happened in |
 | `element` | the UI Automation element: `name`, `controlType`, `localizedControlType`, `automationId`, `toggle` (state at the click), `selected`, `rect`, `parents` (nearest named menu/dialog/tab names) |
-| `typed` / `keys` | the text of a typing step / the shortcut of a key step (`Ctrl+S`) |
+| `typed` / `keys` | the text of a typing step (`••••••••` for a password field: what was typed is never stored, see `secret.rs`) / the shortcut of a key step (`Ctrl+S`) |
 | `zoom` | a default zoom area around the click (about 640 x 400, inside the window and the picture); shown only when the setting is on |
 | `text` | the step text as parts `[{ "t": "Click ", "b": false }, { "t": "Save", "b": true }]` in the language of the program at the time |
 | `frameAgeMs` | how long before the mouse went down the picture arrived (see below) |

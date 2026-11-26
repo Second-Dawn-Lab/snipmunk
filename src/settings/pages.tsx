@@ -6,6 +6,7 @@ import { HotkeyNotice } from "../components/HotkeyNotice";
 import { useT } from "../i18n";
 import { ipc, isTauri, type OcrStatus } from "../ipc";
 import { LANGUAGES } from "../language";
+import { updateMessage, useUpdate } from "../update";
 import type { CaptureDelay, CaptureMode, Settings } from "./defaults";
 import { Kbd, ShortcutDialog } from "./ShortcutDialog";
 
@@ -68,8 +69,8 @@ export function GeneralPage({ settings, set }: PageProps) {
           value={settings.closeAction}
           onChange={(closeAction) => set({ closeAction })}
           options={[
-            { value: "background", label: t("settings.closeBackground") },
             { value: "quit", label: t("settings.closeQuit") },
+            { value: "background", label: t("settings.closeBackground") },
             { value: "ask", label: t("settings.closeAsk") },
           ]}
         />
@@ -430,9 +431,14 @@ export function CopyPage({ settings, set }: PageProps) {
   );
 }
 
-export function AboutPage() {
+export function AboutPage({ settings, set }: PageProps) {
   const { t } = useT();
-  const [version, setVersion] = useState("0.0.0");
+  const update = useUpdate();
+  const phase = update.phase;
+  const status = updateMessage(phase);
+  const busy = phase.kind === "checking" || phase.kind === "downloading";
+  const installable = phase.kind === "available" || phase.kind === "ready";
+  const [version, setVersion] = useState("");
   useEffect(() => {
     if (isTauri) void getVersion().then(setVersion).catch(() => undefined);
   }, []);
@@ -445,12 +451,26 @@ export function AboutPage() {
         <div className="about__version">{t("about.version", { version })}</div>
       </div>
       <Section>
-        <Setting id="updates" title={t("about.updates")} description={t("about.updatesDesc")}>
-          <button type="button" className="dw-btn" aria-disabled="true" title={`${t("about.updates")} – ${t("soon.label")}`}>
-            <Icon name="download" size={16} />
-            {t("about.updates")}
-          </button>
-        </Setting>
+        {update.supported ? (
+          <>
+            <Setting id="updates" title={t("about.updates")} description={status ? t(status.key, status.vars) : t("about.updatesDesc")}>
+              {installable ? (
+                <Button variant="primary" icon="download" onClick={() => void ipc.updateInstall()}>
+                  {t("update.install")}
+                </Button>
+              ) : (
+                <Button icon="download" disabled={busy} onClick={() => void ipc.updateCheck().catch(() => undefined)}>
+                  {t("about.updates")}
+                </Button>
+              )}
+            </Setting>
+            <Setting id="autoUpdate" title={t("update.auto")} description={t("update.autoDesc")}>
+              <Switch label={t("update.auto")} checked={settings.autoUpdateCheck} onChange={(autoUpdateCheck) => set({ autoUpdateCheck })} />
+            </Setting>
+          </>
+        ) : (
+          <Setting id="updates" title={t("about.updates")} description={t("update.store")} />
+        )}
         <Setting id="github" title={t("about.github")} description={t("about.githubDesc")}>
           <Button icon="external" onClick={() => open(REPO)}>
             {t("about.open")}

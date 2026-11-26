@@ -314,10 +314,10 @@ Documents home; F2 renames a recording.
 - A box can stand at most half a picture width beside and 300 frame units above or below the picture.
 - Word, Markdown and "Copy as" get one picture of everything (page colour or transparent around it); PDF and HTML keep the
   picture with its frame and lay a transparent layer over it.
-- The Tree's small pictures show no marks. Quick redact does not read or mask the words of callouts.
+- The Tree's small pictures show no marks. Quick redact does not read or mask the words of callouts (it does since 8-A).
 - A version from before 7.5-D that saves a file again drops the small pieces of magnified areas (`docs/snpd-format.md`).
 - Found, not fixed (older than this phase): a step set to "Full screen" or an expanded area shows the active window again after
-  saving and reopening the guide (the larger picture is in the file).
+  saving and reopening the guide (the larger picture is in the file). Fixed in 8-A.
 
 ### You must test by hand (English first)
 - [ ] **Callouts** in a real guide: each shape; type long text, Arabic and German; drag the box far outside, on a framed template

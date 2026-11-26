@@ -10,10 +10,8 @@ import { GuideEditor, type ScreenshotChoice } from "./GuideEditor";
 import { ExportDialog, useCopyAs, type CopyKind } from "./export/ExportDialog";
 import { editorSelection } from "./selection";
 import { RedactDialog } from "./RedactTools";
+import { renameGuide } from "./renameGuide";
 import type { GuideApi } from "./useGuide";
-
-/** Start renaming the open guide: its name in the header becomes a field (F2 and the File menu). */
-export const renameGuide = () => document.querySelector<HTMLButtonElement>(".recheader__name")?.click();
 
 /** The heading of the open guide, like the recording's: icon, name, status and steps. It begins the row above the pages. */
 function GuideHeading({ guide }: { guide: GuideApi }) {

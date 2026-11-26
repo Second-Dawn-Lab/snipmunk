@@ -400,7 +400,7 @@ impl SessionStore {
 
     /// `%AppData%\SecondDawn\snipmunk\sessions`
     pub fn default_root() -> PathBuf {
-        dawn_core::app_dir("snipmunk").join("sessions")
+        crate::store::app_dir().join("sessions")
     }
 
     /// Open the newest kept session, or start a new one when there is none.

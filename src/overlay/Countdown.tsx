@@ -8,8 +8,14 @@ export function Countdown() {
   const [n, setN] = useState<number | null>(null);
 
   useEffect(() => {
+    let alive = true;
     const unlisten = ipc.onCountdown(setN);
-    return () => void unlisten.then((fn) => fn());
+    // The window is made for this countdown: what was sent before the page loaded is asked for.
+    void unlisten.then(() => ipc.countdownValue()).then((now) => alive && setN((n) => n ?? now));
+    return () => {
+      alive = false;
+      void unlisten.then((fn) => fn());
+    };
   }, []);
 
   return (

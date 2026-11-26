@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { HotkeyNotice } from "../components/HotkeyNotice";
 import { useT } from "../i18n";
 import { BUILT_INS, normalizeTemplate, type Template } from "../docs/template/model";
-import { useTemplateName } from "../docs/template/TemplatePanel";
+import { useTemplateName } from "../docs/template/name";
 import { ipc } from "../ipc";
 import { FolderSetting, Setting, type PageProps } from "./pages";
 import { Kbd, ShortcutDialog } from "./ShortcutDialog";
@@ -16,7 +16,10 @@ export function DocumentsPage({ settings, set }: PageProps) {
   const [own, setOwn] = useState<Template[]>([]);
   const nameOf = useTemplateName();
   useEffect(() => {
-    void ipc.templatesList().then((l) => setOwn(l.map(normalizeTemplate))).catch(() => undefined);
+    const read = () => void ipc.templatesList().then((l) => setOwn(l.map(normalizeTemplate))).catch(() => undefined);
+    read();
+    const listening = ipc.onTemplatesChanged(read);
+    return () => void listening.then((stop) => stop());
   }, []);
   const templates = [...BUILT_INS, ...own];
   useEffect(() => {

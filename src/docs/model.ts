@@ -79,6 +79,8 @@ export interface StepBlock {
   zoomRect?: Rect;
   /** What the picture shows: absent = the guide default (the window / the screen); a rectangle = a chosen crop. */
   crop?: Rect | null;
+  /** In a guide opened from a file: the area the step had chosen; its stored picture is exactly that area. */
+  areaChoice?: "screen" | "window" | "custom";
   markerHidden?: boolean;
   markerPos?: [number, number];
   marker?: Partial<MarkerStyle>;

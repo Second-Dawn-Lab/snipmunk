@@ -1,6 +1,7 @@
 // Quick redact of a guide (no React): the same finding rules as in screenshot mode, on the text read from the step pictures AND
-// on everything written in the guide (step sentences, typed text, descriptions, content blocks, the cover). A picture finding
-// becomes a redaction mark; a text finding is replaced by dots, and the original does not go into a saved or exported file.
+// on everything written in the guide (step sentences, typed text, the words of callouts and text marks, descriptions, content
+// blocks, the cover). A picture finding becomes a redaction mark; a text finding is replaced by dots, and the original does
+// not go into a saved or exported file.
 
 import { buildDocument, isRtlLine } from "../ocr/layout";
 import { findEmailLabels, findMatches, type FindOptions, type Match, type MatchKind } from "../ocr/pii";
@@ -12,7 +13,7 @@ import { cropRect, type ContentBlock, type GuideDoc, type Part, type PmDoc, type
 import { changeTemplate, shownRect, templateOf } from "./template/apply";
 import { COVER_FIELDS, type CoverField } from "./template/model";
 
-export type Where = "picture" | "text" | "typed" | "desc" | "content" | "cover";
+export type Where = "picture" | "text" | "typed" | "callout" | "mark" | "desc" | "content" | "cover";
 
 export interface Finding {
   /** The block it was found in ("cover" for the cover page). */
@@ -28,6 +29,8 @@ export interface Finding {
   start?: number;
   end?: number;
   field?: CoverField;
+  /** The callout or text mark of a step that holds it. */
+  mark?: string;
   /** Only the address of a link holds it: the link is removed, its words stay. */
   link?: boolean;
 }
@@ -293,7 +296,27 @@ function findInStep(block: StepBlock, step: GuideStep | undefined, options: Find
       if (at >= 0) found = found.filter((m) => m.end <= at || m.start >= at + typed.length);
     }
   }
-  return [...found.map((m): Finding => ({ block: block.id, kind: m.kind, text: m.text, where: "text", start: m.start, end: m.end })), ...out];
+  return [...found.map((m): Finding => ({ block: block.id, kind: m.kind, text: m.text, where: "text", start: m.start, end: m.end })), ...out, ...findInMarks(block, options, known)];
+}
+
+/** What to mask in the words of a step's callouts and text marks. A line break may part a number: the words are searched as
+ * they stand and with the breaks read as spaces. */
+function findInMarks(block: StepBlock, options: FindOptions, known: readonly Known[]): Finding[] {
+  return (block.annotations ?? []).flatMap((a) => {
+    if ((a.kind !== "callout" && a.kind !== "text") || !a.text) return [];
+    let matches = matchesIn(a.text, options, known);
+    for (const m of matchesIn(a.text.replace(/\n/g, " "), options, known)) {
+      // Findings of both readings that touch are one: all that either covers (the longer one says what it is).
+      const same = matches.filter((x) => m.start < x.end && x.start < m.end);
+      const longest = [m, ...same].reduce((x, y) => (y.end - y.start > x.end - x.start ? y : x));
+      const start = Math.min(m.start, ...same.map((x) => x.start));
+      const end = Math.max(m.end, ...same.map((x) => x.end));
+      matches = [...matches.filter((x) => !same.includes(x)), { kind: longest.kind, start, end, text: a.text.slice(start, end) }];
+    }
+    return matches
+      .sort((x, y) => x.start - y.start)
+      .map((m): Finding => ({ block: block.id, kind: m.kind, text: m.text, where: a.kind === "callout" ? "callout" : "mark", mark: a.id, start: m.start, end: m.end }));
+  });
 }
 
 /** A text of the cover as rich text (what was written in place), else its plain words as one paragraph. */
@@ -426,8 +449,16 @@ function applyToStep(b: StepBlock, step: GuideStep | undefined, add: readonly Fi
     next.desc = maskRich(b.desc, desc);
     touched = true;
   }
+  const notes = add.filter((f) => f.mark);
+  if (notes.length && b.annotations) {
+    next.annotations = b.annotations.map((a) => {
+      const mine = notes.filter((f) => f.mark === a.id);
+      return mine.length ? { ...a, text: maskPieces([a.text ?? ""], mine.map((f): Range => [f.start!, f.end!]))[0] } : a;
+    });
+    touched = true;
+  }
   // A saved file takes the step's words from the block and keeps no names of the control and the window.
-  if ((touched && (words.length || marks.length)) || (record && !b.masked)) {
+  if ((touched && (words.length || marks.length || notes.length)) || (record && !b.masked)) {
     next.masked = true;
     next.text ??= step?.text;
     touched = true;

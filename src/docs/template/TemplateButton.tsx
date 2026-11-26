@@ -6,7 +6,7 @@ import { useT } from "../../i18n";
 import type { GuideDoc } from "../model";
 import { templateOf } from "./apply";
 import { BUILT_INS, type Template } from "./model";
-import { useTemplateName } from "./TemplatePanel";
+import { useTemplateName } from "./name";
 import type { Templates } from "./useTemplates";
 
 /** "Template" with a menu: the templates to switch to, save, update, export, import, and the panel. */

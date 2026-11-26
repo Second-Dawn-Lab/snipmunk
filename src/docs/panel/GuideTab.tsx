@@ -8,7 +8,8 @@ import { spotStyle, type SpotStyle } from "../marks";
 import { setZoomDefault, type GuideDoc } from "../model";
 import { templateOf } from "../template/apply";
 import { SpotStyleFields } from "./MarkOptions";
-import { TemplateEditor, useTemplateName } from "../template/TemplatePanel";
+import { useTemplateName } from "../template/name";
+import { TemplateEditor } from "../template/TemplatePanel";
 
 type Change = (fn: (d: GuideDoc) => GuideDoc, key?: string) => void;
 

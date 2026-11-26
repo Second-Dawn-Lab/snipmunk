@@ -1,8 +1,26 @@
-//! Tray icon and the windows it opens.
+//! The tray icon (there only while Snipmunk keeps running in the tray) and the windows it opens.
+
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, Wry};
+
+const ID: &str = "main";
+
+/// The menu entries of the tray icon while there is one.
+#[derive(Default)]
+pub struct Tray(Mutex<Option<TrayLabels>>);
+
+/// The main window was put away to the tray: the icon stays until the window is back.
+static KEPT: AtomicBool = AtomicBool::new(false);
+
+/// Is there to be a tray icon? While closing the window keeps Snipmunk running there, and while the window is put away
+/// there (for example by the answer to "Close Snipmunk?").
+pub fn wanted(close_action: &str, kept: bool) -> bool {
+    close_action == "background" || kept
+}
 
 pub struct TrayLabels {
     open: MenuItem<Wry>,
@@ -80,13 +98,76 @@ pub fn set_recording(app: &AppHandle, recording: bool) {
     // The menu is changed on the main thread, without waiting for it (a command runs on another thread).
     let handle = app.clone();
     let _ = app.run_on_main_thread(move || {
-        if let Some(l) = handle.try_state::<TrayLabels>() {
+        with_labels(&handle, |l| {
             let _ = l.record.set_text(if recording {
                 stop_label(lang)
             } else {
                 record_label(lang)
             });
+        });
+    });
+}
+
+fn with_labels(app: &AppHandle, f: impl FnOnce(&TrayLabels)) {
+    if let Some(tray) = app.try_state::<Tray>() {
+        if let Some(labels) = tray.0.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+            f(labels);
         }
+    }
+}
+
+/// Make the tray icon follow `wanted`: it is made or taken away on the main thread.
+pub fn sync(app: &AppHandle) {
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        let Some(tray) = handle.try_state::<Tray>() else {
+            return;
+        };
+        let (action, language) = {
+            let state = handle.state::<crate::commands::AppState>();
+            let settings = state.settings.lock().unwrap();
+            (settings.close_action.clone(), settings.language.clone())
+        };
+        let want = wanted(&action, KEPT.load(Ordering::SeqCst));
+        let mut held = tray.0.lock().unwrap_or_else(|e| e.into_inner());
+        match (want, held.is_some()) {
+            (true, false) => match build(&handle, &language) {
+                Ok(labels) => *held = Some(labels),
+                Err(e) => eprintln!("the tray icon could not be made: {e}"),
+            },
+            (false, true) => {
+                *held = None;
+                let _ = handle.remove_tray_by_id(ID);
+            }
+            _ => {}
+        }
+    });
+}
+
+/// Is the main window put away to the tray?
+pub fn kept() -> bool {
+    KEPT.load(Ordering::SeqCst)
+}
+
+/// Put the main window away to the tray (the icon is there first).
+pub fn hide_to_tray(app: &AppHandle) {
+    KEPT.store(true, Ordering::SeqCst);
+    sync(app);
+    crate::placement::flush();
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.hide();
+    }
+    crate::lifecycle::main_visible(app, false);
+}
+
+/// Take the tray icon away (Quit).
+pub fn remove(app: &AppHandle) {
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        if let Some(tray) = handle.try_state::<Tray>() {
+            *tray.0.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        }
+        let _ = handle.remove_tray_by_id(ID);
     });
 }
 
@@ -128,17 +209,25 @@ fn labels(lang: &str) -> [&'static str; 4] {
     }
 }
 
-pub fn build(app: &AppHandle, lang: &str) -> tauri::Result<()> {
+fn build(app: &AppHandle, lang: &str) -> tauri::Result<TrayLabels> {
     let [o, c, s, q] = labels(lang);
     let open = MenuItem::with_id(app, "open", o, true, None::<&str>)?;
     let capture = MenuItem::with_id(app, "capture", c, true, None::<&str>)?;
-    let record = MenuItem::with_id(app, "record", record_label(lang), true, None::<&str>)?;
+    // (the icon can be made while a recording runs)
+    let recording = crate::recording::is_recording(app);
+    let lang = crate::language::resolve(lang);
+    let first = if recording {
+        stop_label(lang)
+    } else {
+        record_label(lang)
+    };
+    let record = MenuItem::with_id(app, "record", first, true, None::<&str>)?;
     let guide = MenuItem::with_id(app, "guide", guide_label(lang), true, None::<&str>)?;
     let settings = MenuItem::with_id(app, "settings", s, true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", q, true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&open, &capture, &record, &guide, &settings, &quit])?;
 
-    let mut builder = TrayIconBuilder::with_id("main")
+    let mut builder = TrayIconBuilder::with_id(ID)
         .tooltip("Snipmunk")
         .menu(&menu)
         .show_menu_on_left_click(false)
@@ -191,32 +280,46 @@ pub fn build(app: &AppHandle, lang: &str) -> tauri::Result<()> {
     }
     builder.build(app)?;
 
-    app.manage(TrayLabels {
+    Ok(TrayLabels {
         open,
         capture,
         record,
         guide,
         settings,
         quit,
-    });
-    Ok(())
+    })
 }
 
 pub fn set_language(app: &AppHandle, lang: &str) {
-    if let Some(l) = app.try_state::<TrayLabels>() {
-        let [o, c, s, q] = labels(lang);
-        let _ = l.open.set_text(o);
-        let _ = l.capture.set_text(c);
-        let _ = l.record.set_text(record_label(lang));
-        let _ = l.guide.set_text(guide_label(lang));
-        let _ = l.settings.set_text(s);
-        let _ = l.quit.set_text(q);
-    }
+    let recording = crate::recording::is_recording(app);
+    let lang = lang.to_string();
+    // On the main thread, like every change of the icon: the labels are never held while waiting for that thread.
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        with_labels(&handle, |l| {
+            let [o, c, s, q] = labels(&lang);
+            let resolved = crate::language::resolve(&lang);
+            let _ = l.open.set_text(o);
+            let _ = l.capture.set_text(c);
+            let _ = l.record.set_text(if recording {
+                stop_label(resolved)
+            } else {
+                record_label(resolved)
+            });
+            let _ = l.guide.set_text(guide_label(&lang));
+            let _ = l.settings.set_text(s);
+            let _ = l.quit.set_text(q);
+        });
+    });
 }
 
 /// Show the main window and bring it to the front (also from the tray, a second launch and a finished capture).
 pub fn show_main(app: &AppHandle) {
+    if KEPT.swap(false, Ordering::SeqCst) {
+        sync(app);
+    }
     if let Some(w) = app.get_webview_window("main") {
+        crate::lifecycle::main_visible(app, true);
         let _ = w.show();
         let _ = w.unminimize();
         // A saved place on a monitor that is gone must not keep the window out of sight.
@@ -295,7 +398,7 @@ pub fn open_settings_window(app: &AppHandle) {
             let _ = w.set_focus();
             return;
         }
-        let built = tauri::WebviewWindowBuilder::new(&app, "settings", settings_url(&app))
+        let built = crate::webview::window(&app, "settings", settings_url(&app))
             .title("Snipmunk – Settings")
             .inner_size(880.0, 640.0)
             .min_inner_size(700.0, 460.0)
@@ -306,6 +409,14 @@ pub fn open_settings_window(app: &AppHandle) {
         match built {
             Ok(w) => {
                 crate::webview::disable_browser_accelerators(&w);
+                let theme = app
+                    .state::<crate::commands::AppState>()
+                    .settings
+                    .lock()
+                    .unwrap()
+                    .theme
+                    .clone();
+                crate::lifecycle::paint_background(&w, &theme);
                 center_over_main(&app, &w);
                 let _ = w.show();
                 let _ = w.set_focus();
@@ -361,6 +472,15 @@ mod tests {
             (-1920 + 650, 220),
             "a monitor left of the primary one"
         );
+    }
+
+    #[test]
+    fn the_tray_icon_is_there_only_while_snipmunk_keeps_running_in_it() {
+        assert!(super::wanted("background", false));
+        assert!(!super::wanted("quit", false));
+        assert!(!super::wanted("ask", false));
+        // Put away by the answer to "Close Snipmunk?": there until the window is back.
+        assert!(super::wanted("ask", true) && super::wanted("quit", true));
     }
 
     #[test]

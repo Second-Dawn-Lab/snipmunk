@@ -12,7 +12,8 @@ const windowRect = (step: GuideStep, block: StepBlock): Rect => cropRect(step, {
 export function areaOf(step: GuideStep, block: StepBlock): "default" | "window" | "screen" | "custom" {
   if (!block.crop) return "default";
   const [iw, ih] = step.imageSize;
-  if (sameRect(block.crop, [0, 0, iw, ih])) return "screen";
+  // (in a guide opened from a file the whole stored picture is what the step chose then, which the file names)
+  if (sameRect(block.crop, [0, 0, iw, ih])) return block.areaChoice ?? "screen";
   return sameRect(block.crop, windowRect(step, block)) ? "window" : "custom";
 }
 
@@ -29,8 +30,10 @@ export function grow(r: Rect, factor: number, size: [number, number]): Rect {
 /** Choose the picture area of a step (the change is stored in the step; the file keeps only this area when it is saved). */
 export function applyArea(step: GuideStep, block: StepBlock, v: Area, patch: (c: Partial<StepBlock>) => void): void {
   const [iw, ih] = step.imageSize;
-  if (v === "default") patch({ crop: null });
-  else if (v === "screen") patch({ crop: [0, 0, iw, ih] });
-  else if (v === "window") patch({ crop: windowRect(step, block) });
-  else if (v === "grow25" || v === "grow50") patch({ crop: grow(block.crop ?? windowRect(step, block), v === "grow25" ? 0.25 : 0.5, [iw, ih]) });
+  // (a new choice replaces the one a file named)
+  const set = (crop: Rect | null) => patch({ crop, areaChoice: undefined });
+  if (v === "default") set(null);
+  else if (v === "screen") set([0, 0, iw, ih]);
+  else if (v === "window") set(windowRect(step, block));
+  else if (v === "grow25" || v === "grow50") set(grow(block.crop ?? windowRect(step, block), v === "grow25" ? 0.25 : 0.5, [iw, ih]));
 }

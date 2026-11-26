@@ -1590,6 +1590,12 @@ body.is-dragging * {
 @keyframes toast-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .toast { animation: none; } }
 
+/* The notice of a newer version, in the corner opposite the toasts. */
+.updatenotice { position: fixed; inset-block-end: 56px; inset-inline-start: 16px; z-index: 59; display: flex; flex-direction: column; gap: 8px; width: min(360px, calc(100vw - 32px)); padding: 12px; border-radius: 10px; background: var(--dw-surface); color: var(--dw-text); border: 1px solid var(--dw-brand); box-shadow: 0 6px 22px rgba(0, 0, 0, 0.22); font-size: 13.5px; }
+.updatenotice__head { display: flex; align-items: center; gap: 8px; overflow-wrap: anywhere; }
+.updatenotice progress { width: 100%; accent-color: var(--dw-brand); }
+.updatenotice__actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
 /* The folder row of the Save dialog: label, the path (cut with an ellipsis, full path in the tooltip), the Change button. */
 .savedlg__row--folder { grid-template-columns: 120px minmax(0, 1fr) auto; }
 .savedlg__row--folder .savedlg__folder { min-width: 0; text-align: start; unicode-bidi: plaintext; }

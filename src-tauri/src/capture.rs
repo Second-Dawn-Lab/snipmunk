@@ -19,7 +19,7 @@ use dawn_hotkeys as hk;
 use serde::{Deserialize, Serialize};
 use tauri::{
     AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, Runtime, State, UriSchemeContext,
-    WebviewUrl, WebviewWindow, WebviewWindowBuilder,
+    WebviewUrl, WebviewWindow,
 };
 
 use crate::commands::AppState;
@@ -105,9 +105,44 @@ fn overlays(app: &AppHandle) -> Vec<WebviewWindow> {
         .collect()
 }
 
+/// How long the overlays of a capture are kept, hidden, for a next one. After that they are destroyed with their web
+/// pages. A new overlay takes about a quarter of a second longer to show its picture than a kept one; a kept one holds
+/// some 10 to 30 MB: one minute covers captures taken one after another (see docs/performance.md).
+const OVERLAY_KEEP: Duration = Duration::from_secs(60);
+
+/// Held while the overlays of a capture are made, and while idle ones are taken away: neither happens during the other.
+static OVERLAY_GATE: Mutex<()> = Mutex::new(());
+/// Counts every use and every put-away of the overlays: a put-away's timer takes them down only if nothing came after.
+static OVERLAY_TURN: AtomicU64 = AtomicU64::new(0);
+
+/// Hide the overlays; they are destroyed when no capture has used them for `OVERLAY_KEEP`.
 fn hide_overlays(app: &AppHandle) {
     for w in overlays(app) {
         let _ = w.hide();
+    }
+    let turn = OVERLAY_TURN.fetch_add(1, Ordering::SeqCst) + 1;
+    let app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(overlay_keep());
+        let _gate = OVERLAY_GATE.lock().unwrap_or_else(|e| e.into_inner());
+        if OVERLAY_TURN.load(Ordering::SeqCst) == turn {
+            destroy_overlays(&app);
+        }
+    });
+}
+
+/// `OVERLAY_KEEP`; a test instance can try another time with `SNIPMUNK_OVERLAY_KEEP_MS`.
+fn overlay_keep() -> Duration {
+    std::env::var("SNIPMUNK_OVERLAY_KEEP_MS")
+        .ok()
+        .filter(|_| guard_active())
+        .and_then(|ms| ms.parse().ok())
+        .map_or(OVERLAY_KEEP, Duration::from_millis)
+}
+
+fn destroy_overlays(app: &AppHandle) {
+    for w in overlays(app) {
+        crate::webview::destroy(&w);
     }
 }
 
@@ -157,14 +192,17 @@ impl Drop for OwnWindowsHidden {
 /// How long the compositor gets to leave a window out of captures after the change.
 const AFFINITY_SETTLE: Duration = Duration::from_millis(60);
 
+/// The overlay of one monitor: the one that is still there, else a new one.
 fn ensure_overlay(app: &AppHandle, label: &str) -> tauri::Result<WebviewWindow> {
-    if let Some(w) = app.get_webview_window(label) {
+    if let Some(w) = crate::webview::existing(app, label) {
         return Ok(w);
     }
-    let window = WebviewWindowBuilder::new(app, label, WebviewUrl::default())
+    let window = crate::webview::window(app, label, WebviewUrl::default())
         .title("Snipmunk – Capture overlay")
         .decorations(false)
         .transparent(true)
+        // Nothing of the window is visible before its page has painted.
+        .background_color(tauri::window::Color(0, 0, 0, 0))
         .always_on_top(true)
         .skip_taskbar(true)
         .resizable(false)
@@ -175,23 +213,6 @@ fn ensure_overlay(app: &AppHandle, label: &str) -> tauri::Result<WebviewWindow> 
     crate::webview::exclude_from_capture(&window);
     crate::webview::disable_browser_accelerators(&window);
     Ok(window)
-}
-
-/// Create the hidden windows ahead of time (one overlay per monitor, the countdown badge and the toast), so the first
-/// capture is as fast as the next. Runs on its own thread: windows must not be built on the main thread.
-pub fn precreate(app: &AppHandle) {
-    let app = app.clone();
-    std::thread::spawn(move || {
-        let monitors = app
-            .available_monitors()
-            .map(|m| m.len())
-            .unwrap_or(1)
-            .max(1);
-        for i in 0..monitors {
-            let _ = ensure_overlay(&app, &overlay_label(i));
-        }
-        crate::popups::precreate(&app);
-    });
 }
 
 fn finish_run(app: &AppHandle) {
@@ -213,12 +234,31 @@ fn fail(app: &AppHandle, message: &str) {
     crate::tray::show_main(app);
 }
 
-/// A test instance (a development build started with `SNIPMUNK_NO_REAL_CAPTURE` set) never grabs the desktop, records it or
-/// hooks the input, whatever a test script clicks. Every start of a real capture or recording asks this first.
+/// Test and measurement instances never touch the real machine: no screen grab, no recording of the screen, the sound or the
+/// camera, no keyboard or mouse hook, no autostart entry. Such an instance is a development build started with
+/// `SNIPMUNK_NO_REAL_CAPTURE`, or any build made with the cargo feature `measure-guard` (only for
+/// `scripts/measure-memory.ps1`; a release is never built with it).
+pub fn guard_active() -> bool {
+    cfg!(feature = "measure-guard")
+        || (cfg!(debug_assertions) && std::env::var_os("SNIPMUNK_NO_REAL_CAPTURE").is_some())
+}
+
+/// The file a guarded instance "chooses" in a save dialog: `SNIPMUNK_PICK_DIR` + "export." and the kind.
+pub fn picked_by_the_test(kind: &str) -> Option<String> {
+    let dir = std::env::var_os("SNIPMUNK_PICK_DIR").filter(|_| guard_active())?;
+    Some(
+        std::path::PathBuf::from(dir)
+            .join(format!("export.{kind}"))
+            .to_string_lossy()
+            .into_owned(),
+    )
+}
+
+/// Does the guard refuse a real capture? Every start of a real capture or recording asks this first.
 pub fn real_capture_blocked() -> bool {
-    let blocked = cfg!(debug_assertions) && std::env::var_os("SNIPMUNK_NO_REAL_CAPTURE").is_some();
+    let blocked = guard_active();
     if blocked {
-        eprintln!("[test] a real capture was asked for and refused (SNIPMUNK_NO_REAL_CAPTURE)");
+        eprintln!("[test] a real capture was asked for and refused (the test guard)");
     }
     blocked
 }
@@ -226,7 +266,7 @@ pub fn real_capture_blocked() -> bool {
 /// Is the guard of a test instance active? A test script asks this before it clicks anything; it grabs nothing.
 #[tauri::command]
 pub fn dev_capture_guard() -> bool {
-    cfg!(debug_assertions) && std::env::var_os("SNIPMUNK_NO_REAL_CAPTURE").is_some()
+    guard_active()
 }
 
 /// Start a capture (from the shortcut, the button or the tray). Does nothing while another capture is running.
@@ -311,7 +351,25 @@ fn begin(app: &AppHandle) {
         .collect();
     let cursor = hk::cursor_position().unwrap_or((0, 0));
     let focus = geometry::monitor_at(&rects, cursor).unwrap_or(0);
+    present(app, screens, windows, focus, started, true);
+}
 
+/// Put the frozen screenshots of a run on the overlays, one per monitor. `activate` is false only for the timing
+/// measurement: its overlay never takes the focus.
+fn present(
+    app: &AppHandle,
+    screens: Vec<Screen>,
+    windows: Vec<WinInfo>,
+    focus: usize,
+    started: Instant,
+    activate: bool,
+) {
+    let rects: Vec<Rect> = screens
+        .iter()
+        .map(|s| Rect::new(s.x, s.y, s.width, s.height))
+        .collect();
+    let _gate = OVERLAY_GATE.lock().unwrap_or_else(|e| e.into_inner());
+    OVERLAY_TURN.fetch_add(1, Ordering::SeqCst);
     let capture = app.state::<Capture>();
     let id = capture.next_id.fetch_add(1, Ordering::SeqCst);
     *capture.run.lock().unwrap() = Some(Run {
@@ -340,9 +398,13 @@ fn begin(app: &AppHandle) {
         let _ = app.emit_to(&label, "capture-open", id);
         // Show it at once: the window is transparent until its page has the frozen screenshot, so the screen looks
         // dimmed immediately and the (identical) frozen picture replaces the live one a moment later.
-        let _ = window.show();
-        if i == focus {
-            let _ = window.set_focus();
+        if activate {
+            let _ = window.show();
+            if i == focus {
+                let _ = window.set_focus();
+            }
+        } else {
+            crate::webview::show_without_focus(&window);
         }
         trace(&format!(
             "overlay {i} shown {} ms after the start",
@@ -384,6 +446,61 @@ fn watch_overlays(app: &AppHandle, id: u64) {
 pub fn cancel(app: &AppHandle) {
     hide_overlays(app);
     finish_run(app);
+}
+
+// --- the timing measurement --------------------------------------------------
+
+/// For scripts/measure-memory.ps1: how long the selection overlay takes from the start of a capture until its picture
+/// is on screen, with a generated screenshot on an overlay far off every monitor that never takes the focus. `fresh`
+/// destroys a kept overlay first. Answers only in a guarded instance.
+#[tauri::command]
+pub async fn dev_overlay_timing(app: AppHandle, fresh: bool) -> CmdResult<u64> {
+    if !guard_active() {
+        return Err(CmdError::new("refused", "only in a test instance"));
+    }
+    if app.state::<Capture>().busy.swap(true, Ordering::SeqCst) {
+        return Err(CmdError::new("busy", "a capture is running"));
+    }
+    if fresh {
+        let _gate = OVERLAY_GATE.lock().unwrap_or_else(|e| e.into_inner());
+        destroy_overlays(&app);
+    }
+    let (width, height) = (1920u32, 1080u32);
+    let mut rgba = vec![255u8; (width * height * 4) as usize];
+    for (i, pixel) in rgba.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+        pixel[..3].copy_from_slice(&[(i % 251) as u8, ((i / 1920) % 241) as u8, 128]);
+    }
+    let screen = Screen {
+        x: -30000,
+        y: -30000,
+        width,
+        height,
+        scale: 1.0,
+        primary: true,
+        frame: dawn_capture::Frame {
+            width,
+            height,
+            rgba,
+        },
+    };
+    let started = Instant::now();
+    present(&app, vec![screen], Vec::new(), 0, started, false);
+    let mut took = None;
+    while took.is_none() && started.elapsed() < OVERLAY_TIMEOUT {
+        std::thread::sleep(Duration::from_millis(2));
+        let capture = app.state::<Capture>();
+        let ready = capture
+            .run
+            .lock()
+            .unwrap()
+            .as_ref()
+            .is_some_and(|r| r.ready);
+        if ready {
+            took = Some(started.elapsed().as_millis() as u64);
+        }
+    }
+    cancel(&app);
+    took.ok_or_else(|| CmdError::new("timeout", "the overlay did not report"))
 }
 
 // --- the overlay pages -------------------------------------------------------

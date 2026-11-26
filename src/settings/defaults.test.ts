@@ -6,7 +6,8 @@ describe("defaultSettings", () => {
   it("has the defaults of the spec", () => {
     expect(defaultSettings).toMatchObject({
       theme: "system",
-      closeAction: "background",
+      closeAction: "quit",
+      launchAtLogin: false,
       captureHotkey: "Ctrl+Alt+PrintScreen",
       clearOnExit: false,
       retentionDays: 30,

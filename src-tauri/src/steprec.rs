@@ -55,6 +55,9 @@ pub enum Raw {
         mods: Mods,
         hkl: isize,
         at: Instant,
+        /// Is the field it goes into secret (see `secret`)? `None`: not looked at, which counts as secret (except for
+        /// the injected events of the tests).
+        secret: Option<bool>,
     },
     /// "Take a step now" (the step hotkey, the bar's button): at the pointer.
     Take { x: i32, y: i32, at: Instant },
@@ -101,12 +104,29 @@ pub fn is_double(
 pub struct TypeGroup {
     pub text: String,
     pub last: Option<Instant>,
+    /// Part of it goes into a secret field: none of it is stored. Once set, it stays for the whole group.
+    pub secret: bool,
 }
 
 impl TypeGroup {
-    pub fn push(&mut self, s: &str, at: Instant) {
-        self.text.push_str(s);
+    pub fn push(&mut self, s: &str, at: Instant, secret: bool) {
+        self.secret |= secret;
+        // (a secret is not kept in memory either: only how many characters there are, for Backspace)
+        if self.secret {
+            let count = self.text.chars().count() + s.chars().count();
+            self.text = "•".repeat(count);
+        } else {
+            self.text.push_str(s);
+        }
         self.last = Some(at);
+    }
+    /// What the step says was typed.
+    pub fn written(&self) -> String {
+        if self.secret {
+            crate::secret::MASK.to_string()
+        } else {
+            self.text.clone()
+        }
     }
     pub fn backspace(&mut self, at: Instant) {
         self.text.pop();
@@ -173,6 +193,61 @@ pub fn key_name(vk: u32) -> String {
 
 pub fn is_modifier(vk: u32) -> bool {
     matches!(vk, 0x10 | 0x11 | 0x12 | 0x14 | 0x5B | 0x5C | 0xA0..=0xA5)
+}
+
+/// A key pressed with these modifiers is a shortcut, not typing. (Ctrl with Alt is AltGr, which types.)
+pub fn is_shortcut(mods: Mods) -> bool {
+    (mods.ctrl && !mods.alt) || (mods.alt && !mods.ctrl) || mods.win
+}
+
+/// May this key write text? Everything the recorder could add to a typing step (and so must be judged first).
+pub fn may_write(vk: u32, mods: Mods) -> bool {
+    !is_modifier(vk) && !is_shortcut(mods) && !matches!(vk, 0x08 | 0x09 | 0x0D)
+}
+
+/// The stage between the hooks and the recorder, on a thread of its own so that nothing slow is ever in front of it:
+/// each key that may write text is judged at once (see `secret`), and the event goes on with the verdict. It ends when
+/// the hooks are gone and everything they sent has gone on.
+#[cfg(windows)]
+fn watch_fields(from: Receiver<Raw>, to: Sender<Raw>, typing: bool) {
+    let uia = facts::Uia::start();
+    let mut asked = 0isize;
+    crate::secret::judge(from, to, |event| match event {
+        // Typing usually follows a click: a web page clicked into is asked now, so it is ready at the first key.
+        Raw::Mouse { x, y, .. } if typing => {
+            let clicked = facts::root_at(x, y);
+            if clicked != 0 && clicked != asked {
+                asked = clicked;
+                uia.prime(clicked, None);
+            }
+            event
+        }
+        Raw::Key {
+            vk,
+            scan,
+            mods,
+            hkl,
+            at,
+            ..
+        } if typing && may_write(vk, mods) => {
+            // A Chromium window is asked for its accessibility tree once, so its fields can answer.
+            let front = facts::foreground_root();
+            if front != 0 && front != asked {
+                asked = front;
+                uia.prime(front, None);
+            }
+            let looked = uia.focus_is_secret(crate::secret::LATE);
+            Raw::Key {
+                vk,
+                scan,
+                mods,
+                hkl,
+                at,
+                secret: Some(crate::secret::verdict(looked, crate::secret::since(at))),
+            }
+        }
+        other => other,
+    });
 }
 
 #[cfg(test)]
@@ -411,13 +486,31 @@ mod pure_tests {
     fn typed_characters_group_and_backspace_removes_the_last() {
         let t0 = Instant::now();
         let mut g = TypeGroup::default();
-        g.push("Ham", t0);
-        g.push("x", t0 + Duration::from_millis(100));
+        g.push("Ham", t0, false);
+        g.push("x", t0 + Duration::from_millis(100), false);
         g.backspace(t0 + Duration::from_millis(200));
-        g.push("burg", t0 + Duration::from_millis(300));
+        g.push("burg", t0 + Duration::from_millis(300), false);
         assert_eq!(g.text, "Hamburg");
+        assert_eq!(g.written(), "Hamburg");
         assert!(!g.idle(t0 + Duration::from_millis(1500), TYPE_IDLE));
         assert!(g.idle(t0 + Duration::from_millis(2400), TYPE_IDLE));
+    }
+
+    #[test]
+    fn nothing_of_a_group_with_a_secret_key_is_kept() {
+        let t0 = Instant::now();
+        let mut g = TypeGroup::default();
+        g.push("s3", t0, false);
+        // One key of the group went into a secret field: also what came before and what comes after.
+        g.push("c", t0, true);
+        g.push("ret", t0, false);
+        assert!(g.secret && g.text.chars().all(|c| c == '•'), "{:?}", g.text);
+        assert_eq!(g.written(), crate::secret::MASK);
+        // Backspace still counts, so a field emptied again makes no step.
+        for _ in 0..6 {
+            g.backspace(t0);
+        }
+        assert!(g.is_empty());
     }
 
     #[test]
@@ -718,6 +811,9 @@ struct Active {
     ignored: Arc<AtomicU32>,
     #[cfg(windows)]
     hooks: Option<hooks::Hooks>,
+    /// The stage between the hooks and the recorder that judges which keys are secret (`watch_fields`).
+    #[cfg(windows)]
+    watcher: Option<std::thread::JoinHandle<()>>,
 }
 
 #[derive(Default)]
@@ -1002,13 +1098,24 @@ pub async fn start_with(
         let (tx, rx) = std::sync::mpsc::channel::<Raw>();
         let paused = Arc::new(AtomicBool::new(false));
         let count = Arc::new(AtomicU32::new(0));
+        let typing = settings.typing;
         let thread = {
             let (app, frames, paused, count, id) = (app.clone(), frames.clone(), paused.clone(), count.clone(), info.id.clone());
             let ignored = ignored.clone();
             std::thread::spawn(move || pipeline(app, id, rx, frames, settings, paused, count, ignored, start_n))
         };
+        // Between the hooks and the recorder: each key that may write text is looked at as it comes (see `secret`).
         #[cfg(windows)]
-        let hooks = if real_hooks { hooks::Hooks::install(tx.clone(), paused.clone()).ok() } else { None };
+        let (hooks, watcher) = if real_hooks {
+            let (hook_tx, hook_rx) = std::sync::mpsc::channel::<Raw>();
+            let to = tx.clone();
+            let watcher = std::thread::spawn(move || watch_fields(hook_rx, to, typing));
+            (hooks::Hooks::install(hook_tx, paused.clone()).ok(), Some(watcher))
+        } else {
+            (None, None)
+        };
+        #[cfg(not(windows))]
+        let _ = typing;
         let active = Active {
             id: info.id.clone(),
             append,
@@ -1023,6 +1130,8 @@ pub async fn start_with(
             ignored,
             #[cfg(windows)]
             hooks,
+            #[cfg(windows)]
+            watcher,
         };
         *app.state::<GuideRec>().active.lock().unwrap() = Some(active);
         announce(&app);
@@ -1048,7 +1157,7 @@ fn show_frame(app: &AppHandle, area: AreaMode) {
     let Some(first) = first else {
         return;
     };
-    let built = tauri::WebviewWindowBuilder::new(
+    let built = crate::webview::window(
         app,
         "guideframe",
         tauri::WebviewUrl::App("index.html".into()),
@@ -1139,22 +1248,19 @@ fn ui_start(app: &AppHandle, area: AreaMode) {
 fn show_bar(app: &AppHandle) {
     let (x, y, scale) = hooks::primary_top().unwrap_or((0, 0, 1.0));
     let (w, h) = ((460.0 * scale) as u32, (76.0 * scale) as u32);
-    let built = tauri::WebviewWindowBuilder::new(
-        app,
-        "guidebar",
-        tauri::WebviewUrl::App("index.html".into()),
-    )
-    .title("Snipmunk – Guide bar")
-    .decorations(false)
-    .transparent(true)
-    .background_color(tauri::window::Color(0, 0, 0, 0))
-    .shadow(false)
-    .always_on_top(true)
-    .skip_taskbar(true)
-    .focused(false)
-    .resizable(false)
-    .visible(false)
-    .build();
+    let built =
+        crate::webview::window(app, "guidebar", tauri::WebviewUrl::App("index.html".into()))
+            .title("Snipmunk – Guide bar")
+            .decorations(false)
+            .transparent(true)
+            .background_color(tauri::window::Color(0, 0, 0, 0))
+            .shadow(false)
+            .always_on_top(true)
+            .skip_taskbar(true)
+            .focused(false)
+            .resizable(false)
+            .visible(false)
+            .build();
     if let Ok(win) = built {
         let _ = win.set_size(tauri::PhysicalSize::new(w, h));
         let _ = win.set_position(tauri::PhysicalPosition::new(
@@ -1257,7 +1363,13 @@ fn end(app: &AppHandle, keep: bool) -> Option<String> {
     // The recorder is taken out of the state first: no lock is held while the threads end and the windows change.
     let mut a = app.state::<GuideRec>().active.lock().unwrap().take()?;
     #[cfg(windows)]
-    drop(a.hooks.take());
+    {
+        drop(a.hooks.take());
+        // The keys still on their way through the watcher reach the recorder before "Stop" does.
+        if let Some(w) = a.watcher.take() {
+            let _ = w.join();
+        }
+    }
     let _ = a.tx.send(Raw::Stop);
     if let Some(t) = a.thread.take() {
         let _ = t.join();
@@ -1321,6 +1433,15 @@ struct Snapshot {
     uia: Option<UiaFacts>,
 }
 
+impl Snapshot {
+    /// Is the element of this snapshot a field whose content must not be written down (see `secret`)?
+    fn on_secret_field(&self) -> bool {
+        self.uia.as_ref().is_some_and(|u| {
+            crate::secret::field_is_secret(u.password, &u.control, &u.name, &u.automation_id)
+        })
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct WinFacts {
     pub hwnd: isize,
@@ -1353,6 +1474,8 @@ pub struct UiaFacts {
     pub classes: Vec<String>,
     /// A text control (an editor, a text field). `name` never holds what it contains.
     pub surface: steptext::Surface,
+    /// The element says it is a password field.
+    pub password: bool,
 }
 
 /// Which part of the Windows shell a click was in (the taskbar and the Start menu are not "File Explorer"). Pure; tested.
@@ -1503,6 +1626,8 @@ struct Pipe {
     pending: Option<(PendingClick, Snapshot)>,
     typing: TypeGroup,
     typing_facts: Option<Snapshot>,
+    /// The last click was on a secret field: what is typed next is secret.
+    clicked_secret: bool,
     last_hwnd: isize,
     hint_sent: bool,
     own_pid: u32,
@@ -1537,6 +1662,7 @@ fn pipeline(
         pending: None,
         typing: TypeGroup::default(),
         typing_facts: None,
+        clicked_secret: false,
         last_hwnd: 0,
         hint_sent: false,
         own_pid: std::process::id(),
@@ -1611,11 +1737,13 @@ impl Pipe {
                             self.flush_pending();
                         }
                         let snap = self.snapshot((x, y), at);
+                        self.clicked_secret = snap.on_secret_field();
                         self.pending = Some((PendingClick { at, x, y }, snap));
                     }
                     Button::Right | Button::Middle => {
                         self.flush_pending();
                         let snap = self.snapshot((x, y), at);
+                        self.clicked_secret = snap.on_secret_field();
                         let kind = if button == Button::Right {
                             Kind::RightClick
                         } else {
@@ -1641,7 +1769,12 @@ impl Pipe {
                 mods,
                 hkl,
                 at,
-            } => self.key(vk, scan, mods, hkl, at),
+                secret,
+            } => {
+                // A key nobody looked at is secret; only the tests' injected events are taken as they say.
+                let secret = secret.unwrap_or(!self.settings.allow_own);
+                self.key(vk, scan, mods, hkl, at, secret)
+            }
             Raw::Stop => {}
         }
     }
@@ -1684,7 +1817,7 @@ impl Pipe {
         facts::point_belongs_to(x, y, self.own_pid, &own)
     }
 
-    fn key(&mut self, vk: u32, scan: u32, mods: Mods, hkl: isize, at: Instant) {
+    fn key(&mut self, vk: u32, scan: u32, mods: Mods, hkl: isize, at: Instant, secret: bool) {
         if is_modifier(vk) {
             return;
         }
@@ -1698,9 +1831,7 @@ impl Pipe {
         }) {
             return;
         }
-        let ctrl_only = mods.ctrl && !mods.alt;
-        let shortcut = ctrl_only || (mods.alt && !mods.ctrl) || mods.win;
-        if shortcut {
+        if is_shortcut(mods) {
             self.flush_pending();
             self.flush_typing_at(at);
             if self.settings.shortcuts {
@@ -1714,6 +1845,8 @@ impl Pipe {
         if vk == 0x0D || vk == 0x09 {
             self.flush_pending();
             self.flush_typing_at(at);
+            // The focus goes on: the field that was clicked no longer says anything about what comes.
+            self.clicked_secret = false;
             if self.settings.enter_tab {
                 let (x, y) = self.pointer_now();
                 let snap = self.snapshot((x, y), at);
@@ -1735,12 +1868,16 @@ impl Pipe {
             return;
         }
         self.flush_pending();
+        let mut secret = secret || self.clicked_secret;
         if self.typing.is_empty() {
+            self.typing = TypeGroup::default();
             // The element that has the focus at the first character is the field of the group.
             let (x, y) = self.pointer_now();
-            self.typing_facts = Some(self.snapshot_focus((x, y), at));
+            let snap = self.snapshot_focus((x, y), at);
+            secret |= snap.on_secret_field();
+            self.typing_facts = Some(snap);
         }
-        self.typing.push(&text, at);
+        self.typing.push(&text, at, secret);
     }
 
     fn flush_pending(&mut self) {
@@ -1760,14 +1897,16 @@ impl Pipe {
             self.typing_facts = None;
             return;
         }
-        let text = std::mem::take(&mut self.typing.text);
-        self.typing = TypeGroup::default();
+        let group = std::mem::take(&mut self.typing);
         if let Some(mut snap) = self.typing_facts.take() {
-            // The picture of a typing step is taken at its end: it shows the typed text.
-            let mi = snap.monitor;
-            snap.frame = self.frames.monitors.get(mi).and_then(|m| m.at(at));
+            // The picture of a typing step is taken at its end: it shows the typed text. For a secret it stays the one
+            // from before the first key (a password field may show what is in it).
+            if !group.secret {
+                let mi = snap.monitor;
+                snap.frame = self.frames.monitors.get(mi).and_then(|m| m.at(at));
+            }
             snap.at = at;
-            self.commit(snap, Kind::Type, Some(text), None);
+            self.commit(snap, Kind::Type, Some(group.written()), None);
         }
     }
 
@@ -1994,6 +2133,9 @@ pub enum Inject {
         mods: Mods,
         #[serde(default)]
         layout: String,
+        /// As if the focused field were a password field.
+        #[serde(default)]
+        secret: bool,
     },
     Take {
         x: i32,
@@ -2041,7 +2183,12 @@ pub async fn dev_guide_inject(app: AppHandle, events: Vec<Inject>) -> CmdResult<
                     let _ = tx.send(Raw::Take { x, y, at });
                     sent += 1;
                 }
-                Inject::Key { vk, mods, layout } => {
+                Inject::Key {
+                    vk,
+                    mods,
+                    layout,
+                    secret,
+                } => {
                     let hkl = facts::layout_handle(&layout);
                     let _ = tx.send(Raw::Key {
                         vk,
@@ -2049,6 +2196,7 @@ pub async fn dev_guide_inject(app: AppHandle, events: Vec<Inject>) -> CmdResult<
                         mods,
                         hkl,
                         at,
+                        secret: Some(secret),
                     });
                     sent += 1;
                 }
@@ -2207,6 +2355,8 @@ pub mod hooks {
                             mods: mods_now(),
                             hkl,
                             at: Instant::now(),
+                            // (looked at by the next stage: nothing slow happens in a hook)
+                            secret: None,
                         });
                     }
                 }
@@ -2775,6 +2925,8 @@ mod facts {
     enum Req {
         Point(i32, i32, Sender<Option<UiaFacts>>),
         Focused(Sender<Option<UiaFacts>>),
+        /// Is the focused field secret? (Only what that needs is read.)
+        Secret(Sender<Option<bool>>),
         /// Make a Chromium window (Chrome, Edge, Electron, a web view) build its accessibility tree: the top window handle and,
         /// when someone waits, the number of render hosts that were asked.
         Prime(isize, Option<Sender<usize>>),
@@ -2862,6 +3014,25 @@ mod facts {
             crate::steptext::safe_name(&f.control, &class, &f.name, &label, &content);
     }
 
+    /// What a field says about itself that decides whether typing into it is secret; `None` when it does not answer.
+    /// Nothing of its content is read.
+    fn secret_of(el: &IUIAutomationElement) -> Option<bool> {
+        // SAFETY: COM calls on the thread that owns the element.
+        unsafe {
+            let control = control_word(el.CurrentControlType().ok()?.0);
+            let password = el.CurrentIsPassword().ok()?.as_bool();
+            let text = |t: windows::core::Result<windows::core::BSTR>| {
+                t.map(|b| b.to_string()).unwrap_or_default()
+            };
+            Some(crate::secret::field_is_secret(
+                password,
+                control,
+                &text(el.CurrentName()),
+                &text(el.CurrentAutomationId()),
+            ))
+        }
+    }
+
     fn describe(auto: &IUIAutomation, el: &IUIAutomationElement) -> Option<UiaFacts> {
         // SAFETY: COM calls on the UI Automation thread on elements that came from it.
         unsafe {
@@ -2884,6 +3055,7 @@ mod facts {
             if let Ok(c) = el.CurrentClassName() {
                 f.classes.push(c.to_string());
             }
+            f.password = el.CurrentIsPassword().is_ok_and(|b| b.as_bool());
             safe_text_name(el, &mut f);
             if let Ok(p) = el.GetCurrentPattern(UIA_TogglePatternId) {
                 if let Ok(t) = p.cast::<IUIAutomationTogglePattern>() {
@@ -3026,6 +3198,9 @@ mod facts {
                                 Req::Point(.., s) | Req::Focused(s) => {
                                     let _ = s.send(None);
                                 }
+                                Req::Secret(s) => {
+                                    let _ = s.send(None);
+                                }
                                 Req::Prime(_, s) => {
                                     if let Some(s) = s {
                                         let _ = s.send(0);
@@ -3051,6 +3226,11 @@ mod facts {
                                     .ok()
                                     .and_then(|e| describe(&auto, &e));
                                 let _ = s.send(f);
+                            }
+                            Req::Secret(s) => {
+                                let secret =
+                                    auto.GetFocusedElement().ok().and_then(|e| secret_of(&e));
+                                let _ = s.send(secret);
                             }
                             Req::Prime(root, s) => {
                                 let n = prime_chromium(&auto, root, &mut primed);
@@ -3078,6 +3258,13 @@ mod facts {
             r.recv_timeout(limit).ok().flatten()
         }
 
+        /// Is what goes into the focused field to be kept out of the guide? `None`: it could not be looked at in time.
+        pub fn focus_is_secret(&self, limit: Duration) -> Option<bool> {
+            let (s, r) = channel();
+            self.tx.send(Req::Secret(s)).ok()?;
+            r.recv_timeout(limit).ok().flatten()
+        }
+
         /// Ask a Chromium window to build its accessibility tree (once per window); `wait`: how long to wait for the answer. Returns
         /// the number of render hosts that were asked (0 when the window has none, or on a timeout).
         pub fn prime(&self, root: isize, wait: Option<Duration>) -> usize {
@@ -3094,6 +3281,91 @@ mod facts {
                     0
                 }
             }
+        }
+    }
+
+    #[cfg(test)]
+    mod secret_tests {
+        use super::*;
+        use windows::core::w;
+        use windows::Win32::UI::WindowsAndMessaging::{
+            CreateWindowExW, DestroyWindow, DispatchMessageW, PeekMessageW, MSG, PM_REMOVE,
+            WINDOW_STYLE, WS_CHILD, WS_OVERLAPPEDWINDOW, WS_VISIBLE,
+        };
+
+        /// A real password box and a real ordinary box of Windows, in a window of this test that is never shown, asked
+        /// through UI Automation by their handles (no other window is looked at).
+        #[test]
+        fn windows_says_which_of_two_real_edit_boxes_is_for_a_password() {
+            const ES_PASSWORD: u32 = 0x0020;
+            let (handles_tx, handles_rx) = channel::<(isize, isize)>();
+            let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let done2 = done.clone();
+            // The window's thread answers UI Automation while the test asks.
+            let owner = std::thread::spawn(move || {
+                // SAFETY: the windows are made, pumped and destroyed on this thread.
+                unsafe {
+                    let top = CreateWindowExW(
+                        Default::default(),
+                        w!("STATIC"),
+                        w!("Snipmunk secret test"),
+                        WS_OVERLAPPEDWINDOW,
+                        0,
+                        0,
+                        300,
+                        160,
+                        None,
+                        None,
+                        None,
+                        None,
+                    )
+                    .unwrap();
+                    let edit = |style: u32, y: i32| {
+                        CreateWindowExW(
+                            Default::default(),
+                            w!("EDIT"),
+                            w!(""),
+                            WINDOW_STYLE((WS_CHILD | WS_VISIBLE).0 | style),
+                            10,
+                            y,
+                            200,
+                            24,
+                            Some(top),
+                            None,
+                            None,
+                            None,
+                        )
+                        .unwrap()
+                    };
+                    let (password, plain) = (edit(ES_PASSWORD, 10), edit(0, 50));
+                    handles_tx
+                        .send((password.0 as isize, plain.0 as isize))
+                        .unwrap();
+                    let mut msg = MSG::default();
+                    while !done2.load(std::sync::atomic::Ordering::SeqCst) {
+                        while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
+                            DispatchMessageW(&msg);
+                        }
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                    let _ = DestroyWindow(top);
+                }
+            });
+            let (password, plain) = handles_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+            // SAFETY: COM on this thread; the handles are the test's own windows.
+            let answers = unsafe {
+                let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+                let auto: IUIAutomation =
+                    CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER).unwrap();
+                [password, plain].map(|h| {
+                    let el = auto.ElementFromHandle(HWND(h as *mut _)).unwrap();
+                    let facts = describe(&auto, &el).unwrap();
+                    (secret_of(&el), facts.password)
+                })
+            };
+            done.store(true, std::sync::atomic::Ordering::SeqCst);
+            owner.join().unwrap();
+            assert_eq!(answers, [(Some(true), true), (Some(false), false)]);
         }
     }
 }
@@ -3114,6 +3386,9 @@ mod facts {
             0
         }
         pub fn focused(&self, _: Duration) -> Option<UiaFacts> {
+            None
+        }
+        pub fn focus_is_secret(&self, _: Duration) -> Option<bool> {
             None
         }
     }
@@ -3369,6 +3644,7 @@ button,input,select{font:inherit} [role=tab]{padding:4px 10px;border:1px solid #
                 vk,
                 mods,
                 layout: layout.into(),
+                secret: false,
             });
             v.push(Inject::Wait { ms: 15 });
         }
@@ -3437,16 +3713,15 @@ button,input,select{font:inherit} [role=tab]{padding:4px 10px;border:1px solid #
         )
         .parse::<tauri::Url>()
         .map_err(|e| CmdError::new("io", e.to_string()))?;
-        let win =
-            tauri::WebviewWindowBuilder::new(&app, "uiaprobe", tauri::WebviewUrl::External(url))
-                .title("UIA probe page")
-                .inner_size(640.0, 480.0)
-                .position(60.0, 60.0)
-                .always_on_top(true)
-                .focused(false)
-                .decorations(false)
-                .build()
-                .map_err(|e| CmdError::new("io", e.to_string()))?;
+        let win = crate::webview::window(&app, "uiaprobe", tauri::WebviewUrl::External(url))
+            .title("UIA probe page")
+            .inner_size(640.0, 480.0)
+            .position(60.0, 60.0)
+            .always_on_top(true)
+            .focused(false)
+            .decorations(false)
+            .build()
+            .map_err(|e| CmdError::new("io", e.to_string()))?;
         pause(1200).await;
         let dpr = win.scale_factor().unwrap_or(1.0);
         let pos = win.inner_position().map(|p| (p.x, p.y)).unwrap_or((60, 60));
@@ -3495,19 +3770,15 @@ button,input,select{font:inherit} [role=tab]{padding:4px 10px;border:1px solid #
             )
             .parse::<tauri::Url>()
             .map_err(|e| CmdError::new("io", e.to_string()))?;
-            let win = tauri::WebviewWindowBuilder::new(
-                &app,
-                "guidetest",
-                tauri::WebviewUrl::External(url),
-            )
-            .title("Guide test page")
-            .inner_size(640.0, 480.0)
-            .position(60.0, 60.0)
-            .always_on_top(true)
-            .focused(false)
-            .decorations(false)
-            .build()
-            .map_err(|e| CmdError::new("io", e.to_string()))?;
+            let win = crate::webview::window(&app, "guidetest", tauri::WebviewUrl::External(url))
+                .title("Guide test page")
+                .inner_size(640.0, 480.0)
+                .position(60.0, 60.0)
+                .always_on_top(true)
+                .focused(false)
+                .decorations(false)
+                .build()
+                .map_err(|e| CmdError::new("io", e.to_string()))?;
             pause(1800).await;
             let dpr = win.scale_factor().unwrap_or(1.0);
             let pos = win.inner_position().map(|p| (p.x, p.y)).unwrap_or((60, 60));
@@ -3600,6 +3871,7 @@ button,input,select{font:inherit} [role=tab]{padding:4px 10px;border:1px solid #
                     vk: 0x53,
                     mods: ctrl,
                     layout: "en".into(),
+                    secret: false,
                 },
                 ev(500),
             ]);

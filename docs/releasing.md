@@ -2,7 +2,9 @@
 
 Releases are automated with [release-please](https://github.com/googleapis/release-please). You never edit version numbers, the changelog or tags by hand. You write commit messages with a short prefix, merge a pull request when you want a release, test a draft, and click Publish.
 
-Snipmunk reaches the network in exactly one way: the **update check** (`latest.json` on the latest GitHub release, at most once a day and when the user clicks "Check for updates"; the update check UI is added in a later phase). Capturing, annotating, saving and copying screenshots never touch the network. No other code may open a connection. See "Network access" at the end.
+Snipmunk reaches the network in exactly one way: the **update check** and the update's download (`latest.json` and the installer on the latest GitHub release). Capturing, annotating, recording, guides, saving and copying never touch the network. No other code may open a connection. See "Network access" at the end and [PRIVACY.md](../PRIVACY.md).
+
+**First release?** Do section 2, then section 5.
 
 ## 1. How it works
 
@@ -28,7 +30,9 @@ you test the installer from the draft, then click "Publish release"
 installed copies find latest.json and offer the update
 ```
 
-**One version source.** `package.json` holds the version. `src-tauri/tauri.conf.json` reads it (`"version": "../package.json"`). release-please keeps `Cargo.toml` (`[workspace.package] version`) and the `snipmunk` entry in `Cargo.lock` in step, so CI (which uses the lockfile) never sees a drift. The release build still checks that all of them match the tag.
+**One version source.** `package.json` holds the version. `src-tauri/tauri.conf.json` reads it (`"version": "../package.json"`). release-please keeps `Cargo.toml` (`[workspace.package] version`) and the `snipmunk` and `snipmunk-pixels` entries in `Cargo.lock` in step, so CI never sees a drift. The release build still checks that all of them match the tag.
+
+**Tools of the workflows:** `actions/checkout@v7`, `pnpm/action-setup@v6`, `actions/setup-node@v7` with Node 24, `actions/upload-artifact@v7`, Rust stable (`dtolnay/rust-toolchain`), `Swatinem/rust-cache@v2`, release-please-action pinned to v5.0.0; pnpm from `packageManager` in `package.json`; dawn-core checked out at the ref in `dawn-core.ref`. CI also runs `cargo fmt -p snipmunk --check` and clippy for the normal and the Store variant.
 
 **Why the build is a job of the same workflow.** A tag or release created with the default `GITHUB_TOKEN` does not start other workflows (a GitHub rule against loops). A separate "on tag push" workflow would therefore never run for a tag release-please made. So `.github/workflows/release.yml` has two jobs: `release-please` (opens the PR, creates the draft and the tag) and `build` (runs only when the first job created a release, and uploads to that draft).
 
@@ -49,21 +53,29 @@ installed copies find latest.json and offer the update
 
 The updater only installs updates signed with your key. **Never create the private key in this repository, never commit it, and never paste it into a chat or an issue.** Do these steps on your own machine:
 
-1. Generate a key pair (choose a strong password when asked):
+Snipmunk has its **own** key pair, not Owl-L's.
 
-   ```bash
-   pnpm tauri signer generate -w ~/.tauri/snipmunk-updater.key
+1. Generate it in PowerShell, from the `snipmunk` folder (choose a strong password when asked). Use this form: PowerShell does not expand `~` for the tool, which would then create a folder named `~` **inside the repository**.
+
+   ```powershell
+   pnpm tauri signer generate -w "$env:USERPROFILE\.tauri\snipmunk-updater.key"
    ```
 
-   This writes the private key to `~/.tauri/snipmunk-updater.key` (outside any repository) and prints the public key. A matching `snipmunk-updater.key.pub` file is written next to it.
+   This writes the private key to `%USERPROFILE%\.tauri\snipmunk-updater.key` (outside any repository) and the public key to `snipmunk-updater.key.pub` next to it.
 
-2. Put the **public** key into `src-tauri/tauri.conf.json` (`plugins.updater.pubkey`). The release workflow refuses to run while the placeholder `REPLACE_WITH_...` is still there.
+2. Copy the **public** key (one long line):
+
+   ```powershell
+   Get-Content "$env:USERPROFILE\.tauri\snipmunk-updater.key.pub" | Set-Clipboard
+   ```
+
+   Paste it into `src-tauri/tauri.conf.json` as `plugins.updater.pubkey`, replacing the whole text `REPLACE_WITH_UPDATER_PUBLIC_KEY (see docs/releasing.md, section 2)`. The release workflow refuses to run while the placeholder is there, and an installed app can only install updates signed with the matching private key.
 
 3. Add two **GitHub Actions secrets** to the `snipmunk` repository (Settings, Secrets and variables, Actions):
 
    | Secret | Value |
    |---|---|
-   | `TAURI_SIGNING_PRIVATE_KEY` | the full content of `~/.tauri/snipmunk-updater.key` |
+   | `TAURI_SIGNING_PRIVATE_KEY` | the full content of `%USERPROFILE%\.tauri\snipmunk-updater.key` (copy it with `Get-Content "$env:USERPROFILE\.tauri\snipmunk-updater.key" \| Set-Clipboard`) |
    | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | the password you chose |
 
 4. Back up the private key and password somewhere safe (a password manager). **If you lose the key, installed copies of Snipmunk can never update themselves again.** If it leaks, generate a new pair, release a version that carries the new public key signed with the old key, and rotate the secrets.
@@ -112,9 +124,33 @@ Rules of thumb:
 
 To withdraw a bad release before or after publishing, delete the release or turn it back into a draft (`latest` then points at the previous published release), fix the problem with `fix:` commits and release the next patch version. Do not reuse a version number.
 
-## 5. Bootstrapping note 
+## 5. The first release, 0.1.0
 
-`.release-please-manifest.json` says `0.0.0`: nothing is released yet. release-please finds all commits since the repository started; the first `feat:`/`fix:` commit makes the Release PR propose `0.0.1`. To start at `0.1.0`, put `Release-As: 0.1.0` in the description of a commit (see section 3). Do not edit the manifest by hand; the Release PR updates it.
+`.release-please-manifest.json` says `0.0.0` (nothing is released yet) while `package.json` and `Cargo.toml` already say `0.1.0`. The first release is named by a footer in the commit, not guessed: **`Release-As: 0.1.0`**. Do not edit the manifest by hand; the Release PR sets it to `0.1.0`.
+
+Do this in order:
+
+1. **Key and secrets** (section 2): generate the key, paste the public key into `src-tauri/tauri.conf.json`, add `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` to the repository, and set the workflow permissions.
+2. Check that `dawn-core.ref` names a tag that exists on GitHub (`v0.7.0`).
+3. In **GitHub Desktop**, repository `snipmunk`: look through the Changes list (no `.key` file, no `target` folder, no `identity.json` unless you mean to). Commit **everything as one commit** with
+   - **Summary:** `feat: first release of Snipmunk for Windows`
+   - **Description** (exactly this one line): `Release-As: 0.1.0`
+
+   Do not start the Summary with `chore: release`: that is the title of release-please's own pull request.
+4. **Commit to main**, then **Push origin**.
+5. On GitHub, **Actions**: wait for **CI** to be green. The **Release** run's first job opens a pull request **"chore: release 0.1.0"** (Pull requests tab). It changes `CHANGELOG.md` (all earlier `feat:` / `fix:` commits are listed) and the manifest. If it names another version, do not merge it: check the commit's description.
+6. **Merge pull request** → **Confirm merge**.
+7. **Actions → Release**: `release-please` creates the tag `v0.1.0` and a draft release; `build` uploads `Snipmunk_0.1.0_x64-setup.exe`, its `.sig` and `latest.json`. If it fails, fix the cause and use **Run workflow** with the tag `v0.1.0`.
+8. **Releases → the draft**: download the installer and test it (section 8). You may shorten the notes. Then **Publish release**.
+
+## 5a. The update test, 0.1.0 → 0.1.1
+
+1. Keep the published **0.1.0** installed (from the release, not a local build).
+2. Make a small real fix (or a harmless one, for example a spelling correction in the app) and commit it with the Summary `fix: ...`; push. Wait for CI, merge **"chore: release 0.1.1"**, test the draft's files exist, **Publish release**.
+3. Start the installed 0.1.0: **Settings → About → Check for updates**. It must say "Snipmunk 0.1.1 is available". (The quiet check after a start also finds it, at most once a day; if you checked in the last 24 hours it waits until tomorrow.)
+4. Press **Update and restart**: progress, then Snipmunk closes, the installer runs without questions, and 0.1.1 starts. **About** shows 0.1.1; settings, screenshots and the Start menu shortcut are as before.
+5. Repeat once with unsaved work (an unsaved recording): the question comes first; **Cancel** keeps 0.1.0 running and the notice stays; **Update and restart** again installs it.
+6. With the network off, a start shows nothing; **Check for updates** says the server could not be reached.
 
 ## 6. dawn-core releases
 
@@ -130,7 +166,7 @@ The updater signature above protects the update channel; it is **not** a Windows
 | **Azure Trusted Signing** | Paid (about 10 USD a month) | A verified identity, an Azure subscription. | Easy GitHub integration, publisher shows your verified name. |
 | **Unsigned** | Free | Nothing | Users see the SmartScreen warning for a long time. Acceptable for a first, small release. |
 
-We apply to SignPath Foundation. Ready in the repository: [CODE_SIGNING_POLICY.md](CODE_SIGNING_POLICY.md) (linked from the README), [SECURITY.md](../SECURITY.md), [CODE_OF_CONDUCT.md](../CODE_OF_CONDUCT.md), and the text to paste into the application form: [signpath-application.md](signpath-application.md). Check SignPath Foundation's current conditions on their website before applying; they may have changed.
+We apply to SignPath Foundation. Ready in the repository: [CODE_SIGNING_POLICY.md](CODE_SIGNING_POLICY.md) (link it from the README), [PRIVACY.md](../PRIVACY.md), [SECURITY.md](../SECURITY.md), [CODE_OF_CONDUCT.md](../CODE_OF_CONDUCT.md). The text for the application form is still to be written (Owl-L's `docs/signpath-application.md` is the model). Check SignPath Foundation's current conditions on their website before applying; they may have changed.
 
 ### Turning SignPath on (after the application is approved)
 
@@ -159,20 +195,21 @@ Before the first signed release, try it on a throwaway tag via "Run workflow" an
 
 Run on a clean Windows user profile (or a fresh VM), using the installer from the **draft release**:
 
-1. Install from `Snipmunk_x.y.z_x64-setup.exe` (SmartScreen: More info, Run anyway). The install is per user (no admin prompt). Check that a **Start menu shortcut and a desktop shortcut** exist and that Snipmunk starts.
-2. Resize and move the window, close it (default: it keeps running in the tray), reopen it from the tray: size and position are remembered.
-3. Settings: switch theme (system, light, dark) and language (English, German); the tray menu follows the language.
-4. Settings: turn on "Start with Windows", sign out and in: Snipmunk starts hidden in the tray. Turn it off again.
-5. Start a second copy: the running window comes to the front instead of a second tray icon.
-6. Menu, Check for updates (once the update UI exists): "up to date" while no newer release is published; with the network off, the connection message.
+1. Install from `Snipmunk_x.y.z_x64-setup.exe` (SmartScreen: More info, Run anyway). The install is per user (no admin prompt). The last page offers "Create desktop shortcut" (ticked). Check that a **Start menu shortcut and a desktop shortcut** exist, that Snipmunk starts, and that taskbar and Task Manager show one "Snipmunk". Double-click a `.snpr`, a `.snpd` and a `.snpt` file (own icons; the template asks before it is imported), also while Snipmunk runs.
+2. Resize and move the window, close it (default: Snipmunk quits; no Snipmunk or WebView2 process stays), start it again: size and position are remembered.
+3. Settings: set "When the window is closed" to "Keep running in the tray": the tray icon appears. Switch theme (system, light, dark) and language (English, German); the tray menu follows the language. Close the window, reopen it from the tray; set the setting back: the icon goes.
+4. Settings: turn on "Start with Windows", sign out and in: Snipmunk starts minimized (only in the tray with "Keep running in the tray"). Turn it off again.
+5. Start a second copy: the running window comes to the front.
+6. Settings → About: the version; **Check for updates** says "up to date" while no newer release is published; with the network off, that the server could not be reached. With the network off a start shows no message.
 7. Close the app, start it again: the kept session and its screenshots are still there (auto-keep). Settings, "Clear on exit" on: after quitting, the session is empty.
-8. Uninstall (Settings, Apps): the question "Also delete Snipmunk's settings and saved screenshots?" appears. Answer No and check that `%AppData%\SecondDawn\snipmunk` is still there; reinstall, uninstall again, answer Yes and check that it is gone. In both cases `%AppData%\SecondDawn\models` stays.
-9. Update test (once a second release exists): install the older version, publish the newer release, click Check for updates, "Update and restart".
+8. Uninstall (Settings, Apps): leave **Delete the application data** unticked and check that `%AppData%\SecondDawn\snipmunk` is still there, and that the shortcuts, the three file types and the "Start with Windows" entry are gone. Reinstall, uninstall again with the box **ticked**: `%AppData%\SecondDawn\snipmunk`, `%Temp%\Snipmunk` and `%LocalAppData%\lab.seconddawn.snipmunk` are gone; files you saved elsewhere and `%AppData%\SecondDawn\models` stay. (Do the ticked test on a test profile or after a backup: it deletes your screenshots.)
+9. Update test: section 5a.
 
 ## 9. Network access
 
 | Code | When | What is sent |
 |---|---|---|
-| `tauri-plugin-updater` (`src-tauri/src/lib.rs`; the check UI and schedule come in a later phase) | At most once a day at startup, and when the user clicks "Check for updates" | An HTTPS GET for `latest.json` on GitHub. The installer is downloaded only after the user clicks "Update and restart". |
+| `src-tauri/src/updates.rs` (`tauri-plugin-updater`; not in the Store build) | After a start, at most once a day while "Check for updates automatically" is on; and when the user presses "Check for updates" | An HTTPS GET for `latest.json` on GitHub |
+| The same | Only after "Update and restart" | An HTTPS GET for the installer of that release; its signature is checked before it is run |
 
-Screenshots, sessions and settings never touch the network. Anything new that needs the network must be added to this table and to the README's privacy section first.
+Screenshots, recordings, guides, sessions and settings never touch the network. Anything new that needs the network must be added to this table and to [PRIVACY.md](../PRIVACY.md) first.

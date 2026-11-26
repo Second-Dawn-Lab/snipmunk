@@ -13,6 +13,17 @@ describe("picture area of a step", () => {
     expect(areaOf(step, block([100, 100, 400, 300]))).toBe("window");
     expect(areaOf(step, block([10, 10, 50, 50]))).toBe("custom");
   });
+  it("says after reopening what the file named, until another choice is made", () => {
+    // (an opened file: the stored picture is the chosen area, its crop the whole of it)
+    const opened = { ...block([0, 0, 1000, 600]), areaChoice: "custom" as const };
+    expect(areaOf(step, opened)).toBe("custom");
+    expect(areaOf(step, { ...opened, areaChoice: "window" })).toBe("window");
+    expect(areaOf(step, { ...opened, crop: [10, 10, 50, 50] })).toBe("custom");
+    expect(areaOf(step, { ...opened, crop: null })).toBe("default");
+    let got: Partial<StepBlock> = {};
+    applyArea(step, opened, "screen", (c) => (got = c));
+    expect(areaOf(step, { ...opened, ...got })).toBe("screen");
+  });
   it("applies a choice as a crop; the guide default is no crop (so it follows the guide)", () => {
     let got: Partial<StepBlock> = {};
     const patch = (c: Partial<StepBlock>) => (got = c);

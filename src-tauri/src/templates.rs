@@ -25,7 +25,7 @@ fn dir() -> PathBuf {
             return PathBuf::from(d);
         }
     }
-    dawn_core::app_dir("snipmunk").join("templates")
+    crate::store::app_dir().join("templates")
 }
 
 /// An id is a file name: letters, digits and `-` only.
@@ -314,19 +314,43 @@ pub async fn templates_export_many(ids: Vec<String>, folder: String) -> CmdResul
         .map_err(io)?
 }
 
-/// Add a template file to the own templates (checked, under a new id).
+/// Add a template file to the own templates (checked, under a new id). Every window with a list of templates is told.
 #[tauri::command]
-pub async fn templates_import(path: String) -> CmdResult<Value> {
-    tauri::async_runtime::spawn_blocking(move || {
+pub async fn templates_import(app: tauri::AppHandle, path: String) -> CmdResult<Value> {
+    use tauri::Emitter;
+    let added = tauri::async_runtime::spawn_blocking(move || {
         let tmp = scratch()?;
         let mut t = read(Path::new(&path), Some(tmp.path()))?;
         let id = new_id();
         t["id"] = json!(id);
         write(&file_of(&dir(), &id)?, &t, tmp.path())?;
-        Ok(t)
+        Ok::<Value, CmdError>(t)
     })
     .await
-    .map_err(io)?
+    .map_err(io)??;
+    let _ = app.emit("templates-changed", ());
+    Ok(added)
+}
+
+/// The name in a template file, for the question before it is imported. Fails for a file that is not a template.
+#[tauri::command]
+pub async fn templates_peek(path: String) -> CmdResult<String> {
+    tauri::async_runtime::spawn_blocking(move || name_in(Path::new(&path)))
+        .await
+        .map_err(io)?
+}
+
+fn name_in(path: &Path) -> CmdResult<String> {
+    let template = read(path, None)?;
+    let name = template["name"].as_str().unwrap_or_default().trim();
+    if name.is_empty() {
+        // (a template without a name is shown by its file's)
+        return Ok(path
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default());
+    }
+    Ok(name.chars().take(120).collect())
 }
 
 /// "Import template…": a file dialog for one or several `.snpt` files. Empty when cancelled.
@@ -361,6 +385,18 @@ mod tests {
     fn tmp() -> tempfile::TempDir {
         let base = std::env::var("SNIPMUNK_TEST_DIR").unwrap_or_else(|_| ".".into());
         tempfile::tempdir_in(base).unwrap()
+    }
+
+    #[test]
+    fn the_question_before_an_import_names_the_template_and_refuses_other_files() {
+        let d = tmp();
+        let file = d.path().join("From the team.snpt");
+        write(&file, &json!({ "name": "  Team report " }), d.path()).unwrap();
+        assert_eq!(name_in(&file).unwrap(), "Team report");
+        write(&file, &json!({}), d.path()).unwrap();
+        assert_eq!(name_in(&file).unwrap(), "From the team");
+        std::fs::write(&file, b"not a package").unwrap();
+        assert!(name_in(&file).is_err());
     }
 
     #[test]

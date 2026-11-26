@@ -1,6 +1,6 @@
 # Snipmunk roadmap
 
-Status: Phases 1 to 7.5 are done (Phase 7 ✅; the scrolling screenshot is parked for v0.2). The product has three modes: Screenshots (one clipboard list), Recording (current recording + project tabs) and Documents (step recorder, guide editor, templates, export and `.snpd` files: Phase 7.5 ✅, up to 7.5-D). Next: Phase 8, polish and the first release for Windows.
+Status: Phases 1 to 7.5 are done (Phase 7 ✅; the scrolling screenshot is parked for v0.2). The product has three modes: Screenshots (one clipboard list), Recording (current recording + project tabs) and Documents (step recorder, guide editor, templates, export and `.snpd` files: Phase 7.5 ✅, up to 7.5-D). Phase 8, polish and the first release for Windows, is in progress: 8-A (fixes, close = quit, lightweight) and 8-B (release setup) are done, 8-C (documentation) is next.
 
 ## Phase 1: Repo setup ✅
 Project folder, README, license, `.gitignore`, roadmap and icon placeholder.
@@ -112,15 +112,12 @@ A free, offline, account-free step guide recorder for any Windows app: each step
 - Later: Stack/Grid options.
 - Later for guide marks: move, resize, rotate and order for the other marks (arrows, boxes, texts); callout, magnifier and spotlight have their handles since 7.5-D.
 
-## Phase 8: Polish and the first release (v0.1.0, Windows) — next
-- **Lightweight targets**: memory (about 700 MB now, goal **under 300 MB**): **one shared WebView2 environment** for all windows, and the **hidden windows (overlay, floating bar, bubble) created only when needed** instead of pre-created; GPU export path everywhere; avoid reading text twice (OCR).
-- **Close = quit by default** (the other close behaviours stay in the settings).
-- **Task Manager grouping check**: all of Snipmunk's processes appear as one app.
-- **Remove the unused `windows` crate features** that were added for the auto scrolling screenshot (UI Automation, `PrintWindow`, and others only it used).
-- **Updater**: the update check is registered; add the page's restart button that calls `restart_app` (the unsaved-changes dialog runs first).
-- Node 24 for GitHub Actions in all repositories.
-- **Installer** with file associations, updater key, code signing (SignPath), and an **MSIX package for the Microsoft Store**.
-- **README** and screenshots, a full manual test pass.
+## Phase 8: Polish and the first release (v0.1.0, Windows) — in progress
+- **8-A Fixes, close = quit, lightweight ✅**: a step's chosen picture area survives saving and reopening; Quick redact also masks the words of callouts and text marks; closing the window quits (the tray icon only with "Keep running in the tray"), the web view's caches are cleared on quit and the window appears with its first painted frame; every window made only when needed and destroyed after use, one web view environment with one renderer process, code loaded per mode; a repeatable memory and start-up measurement (`docs/performance.md`); unused `windows` crate features removed. Tests in `docs/manual-tests-phase-8.md`.
+- **8-B Release setup ✅** (waiting for the updater key and the first release): the release pipeline as Owl-L's (Node 24 actions, both Cargo.lock entries, version **0.1.0**); the **in-app updater** (Settings → About, a quiet daily check, "Update and restart" through the unsaved-changes dialog); the installer with `.snpt` files (import after a question), one data question at uninstall and no registry left behind; the **Microsoft Store variant** and MSIX script (`docs/store.md`); `PRIVACY.md`. Not done here: code signing (SignPath application), the Store submission and its sideload test, Node 24 in the other repositories. Tests in `docs/manual-tests-phase-8.md`.
+- **8-C Documentation — next**: README with screenshots, full user documentation, the Second Dawn main README; a full manual test pass.
+- **8-D Clean-up**.
+- Still open from the Phase 8 list: a GPU export path everywhere; avoid reading text twice (OCR).
 
 ## v0.2: after the first release
 - **Webcam bubble resize during recording** (failed in the hand test of 7-B6).

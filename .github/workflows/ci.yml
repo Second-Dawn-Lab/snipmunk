@@ -11,24 +11,24 @@ jobs:
     timeout-minutes: 60
     steps:
       # snipmunk and dawn-core are checked out side by side, as on a developer machine.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           path: snipmunk
       - name: Read the pinned dawn-core ref
         id: ref
         shell: bash
         run: echo "ref=$(grep -v '^#' snipmunk/dawn-core.ref | grep -v '^[[:space:]]*$' | head -n1 | tr -d '[:space:]')" >> "$GITHUB_OUTPUT"
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: Second-Dawn-Lab/dawn-core
           ref: ${{ steps.ref.outputs.ref }}
           path: dawn-core
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           package_json_file: snipmunk/package.json
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -53,6 +53,9 @@ jobs:
       - run: cargo check --workspace
         working-directory: snipmunk
       - run: cargo clippy --workspace --all-targets -- -D warnings
+        working-directory: snipmunk
+      # The Microsoft Store variant (no in-app updater, the packaged start-up task) must keep compiling too.
+      - run: cargo clippy -p snipmunk --all-targets --features store -- -D warnings
         working-directory: snipmunk
       - run: cargo test --workspace
         working-directory: snipmunk

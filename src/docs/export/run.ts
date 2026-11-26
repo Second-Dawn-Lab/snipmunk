@@ -5,7 +5,6 @@ import { ipc, type GuideStep } from "../../ipc";
 import type { Block, GuideDoc } from "../model";
 import { applyTemplate, templateOf } from "../template/apply";
 import type { Template } from "../template/model";
-import { exportDocx } from "./docx";
 import { exportHtml, type ExportData } from "./html";
 import { exportMarkdown } from "./markdown";
 import { paginate, printHtml } from "./paginate";
@@ -160,6 +159,8 @@ export async function writeExport(path: string, d: ExportData, c: Choices, local
   stop();
   if (c.format === "html") return ipc.exportWrite(path, textBase64(exportHtml(d)));
   if (c.format === "docx") {
+    // The Word writer (and the library it uses) is loaded only when a Word file is made.
+    const { exportDocx } = await import("./docx");
     const data = await exportDocx(d, { pagePattern: locale.pagePattern });
     stop();
     return ipc.exportWrite(path, data);

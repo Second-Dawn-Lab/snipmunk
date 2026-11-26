@@ -5,6 +5,7 @@ use std::sync::Mutex;
 use crate::hotkey::{self, HotkeyManager, HotkeyStatus, ShortcutCheck};
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager, State};
+#[cfg(not(feature = "store"))]
 use tauri_plugin_autostart::ManagerExt;
 
 use crate::error::{CmdError, CmdResult};
@@ -76,6 +77,8 @@ pub fn apply(app: &AppHandle, settings: &Settings) {
     if let Some(main) = app.get_webview_window("main") {
         let _ = main.set_always_on_top(settings.always_on_top);
     }
+    // The tray icon is there only with "Keep running in the tray".
+    tray::sync(app);
     tray::set_language(app, &settings.language);
     crate::recording::apply_audio_settings(app);
     {
@@ -102,6 +105,29 @@ pub fn apply(app: &AppHandle, settings: &Settings) {
 
 /// Only touches the Windows registry entry when the state differs.
 pub fn apply_autostart(app: &AppHandle, wanted: bool) {
+    // (a test instance never writes the Windows autostart entry)
+    if crate::capture::guard_active() {
+        return;
+    }
+    // The Store build uses its package's start-up task. Windows may refuse (the user switched it off in Task Manager):
+    // the setting then goes back, so the switch shows what is so.
+    #[cfg(feature = "store")]
+    {
+        let app = app.clone();
+        std::thread::spawn(move || match crate::store::set_start_with_windows(wanted) {
+            Ok(false) if wanted => {
+                let _ = patch_settings(&app, serde_json::json!({ "launchAtLogin": false }));
+            }
+            Ok(_) => {}
+            Err(e) => eprintln!("could not change the start-up task: {e}"),
+        });
+    }
+    #[cfg(not(feature = "store"))]
+    set_autostart_entry(app, wanted);
+}
+
+#[cfg(not(feature = "store"))]
+fn set_autostart_entry(app: &AppHandle, wanted: bool) {
     let manager = app.autolaunch();
     if manager.is_enabled().unwrap_or(false) == wanted {
         return;
@@ -199,9 +225,8 @@ pub fn close_action(
     }
     if action == "quit" {
         crate::projects::request_quit(&app);
-    } else if let Some(w) = app.get_webview_window("main") {
-        crate::placement::flush();
-        let _ = w.hide();
+    } else {
+        tray::hide_to_tray(&app);
     }
     Ok(())
 }

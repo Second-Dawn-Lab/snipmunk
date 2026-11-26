@@ -8,8 +8,14 @@ export function Toast() {
   const [info, setInfo] = useState<ToastInfo | null>(null);
 
   useEffect(() => {
+    let alive = true;
     const unlisten = ipc.onToast(setInfo);
-    return () => void unlisten.then((fn) => fn());
+    // The window is made for this notice: what was sent before the page loaded is asked for.
+    void unlisten.then(() => ipc.toastInfo()).then((now) => alive && setInfo((shown) => shown ?? now));
+    return () => {
+      alive = false;
+      void unlisten.then((fn) => fn());
+    };
   }, []);
 
   if (!info) return null;

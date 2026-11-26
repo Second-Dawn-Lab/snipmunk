@@ -45,6 +45,11 @@ export function useTemplates(doc: GuideDoc, change: Change, onRemoved?: (id: str
   const current = templateOf(doc);
   const refresh = useCallback(() => void ipc.templatesList().then((l) => setOwn(l.map(normalizeTemplate))).catch(() => undefined), []);
   useEffect(refresh, [refresh]);
+  // A template added elsewhere (a file opened from Explorer) appears at once.
+  useEffect(() => {
+    const listening = ipc.onTemplatesChanged(refresh);
+    return () => void listening.then((stop) => stop());
+  }, [refresh]);
   const mine = own.find((x) => x.id === current.id) ?? null;
 
   const use = (tpl: Template, isOwn: boolean) => {

@@ -158,6 +158,55 @@ describe("quick redact of the texts", () => {
   });
 });
 
+// --- the words of callouts and text marks (8-A) --------------------------------------------------------------------------
+
+describe("quick redact of callouts and text marks", () => {
+  const steps = new Map([
+    [1, step(1)],
+    [2, step(2)],
+  ]);
+  const base = createDocument("T", 1, [...steps.values()], defaults);
+  const mark = (id: string, kind: "callout" | "text" | "rect", text: string) => ({ id, kind, x: 10, y: 10, color: "#000", width: 3, text });
+  const doc: GuideDoc = {
+    ...base,
+    blocks: [
+      base.blocks[0],
+      { ...(base.blocks[1] as StepBlock), annotations: [mark("c1", "callout", "Write to anna@example.com\nor call the desk"), mark("t1", "text", "IBAN DE89 3704 0044\n0532 0130 00"), mark("r1", "rect", "anna@example.com")] },
+    ],
+  };
+  const found = findInText(doc, steps, all);
+
+  it("lists every finding with its step and mark", () => {
+    expect(found.map((f) => [f.where, f.mark, f.kind, f.block === doc.blocks[1].id])).toEqual([
+      ["callout", "c1", "email", true],
+      ["mark", "t1", "iban", true],
+    ]);
+    // A number parted by a line break is still found, whole.
+    expect(found[1].text).toBe("DE89 3704 0044\n0532 0130 00");
+  });
+
+  it("masks them in one change, and nothing of them is left in the guide", () => {
+    const masked = applyRedactions(doc, steps, found, "black");
+    const b = masked.blocks[1] as StepBlock;
+    expect(b.annotations!.map((a) => a.text)).toEqual([`Write to ${MASK}\nor call the desk`, `IBAN ${MASK}`, "anna@example.com"]);
+    expect(b.masked).toBe(true);
+    expect(masked.blocks[0]).toBe(doc.blocks[0]);
+    // (a rectangle's unused words are not a text anyone sees; nothing else holds the values)
+    expect(JSON.stringify({ ...masked, blocks: [{ ...b, annotations: b.annotations!.slice(0, 2) }] })).not.toMatch(/anna@example\.com|0532/);
+    expect(findInText(masked, steps, all)).toEqual([]);
+    // Unticked items stay.
+    const one = applyRedactions(doc, steps, [found[0]], "black").blocks[1] as StepBlock;
+    expect(one.annotations![1].text).toContain("0532");
+  });
+
+  it("looks only at the chosen steps, and hides a value a picture showed", () => {
+    expect(findInText(doc, steps, all, new Set([doc.blocks[0].id]))).toEqual([]);
+    const note: GuideDoc = { ...base, blocks: [{ ...(base.blocks[0] as StepBlock), annotations: [mark("c2", "callout", "Use 47qrt$9191 here")] }] };
+    expect(findInText(note, steps, all)).toEqual([]);
+    expect(findInText(note, steps, all, undefined, [{ kind: "secret", text: "47qrt$9191" }]).map((f) => f.where)).toEqual(["callout"]);
+  });
+});
+
 // --- what pictures teach the texts ----------------------------------------------------------------------------------------
 
 describe("a value known from a picture, and a label split over two steps", () => {

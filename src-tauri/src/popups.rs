@@ -1,14 +1,15 @@
 //! The two small windows of a capture: the countdown badge near the pointer (the delay) and the toast in the corner
-//! (after a capture, when Snipmunk stays in the background). Both are created hidden when the app starts, never take the
-//! keyboard focus, and are left out of every screenshot.
+//! (after a capture, when Snipmunk stays in the background). Each is made when it is needed and taken away after use,
+//! never takes the keyboard focus, and is left out of every screenshot. Its page asks what to show when it has loaded
+//! (the event that was sent before is gone by then) and listens for what changes.
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::Mutex;
 use std::time::Duration;
 
 use serde::Serialize;
 use tauri::{
     AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindow,
-    WebviewWindowBuilder,
 };
 
 use crate::geometry::{self, Rect};
@@ -23,12 +24,16 @@ const TOAST_SIZE: (f64, f64) = (340.0, 92.0);
 const TOAST_SECONDS: u64 = 4;
 
 static TOAST_GENERATION: AtomicU64 = AtomicU64::new(0);
+/// The number the countdown badge shows now.
+static COUNT: AtomicU32 = AtomicU32::new(0);
+/// What the toast shows while there is one.
+static TOAST_SHOWN: Mutex<Option<ToastInfo>> = Mutex::new(None);
 
 fn ensure(app: &AppHandle, label: &str, size: (f64, f64)) -> tauri::Result<WebviewWindow> {
-    if let Some(w) = app.get_webview_window(label) {
+    if let Some(w) = crate::webview::existing(app, label) {
         return Ok(w);
     }
-    let window = WebviewWindowBuilder::new(app, label, WebviewUrl::default())
+    let window = crate::webview::window(app, label, WebviewUrl::default())
         .title(match label {
             "toast" => "Snipmunk – Notice",
             "countdown" => "Snipmunk – Countdown",
@@ -50,10 +55,19 @@ fn ensure(app: &AppHandle, label: &str, size: (f64, f64)) -> tauri::Result<Webvi
     Ok(window)
 }
 
-/// Create the hidden windows ahead of time (call from a thread other than the main one).
-pub fn precreate(app: &AppHandle) {
-    let _ = ensure(app, BADGE, (BADGE_SIZE, BADGE_SIZE));
-    let _ = ensure(app, TOAST, TOAST_SIZE);
+/// The countdown page asks for the number to show.
+#[tauri::command]
+pub fn countdown_value() -> Option<u32> {
+    Some(COUNT.load(Ordering::SeqCst)).filter(|n| *n > 0)
+}
+
+/// The toast page asks what to show.
+#[tauri::command]
+pub fn toast_info() -> Option<ToastInfo> {
+    TOAST_SHOWN
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
 }
 
 fn monitor_rects(app: &AppHandle) -> Vec<Rect> {
@@ -73,6 +87,7 @@ fn monitor_rects(app: &AppHandle) -> Vec<Rect> {
 
 /// Count down `seconds` with a badge near the pointer. Returns false when the user pressed Esc.
 pub fn countdown(app: &AppHandle, seconds: u32) -> bool {
+    COUNT.store(seconds, Ordering::SeqCst);
     let Ok(window) = ensure(app, BADGE, (BADGE_SIZE, BADGE_SIZE)) else {
         // Without a badge the delay is still honored, just not shown.
         for _ in 0..seconds {
@@ -106,6 +121,7 @@ pub fn countdown(app: &AppHandle, seconds: u32) -> bool {
 
     let mut cancelled = false;
     'outer: for n in (1..=seconds).rev() {
+        COUNT.store(n, Ordering::SeqCst);
         let _ = window.emit("countdown-tick", n);
         for _ in 0..40 {
             if crate::webview::escape_down() {
@@ -115,7 +131,9 @@ pub fn countdown(app: &AppHandle, seconds: u32) -> bool {
             std::thread::sleep(Duration::from_millis(25));
         }
     }
+    COUNT.store(0, Ordering::SeqCst);
     let _ = window.hide();
+    crate::webview::destroy(&window);
     if !cancelled {
         // Let the window disappear before the screen is grabbed.
         std::thread::sleep(Duration::from_millis(60));
@@ -137,6 +155,9 @@ pub struct ToastInfo {
 
 /// Show the toast bottom-right for a few seconds, without taking the focus.
 pub fn show_toast(app: &AppHandle, info: ToastInfo) {
+    // (an earlier toast's timer no longer counts: it must not take this one's window away)
+    TOAST_GENERATION.fetch_add(1, Ordering::SeqCst);
+    *TOAST_SHOWN.lock().unwrap_or_else(|e| e.into_inner()) = Some(info.clone());
     let Ok(window) = ensure(app, TOAST, TOAST_SIZE) else {
         return;
     };
@@ -175,8 +196,10 @@ pub fn show_toast(app: &AppHandle, info: ToastInfo) {
 
 pub fn hide_toast(app: &AppHandle) {
     TOAST_GENERATION.fetch_add(1, Ordering::SeqCst);
+    *TOAST_SHOWN.lock().unwrap_or_else(|e| e.into_inner()) = None;
     if let Some(w) = app.get_webview_window(TOAST) {
         let _ = w.hide();
+        crate::webview::destroy(&w);
     }
 }
 

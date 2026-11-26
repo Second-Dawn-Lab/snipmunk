@@ -18,6 +18,7 @@ mod guides;
 mod hotkey;
 mod import;
 mod language;
+mod lifecycle;
 mod mp4join;
 mod naming;
 mod ocr;
@@ -30,6 +31,7 @@ mod recording;
 mod recstore;
 mod render;
 mod scrollshot;
+mod secret;
 mod sessions;
 mod settings;
 mod snpd;
@@ -37,10 +39,12 @@ mod startup;
 mod steprec;
 mod steptext;
 mod stitch;
+mod store;
 mod templates;
 mod thumbs;
 mod titlebar;
 mod tray;
+mod updates;
 mod webcam;
 mod webview;
 mod winlist;
@@ -51,9 +55,28 @@ use tauri_plugin_autostart::MacosLauncher;
 use commands::AppState;
 
 pub fn run() {
-    tauri::Builder::default()
+    startup::note("main");
+    let context = tauri::generate_context!();
+    // Before any window exists: Windows groups the program's windows (taskbar, jump list, notifications) under this
+    // name, the same one the installer gives the Start menu shortcut. (A packaged app has its id from the package.)
+    if !store::packaged() {
+        startup::set_app_id(&context.config().identifier);
+    }
+    // The Store build keeps its data in the package's own folder, where other programs can open the files too.
+    store::use_package_folders();
+    let builder = tauri::Builder::default();
+    // The only network access: asks GitHub for latest.json when an update check is run (see updates.rs). The Store
+    // updates its own build.
+    #[cfg(not(feature = "store"))]
+    let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    builder
         // Must be registered first: a second launch just brings the running window forward.
-        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+        .plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
+            // Started again while it was still leaving: it comes back once it is gone.
+            if lifecycle::quitting() {
+                lifecycle::reopen_after_quit(args, cwd);
+                return;
+            }
             tray::show_main(app);
             projects::handle_args(app, &args);
         }))
@@ -61,8 +84,6 @@ pub fn run() {
             MacosLauncher::LaunchAgent,
             Some(vec!["--hidden"]),
         ))
-        // The only network access: asks GitHub for latest.json when an update check is run (see docs/releasing.md).
-        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_dialog::init())
         .manage({
@@ -75,6 +96,8 @@ pub fn run() {
         .manage(steprec::GuideRec::default())
         .manage(hotkey::HotkeyManager::new())
         .manage(render::RenderJob::default())
+        .manage(tray::Tray::default())
+        .manage(updates::Updates::default())
         .register_uri_scheme_protocol("snipmunk-img", commands::serve_image)
         .register_uri_scheme_protocol("snipmunk-cam", bubble::serve_cam)
         .register_uri_scheme_protocol("snipmunk-cap", capture::serve)
@@ -131,6 +154,8 @@ pub fn run() {
             projects::restart_app,
             projects::take_pending_open,
             projects::take_pending_guide,
+            projects::take_pending_templates,
+            templates::templates_peek,
             projects::current_recording,
             projects::discard_current_recording,
             package::project_info,
@@ -246,26 +271,41 @@ pub fn run() {
             capture::capture_finish,
             popups::toast_open,
             popups::toast_close,
+            popups::countdown_value,
+            popups::toast_info,
+            capture::dev_overlay_timing,
+            startup::app_ready,
+            updates::update_state,
+            updates::update_check,
+            updates::update_install,
         ])
         .setup(|app| {
+            // (the main window and its web view exist from here on)
+            startup::note("setup");
             let settings = app.state::<AppState>().settings.lock().unwrap().clone();
-            tray::build(app.handle(), &settings.language)?;
             // A project file given on the command line (double-click in Explorer) is opened by the page once it is ready.
             projects::handle_args(app.handle(), &std::env::args().collect::<Vec<_>>());
             if let Some(main) = app.get_webview_window("main") {
                 webview::disable_browser_accelerators(&main);
-                // The window is created hidden: put it back where it was before it is shown.
+                // The window is created hidden: it gets the theme's background and its old place before it is shown.
+                lifecycle::paint_background(&main, &settings.theme);
                 placement::restore(&main);
             }
-            commands::apply(app.handle(), &settings); // also installs the capture shortcut
-            capture::precreate(app.handle());
+            // Also installs the capture shortcut and the tray icon.
+            commands::apply(app.handle(), &settings);
             // Sessions saved by earlier versions get sharp thumbnails for the large gallery view (background thread).
             thumbs::spawn_upgrade(app.handle().clone());
-            // Only the autostart entry (`--hidden`) stays in the tray; every other start shows the window.
-            if !startup::launched_hidden(std::env::args()) {
-                tray::show_main(app.handle());
-                startup::keep_main_shown(app.handle());
+            // A start by Windows itself (`--hidden`, from the autostart entry or the Store package's start-up task) stays
+            // out of sight: in the tray when Snipmunk is to keep running there, else minimized. Every other start, and
+            // the one right after an update, shows the window as soon as its page has painted (see `startup`).
+            let quiet = startup::launched_hidden(std::env::args());
+            let updated = updates::started_by_update();
+            if quiet && !updated {
+                startup::start_out_of_sight(app.handle(), &settings.close_action);
+            } else {
+                startup::show_when_painted(app.handle());
             }
+            updates::check_after_start(app.handle());
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -276,6 +316,12 @@ pub fn run() {
                 WindowEvent::Moved(_) | WindowEvent::Resized(_) => {
                     if let Some(w) = window.app_handle().get_webview_window("main") {
                         placement::track(&w);
+                        lifecycle::follow(&w);
+                    }
+                }
+                WindowEvent::Focused(_) => {
+                    if let Some(w) = window.app_handle().get_webview_window("main") {
+                        lifecycle::follow(&w);
                     }
                 }
                 WindowEvent::CloseRequested { api, .. } => {
@@ -291,7 +337,7 @@ pub fn run() {
                     placement::flush();
                     match crate::projects::close_behavior(&behavior) {
                         crate::projects::CloseBehavior::Hide => {
-                            let _ = window.hide();
+                            tray::hide_to_tray(window.app_handle())
                         }
                         crate::projects::CloseBehavior::Quit => {
                             crate::projects::request_quit(window.app_handle())
@@ -305,17 +351,23 @@ pub fn run() {
                 _ => {}
             }
         })
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while building Snipmunk")
         .run(|app, event| {
-            if let tauri::RunEvent::Exit = event {
-                placement::flush();
-                hotkey::stop(app);
-                export::clear_temp();
-                let state = app.state::<AppState>();
-                if state.settings.lock().unwrap().clear_on_exit {
-                    state.sessions.lock().unwrap().delete_current();
+            // While quitting, the windows go before the process does: that alone must not end it.
+            if let tauri::RunEvent::ExitRequested {
+                code: None, api, ..
+            } = &event
+            {
+                if lifecycle::quitting() {
+                    api.prevent_exit();
                 }
+            }
+            if let tauri::RunEvent::Exit = event {
+                lifecycle::clear_at_end(app);
+                startup::note("quit-done");
+                // (after everything is cleared away)
+                lifecycle::reopen_if_asked(app);
             }
         });
 }

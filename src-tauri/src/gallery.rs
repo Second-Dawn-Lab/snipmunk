@@ -232,7 +232,7 @@ pub async fn replace_capture_image(
 
 /// Development only: start a new session with `count` generated captures in `groups` groups, to try the gallery with
 /// hundreds of them. The generated session is an ordinary one (retention removes it); release builds refuse.
-#[cfg(debug_assertions)]
+#[cfg(any(debug_assertions, feature = "measure-guard"))]
 #[tauri::command]
 pub fn debug_seed_session(
     app: AppHandle,
@@ -290,7 +290,7 @@ pub fn debug_seed_session(
     })
 }
 
-#[cfg(debug_assertions)]
+#[cfg(any(debug_assertions, feature = "measure-guard"))]
 fn hsl(h: f32, s: f32, l: f32) -> [u8; 3] {
     let h = h.rem_euclid(360.0) / 60.0;
     let c = (1.0 - (2.0 * l - 1.0).abs()) * s;
@@ -308,7 +308,7 @@ fn hsl(h: f32, s: f32, l: f32) -> [u8; 3] {
 }
 
 /// Release builds have no generator: the command exists so the page's call fails with a clear error.
-#[cfg(not(debug_assertions))]
+#[cfg(not(any(debug_assertions, feature = "measure-guard")))]
 #[tauri::command]
 pub fn debug_seed_session() -> CmdResult<()> {
     Err(CmdError::new(

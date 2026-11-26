@@ -21,9 +21,7 @@ pub fn root() -> PathBuf {
     if let Some(d) = std::env::var_os("SNIPMUNK_GUIDES_DIR") {
         return PathBuf::from(d);
     }
-    dawn_core::app_dir("snipmunk")
-        .join("documents")
-        .join("guides")
+    crate::store::app_dir().join("documents").join("guides")
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -410,7 +408,7 @@ pub fn guide_image_path(id: String, name: String) -> Option<String> {
 }
 
 /// Development only: a finished guide with `count` generated steps (a coloured picture each), to look at a long guide.
-#[cfg(debug_assertions)]
+#[cfg(any(debug_assertions, feature = "measure-guard"))]
 #[tauri::command]
 pub fn dev_guide_seed(count: u32) -> CmdResult<String> {
     let g = create("Seeded guide", serde_json::Value::Null)?;
@@ -465,7 +463,7 @@ pub fn dev_guide_seed(count: u32) -> CmdResult<String> {
     Ok(g.id)
 }
 
-#[cfg(not(debug_assertions))]
+#[cfg(not(any(debug_assertions, feature = "measure-guard")))]
 #[tauri::command]
 pub fn dev_guide_seed() -> CmdResult<()> {
     Err(CmdError::new("unavailable", "development builds only"))

@@ -21,6 +21,11 @@
           "type": "toml",
           "path": "Cargo.lock",
           "jsonpath": "$.package[?(@.name.value=='snipmunk')].version"
+        },
+        {
+          "type": "toml",
+          "path": "Cargo.lock",
+          "jsonpath": "$.package[?(@.name.value=='snipmunk-pixels')].version"
         }
       ],
       "pull-request-title-pattern": "chore: release ${version}"

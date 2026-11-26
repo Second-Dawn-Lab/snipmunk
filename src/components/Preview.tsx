@@ -1,9 +1,9 @@
 import { useT } from "../i18n";
 import { type Capture, type Session } from "../ipc";
+import { RecordingView } from "../lazyViews";
 import { formatSize } from "../sessionModel";
 import { AnnotationBar } from "./AnnotationBar";
 import { Editor } from "./Editor";
-import { RecordingView } from "./RecordingView";
 import type { Settings } from "../settings/defaults";
 
 /** "fit" follows the size of the stage; a number is a zoom the user chose. */

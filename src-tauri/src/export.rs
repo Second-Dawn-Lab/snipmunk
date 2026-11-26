@@ -18,7 +18,7 @@ use crate::error::{CmdError, CmdResult};
 const KINDS: [&str; 6] = ["copy", "drag", "paint", "print", "share", "save"];
 
 pub fn temp_root() -> PathBuf {
-    dawn_core::app_dir("snipmunk").join("temp")
+    crate::store::app_dir().join("temp")
 }
 
 /// Delete all staged files (at quit, and at the start of the app for what a crash left).

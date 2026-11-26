@@ -2,6 +2,8 @@ import { useSettings } from "@seconddawn/settings";
 import { Button, Dialog, Icon } from "@seconddawn/ui";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type DropPlan } from "../gallery/fileTypes";
+import { dropWhenAway } from "../memory";
+import { dropOcrCache } from "./useOcr";
 import { isGalleryView } from "../gallery/layout";
 import { moveIds, isNoopMove } from "../gallery/reorder";
 import {
@@ -26,7 +28,8 @@ import { ipc, type Capture, type CmdError, type Group, type Session } from "../i
 import { hasRecordingGroup, mergeGroupOrder } from "../recordingGroups";
 import { SearchIndex } from "../search";
 import { stageAll } from "../share/exporter";
-import { DocumentsMode, renameGuide } from "../docs/DocumentsMode";
+import { DocumentsMode } from "../lazyViews";
+import { renameGuide } from "../docs/renameGuide";
 import { guideEntries, screenshotEntries, type FileEntry } from "./fileEntries";
 import { useGuide } from "../docs/useGuide";
 import { SaveDialog } from "./SaveDialog";
@@ -61,6 +64,8 @@ import { MenuItem } from "./MenuItem";
 import { Preview, type ZoomMode } from "./Preview";
 import { TitleBar } from "./TitleBar";
 import { TopBar } from "./TopBar";
+import { UpdateNotice } from "./UpdateNotice";
+import { TemplateOpen } from "./TemplateOpen";
 
 function messageOf(e: unknown): string {
   const err = e as Partial<CmdError> | undefined;
@@ -90,6 +95,15 @@ export function MainWindow() {
   // independent: no screenshot appears among the recordings and no recording among the screenshots.
   const recMode = settings.captureKind === "video";
   const docMode = settings.captureKind === "documents";
+  // Minimized or in the tray for a while: what can be read from disk again is dropped.
+  useEffect(() => {
+    const watch = dropWhenAway(dropOcrCache);
+    const p = ipc.onMainVisible(watch.seen);
+    return () => {
+      watch.stop();
+      void p.then((fn) => fn());
+    };
+  }, []);
   // The open guide (one at a time); a guide that was just recorded is shown in Documents mode.
   const guide = useGuide(settings);
   useEffect(() => {
@@ -838,6 +852,8 @@ export function MainWindow() {
       <HotkeyNotice onOpenSettings={() => void ipc.openSettings()} />
 
       <Toasts toasts={toasts} onClose={closeToast} />
+      <UpdateNotice />
+      <TemplateOpen />
       <ExportDialog
         capture={exporting}
         defaultFolder={exporting ? rec.folder() : ""}

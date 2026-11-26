@@ -216,7 +216,7 @@ fn announce(app: &AppHandle, recording: bool, _started_at: u64) {
 /// The switches of the bar (system sound, microphone) changed: the running recording follows (a track is made the first time its sound
 /// is switched on; the microphone is never opened while it is off). Runs on its own thread: it may wait for the recorder.
 pub fn apply_audio_settings(app: &AppHandle) {
-    if !is_recording(app) {
+    if !is_recording(app) || crate::capture::guard_active() {
         return;
     }
     let app = app.clone();
@@ -333,7 +333,7 @@ pub async fn start_recording(
             ));
         }
     }
-    if let Some(label) = window.filter(|_| cfg!(debug_assertions)) {
+    if let Some(label) = window.filter(|_| cfg!(any(debug_assertions, feature = "measure-guard"))) {
         // For tests: one of Snipmunk's own windows (captured as a window, nothing else on the desktop). There is deliberately no
         // test path for an area: it would capture the monitor behind the window.
         if label == "__synthetic__" {
@@ -472,21 +472,18 @@ fn prepare_screen(app: &AppHandle, area: Rect) {
         }
     }
     let margin = 4;
-    let built = tauri::WebviewWindowBuilder::new(
-        app,
-        "recframe",
-        tauri::WebviewUrl::App("index.html".into()),
-    )
-    .title("Snipmunk – Recording frame")
-    .decorations(false)
-    .transparent(true)
-    .shadow(false)
-    .always_on_top(true)
-    .skip_taskbar(true)
-    .focused(false)
-    .resizable(false)
-    .visible(false)
-    .build();
+    let built =
+        crate::webview::window(app, "recframe", tauri::WebviewUrl::App("index.html".into()))
+            .title("Snipmunk – Recording frame")
+            .decorations(false)
+            .transparent(true)
+            .shadow(false)
+            .always_on_top(true)
+            .skip_taskbar(true)
+            .focused(false)
+            .resizable(false)
+            .visible(false)
+            .build();
     if let Ok(w) = built {
         let _ = w.set_ignore_cursor_events(true);
         let _ = w.set_position(tauri::PhysicalPosition::new(
@@ -528,22 +525,18 @@ fn show_bar(app: &AppHandle, area: Rect) {
     let (w, h) = ((200.0 * scale) as u32, (52.0 * scale) as u32);
     // The bar is about 420 CSS pixels wide when it has loaded; its place is worked out for that width.
     let (bx, by) = bar_position(mon, (430.0 * scale) as i32, (16.0 * scale) as i32);
-    let built = tauri::WebviewWindowBuilder::new(
-        app,
-        "recbar",
-        tauri::WebviewUrl::App("index.html".into()),
-    )
-    .title("Snipmunk – Recording bar")
-    .decorations(false)
-    .transparent(true)
-    .background_color(tauri::window::Color(0, 0, 0, 0))
-    .shadow(false)
-    .always_on_top(true)
-    .skip_taskbar(true)
-    .focused(false)
-    .resizable(false)
-    .visible(false)
-    .build();
+    let built = crate::webview::window(app, "recbar", tauri::WebviewUrl::App("index.html".into()))
+        .title("Snipmunk – Recording bar")
+        .decorations(false)
+        .transparent(true)
+        .background_color(tauri::window::Color(0, 0, 0, 0))
+        .shadow(false)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .focused(false)
+        .resizable(false)
+        .visible(false)
+        .build();
     if let Ok(win) = built {
         let _ = win.set_size(tauri::PhysicalSize::new(w, h));
         // `bx` is the left edge of the full-size bar; the window is 200 wide at first and widens around its centre.
@@ -626,11 +619,13 @@ fn start_now(app: &AppHandle, source: Source, minimize_main: bool) -> CmdResult<
     // The audio tracks that the switches ask for (the microphone is only opened when it is on).
     #[cfg(windows)]
     {
+        // (a test instance opens no sound device and no camera, whatever the settings say)
+        let real = !crate::capture::guard_active();
         let (system, mic, devices) = {
             let s = state.settings.lock().unwrap();
             (
-                s.rec_system_sound,
-                s.rec_mic,
+                s.rec_system_sound && real,
+                s.rec_mic && real,
                 (s.system_device.clone(), s.mic_device.clone()),
             )
         };
@@ -639,7 +634,7 @@ fn start_now(app: &AppHandle, source: Source, minimize_main: bool) -> CmdResult<
         }
         let (webcam_on, webcam_device) = {
             let s = state.settings.lock().unwrap();
-            (s.webcam_on, s.webcam_device.clone())
+            (s.webcam_on && real, s.webcam_device.clone())
         };
         if let Some(kind) = active.handle.apply_webcam(webcam_on, &webcam_device) {
             let _ = app.emit("recording-notice", kind);

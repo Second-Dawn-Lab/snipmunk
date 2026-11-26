@@ -1,6 +1,80 @@
-//! Settings of the web view that Tauri does not expose.
+//! Settings of the web view that Tauri does not expose, and the windows that are made for one use.
 
-use tauri::WebviewWindow;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
+
+use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+
+/// The web view options of every Snipmunk window. All windows must name exactly the same ones: they then share one
+/// web view environment (one user data folder, one browser process). The main window's are in `tauri.conf.json`.
+///
+/// - `--disable-features=...`: the three features Tauri's web view library turns off itself (naming options replaces
+///   its list, so they are repeated): two Office/PDF toolbar overlays and SmartScreen's page checks, none of which an
+///   app that shows only its own pages uses.
+/// - `--process-per-site`: all windows show the same local site, so their pages share one renderer process instead of
+///   one per window (measured: about 40 MB less with four windows; see docs/performance.md).
+///
+/// The GPU stays on: the video player and the large canvases depend on it.
+pub const BROWSER_ARGS: &str =
+    "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --process-per-site";
+
+/// The builder of every window Snipmunk makes.
+pub fn window<'a>(
+    app: &'a AppHandle,
+    label: &str,
+    url: WebviewUrl,
+) -> WebviewWindowBuilder<'a, tauri::Wry, AppHandle> {
+    WebviewWindowBuilder::new(app, label, url).additional_browser_args(BROWSER_ARGS)
+}
+
+/// Windows that were told to go and may not be gone yet.
+static GOING: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// Take away a window that was made for one use (an overlay, the countdown, the toast): its web page and the memory it
+/// holds go with it. The next one of that name is made by whoever finds none with `existing`.
+pub fn destroy(window: &WebviewWindow) {
+    GOING
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .push(window.label().to_string());
+    let _ = window.destroy();
+}
+
+/// The window of that name, if there is one to use: one that is just going away is waited for (its name is free then).
+/// Not to be called on the main thread, which is what takes the window away.
+pub fn existing(app: &AppHandle, label: &str) -> Option<WebviewWindow> {
+    let going = {
+        let mut list = GOING.lock().unwrap_or_else(|e| e.into_inner());
+        let before = list.len();
+        list.retain(|l| l != label);
+        list.len() != before
+    };
+    if going {
+        let start = Instant::now();
+        while app.get_webview_window(label).is_some() && start.elapsed() < Duration::from_secs(2) {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+    app.get_webview_window(label)
+}
+
+/// Show a window without giving it the keyboard focus.
+#[cfg(windows)]
+pub fn show_without_focus(win: &WebviewWindow) {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_SHOWNOACTIVATE};
+    if let Ok(hwnd) = win.hwnd() {
+        // SAFETY: a valid window handle of this process.
+        unsafe {
+            let _ = ShowWindow(HWND(hwnd.0), SW_SHOWNOACTIVATE);
+        }
+    }
+}
+
+#[cfg(not(windows))]
+pub fn show_without_focus(win: &WebviewWindow) {
+    let _ = win.show();
+}
 
 /// Turn off WebView2's browser accelerator keys (F5, Ctrl+P, Ctrl+F, F12, ...) for a window.
 /// Snipmunk is an app, not a browser: those shortcuts do nothing useful, and the capture shortcut must reach
@@ -69,4 +143,34 @@ pub fn escape_down() -> bool {
 #[cfg(not(windows))]
 pub fn escape_down() -> bool {
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::BROWSER_ARGS;
+
+    #[test]
+    fn every_window_uses_the_same_web_view_options() {
+        // The main window comes from the configuration...
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        for window in config["app"]["windows"].as_array().unwrap() {
+            assert_eq!(window["additionalBrowserArgs"], BROWSER_ARGS);
+        }
+        // ...and every other one from `webview::window`: a window with other options could not be made at all.
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        for entry in std::fs::read_dir(src).unwrap() {
+            let path = entry.unwrap().path();
+            if path.file_name().is_some_and(|n| n == "webview.rs") {
+                continue;
+            }
+            let text = std::fs::read_to_string(&path).unwrap();
+            assert!(
+                !text.contains("WebviewWindowBuilder::new"),
+                "{} makes a window without crate::webview::window",
+                path.display()
+            );
+        }
+        assert!(!BROWSER_ARGS.contains("--disable-gpu"));
+    }
 }

@@ -7,7 +7,7 @@ import { notify } from "../../notify";
 import type { Block } from "../model";
 import { templateOf } from "../template/apply";
 import { BUILT_INS, normalizeTemplate, type Template } from "../template/model";
-import { useTemplateName } from "../template/TemplatePanel";
+import { useTemplateName } from "../template/name";
 import { clipboardHtml } from "./html";
 import { exportMarkdown } from "./markdown";
 import { buildData, exportDoc, extensionOf, readChoices, writeExport, type Choices, type Format, type Locale, type Source } from "./run";

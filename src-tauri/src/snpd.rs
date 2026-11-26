@@ -208,6 +208,61 @@ pub fn stored_crop(step: &Step, block: &Value, keep_full: bool, picture: &str) -
     }
 }
 
+/// Which picture area a step with a crop of its own chose: "screen" (its whole picture), "window" or "custom". The file stores
+/// only the cut picture and no crop, so this is how the choice survives (`areaChoice`, see docs/snpd-format.md).
+fn area_choice(step: &Step, block: &Value) -> Option<String> {
+    let crop = block
+        .get("crop")
+        .and_then(|c| serde_json::from_value::<Rect>(c.clone()).ok())?;
+    let (w, h) = (step.image_size[0], step.image_size[1]);
+    let crop = clamp_rect(crop, w, h);
+    if crop == [0, 0, w as i32, h as i32] {
+        // (in a guide opened from a file the picture is the area that was chosen then)
+        return Some(block["areaChoice"].as_str().unwrap_or("screen").to_string());
+    }
+    let window = step.window.as_ref().map(|win| clamp_rect(win.rect, w, h));
+    Some(
+        if window == Some(crop) {
+            "window"
+        } else {
+            "custom"
+        }
+        .into(),
+    )
+}
+
+/// A file keeps of a step only the picture it showed, cut to its area. A step that had an area of its own ("Full screen", an
+/// expanded or custom one) must show the whole of that picture again when the file is opened: without this it would show
+/// the window inside it, and the next save would cut the rest away. `windows` is whether the guide shows windows by default.
+fn restore_area(block: &mut serde_json::Map<String, Value>, step: &Step, windows: bool) {
+    let (w, h) = (step.image_size[0], step.image_size[1]);
+    let whole = [0, 0, w as i32, h as i32];
+    if step.image.is_empty() || block.contains_key("crop") {
+        return;
+    }
+    if !block.contains_key("areaChoice") {
+        // A file written before the choice was: its picture is the guide's default area exactly, unless the step had an
+        // area of its own. (A step in a picture frame stores what the frame shows, and shows that by its frame.)
+        let framed = block
+            .get("frame")
+            .is_some_and(|f| f.is_object() && f["own"] != json!(true));
+        let window = step
+            .window
+            .as_ref()
+            .filter(|win| win.rect[2] > 8 && win.rect[3] > 8)
+            .map(|win| clamp_rect(win.rect, w, h));
+        if !windows || framed || window.is_none() || window == Some(whole) {
+            return;
+        }
+        let screen = step.monitor[2] == w as i32 && step.monitor[3] == h as i32;
+        block.insert(
+            "areaChoice".into(),
+            json!(if screen { "screen" } else { "custom" }),
+        );
+    }
+    block.insert("crop".into(), json!(whole));
+}
+
 /// The part of the picture a framed step shows (the template's ratio, the step's `frame` {cx, cy, w}), clipped to the picture;
 /// `None` when the guide has no frame or the step has no place of its own. The same rules as `src/docs/template/frame.ts`.
 pub fn framed_area(doc: &Value, block: &Value, size: [u32; 2]) -> Option<Rect> {
@@ -506,6 +561,7 @@ pub fn prepare(
                         patches.push((i, patch));
                     }
                 }
+                let choice = area_choice(step, &b);
                 // The step as stored: its picture, and every rectangle in the pixels of the cropped picture.
                 let mut s = (*step).clone();
                 scrub(&mut s, &b);
@@ -524,6 +580,10 @@ pub fn prepare(
                     o.insert("step".into(), serde_json::to_value(&s).map_err(io)?);
                     o.remove("crop");
                     o.remove("redact");
+                    match choice {
+                        Some(c) => o.insert("areaChoice".into(), json!(c)),
+                        None => o.remove("areaChoice"),
+                    };
                     // The annotations are in the pixels of the full picture: moved the same way.
                     if let Some(a) = o.get_mut("annotations") {
                         *a = shift_annotations(a, crop[0], crop[1]);
@@ -802,6 +862,8 @@ pub fn open_file(work: &Path, path: &Path) -> CmdResult<()> {
     let mut doc = doc;
     let mut lines = String::new();
     let mut n = 0u32;
+    let windows =
+        doc["picture"].as_str().unwrap_or("window") == "window" && doc["keepFull"] != json!(true);
     if let Some(blocks) = doc.get_mut("blocks").and_then(Value::as_array_mut) {
         for b in blocks.iter_mut() {
             if b.get("type").and_then(Value::as_str) != Some("step") {
@@ -821,6 +883,7 @@ pub fn open_file(work: &Path, path: &Path) -> CmdResult<()> {
             if let Some(o) = b.as_object_mut() {
                 o.insert("n".into(), json!(n));
                 o.remove("step");
+                restore_area(o, &step, windows);
                 // The pieces of magnified areas are under their flat names too.
                 if let Some(list) = o.get_mut("annotations").and_then(Value::as_array_mut) {
                     for mark in list {
@@ -868,7 +931,7 @@ pub struct Recent {
 }
 
 fn recent_file() -> PathBuf {
-    dawn_core::app_dir("snipmunk").join("recent-guides.json")
+    crate::store::app_dir().join("recent-guides.json")
 }
 
 fn read_recent() -> Vec<Recent> {
@@ -1330,6 +1393,178 @@ mod tests {
             .entries
             .keys()
             .any(|k| k.contains(&piece)));
+    }
+
+    /// What a step shows, as the page works it out (`cropRect` and the picture frame of src/docs): its crop, else the window
+    /// in a guide of windows, else everything; a framed step shows its frame.
+    fn shown(doc: &Value, block: &Value, step: &Step) -> Rect {
+        if let Some(r) = framed_area(doc, block, step.image_size) {
+            return r;
+        }
+        stored_crop(
+            step,
+            block,
+            doc["keepFull"] == json!(true),
+            doc["picture"].as_str().unwrap_or("window"),
+        )
+    }
+
+    #[test]
+    fn every_step_shows_after_reopening_exactly_what_it_showed_when_it_was_saved() {
+        let (d, steps, mut doc) = work_with_steps(6);
+        let work = d.path().join("work");
+        // Pictures in which every pixel says where it is, so a picture shown from another place cannot look the same.
+        for s in &steps {
+            let img = image::RgbaImage::from_fn(200, 100, |x, y| {
+                image::Rgba([x as u8, y as u8, s.n as u8, 255])
+            });
+            img.save(work.join(&s.image)).unwrap();
+        }
+        // The window is (50,20) 100x60. Full screen; expanded beyond the window; a custom part over its edge; the window
+        // chosen; the guide default; a step in a picture frame wider than the window.
+        let crops = [
+            Some([0, 0, 200, 100]),
+            Some([20, 5, 160, 90]),
+            Some([10, 10, 80, 40]),
+            Some([50, 20, 100, 60]),
+            None,
+            None,
+        ];
+        for (i, c) in crops.iter().enumerate() {
+            if let Some(c) = c {
+                doc["blocks"][i]["crop"] = json!(c);
+            }
+        }
+        let mut framed = doc.clone();
+        framed["template"] = json!({ "frame": { "ratio": "16:9" } });
+        framed["blocks"][5]["frame"] = json!({ "cx": 100, "cy": 50, "w": 160 });
+        for (case, doc) in [("plain", doc), ("framed", framed)] {
+            let file = d.path().join(format!("{case}.snpd"));
+            save(&work, &file, &doc, &steps, true).unwrap();
+            let before: Vec<image::RgbaImage> = (0..6)
+                .map(|i| {
+                    let r = shown(&doc, &doc["blocks"][i], &steps[i]);
+                    let img = image::open(work.join(&steps[i].image)).unwrap().to_rgba8();
+                    image::imageops::crop_imm(
+                        &img,
+                        r[0] as u32,
+                        r[1] as u32,
+                        r[2] as u32,
+                        r[3] as u32,
+                    )
+                    .to_image()
+                })
+                .collect();
+            // Close, open, and save the opened guide once more: the same every time.
+            let mut from = file.clone();
+            for round in 0..2 {
+                let opened = d.path().join(format!("open-{case}-{round}"));
+                open_file(&opened, &from).unwrap();
+                let doc2 = read_document(&opened).unwrap();
+                let steps2: Vec<Step> = std::fs::read_to_string(opened.join("steps.jsonl"))
+                    .unwrap()
+                    .lines()
+                    .map(|l| serde_json::from_str(l).unwrap())
+                    .collect();
+                for i in 0..6 {
+                    let r = shown(&doc2, &doc2["blocks"][i], &steps2[i]);
+                    let img = image::open(opened.join(&steps2[i].image))
+                        .unwrap()
+                        .to_rgba8();
+                    let now = image::imageops::crop_imm(
+                        &img,
+                        r[0] as u32,
+                        r[1] as u32,
+                        r[2] as u32,
+                        r[3] as u32,
+                    )
+                    .to_image();
+                    assert_eq!(
+                        now.dimensions(),
+                        before[i].dimensions(),
+                        "{case} {round} step {i}"
+                    );
+                    assert!(now == before[i], "{case} {round} step {i}: other pixels");
+                }
+                let choices: Vec<Option<&str>> = (0..5)
+                    .map(|i| doc2["blocks"][i]["areaChoice"].as_str())
+                    .collect();
+                assert_eq!(
+                    choices,
+                    [
+                        Some("screen"),
+                        Some("custom"),
+                        Some("custom"),
+                        Some("window"),
+                        None
+                    ],
+                    "{case} {round}"
+                );
+                from = d.path().join(format!("again-{case}-{round}.snpd"));
+                save(&opened, &from, &doc2, &steps2, true).unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn a_file_from_before_the_area_choice_shows_a_larger_stored_picture_whole() {
+        let (d, mut steps, mut doc) = work_with_steps(2);
+        let work = d.path().join("work");
+        // (the pictures are of a whole monitor)
+        for s in &mut steps {
+            s.monitor = [0, 0, 200, 100];
+        }
+        doc["blocks"][0]["crop"] = json!([0, 0, 200, 100]);
+        let file = d.path().join("g.snpd");
+        save(&work, &file, &doc, &steps, true).unwrap();
+        // The file as an earlier version wrote it: without the choice.
+        let pkg = package::open(&file, KIND_DOC).unwrap();
+        let mut stored: Value =
+            serde_json::from_slice(&pkg.meta("document.json").unwrap()).unwrap();
+        stored["blocks"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("areaChoice");
+        package::append_meta(
+            &file,
+            KIND_DOC,
+            &[("document.json".into(), serde_json::to_vec(&stored).unwrap())],
+        )
+        .unwrap();
+        let opened = d.path().join("opened");
+        open_file(&opened, &file).unwrap();
+        let doc2 = read_document(&opened).unwrap();
+        assert_eq!(doc2["blocks"][0]["crop"], json!([0, 0, 200, 100]));
+        assert_eq!(doc2["blocks"][0]["areaChoice"], "screen");
+        // The step that showed its window is left as it was.
+        assert!(doc2["blocks"][1].get("crop").is_none());
+        assert!(doc2["blocks"][1].get("areaChoice").is_none());
+    }
+
+    #[test]
+    fn masked_words_of_callouts_are_in_no_saved_version() {
+        let (d, steps, mut doc) = work_with_steps(1);
+        let work = d.path().join("work");
+        let file = d.path().join("g.snpd");
+        doc["blocks"][0]["annotations"] = json!([
+            { "id": "c1", "kind": "callout", "x": 60, "y": 30, "text": "Write to anna@example.com" },
+            { "id": "t1", "kind": "text", "x": 60, "y": 60, "text": "Token 47qrt$9191" }
+        ]);
+        save(&work, &file, &doc, &steps, true).unwrap();
+        doc["blocks"][0]["annotations"][0]["text"] = json!("Write to ••••••");
+        doc["blocks"][0]["annotations"][1]["text"] = json!("Token ••••••");
+        doc["blocks"][0]["masked"] = json!(true);
+        assert_eq!(
+            save(&work, &file, &doc, &steps, false).unwrap().how,
+            "rewritten"
+        );
+        let bytes = std::fs::read(&file).unwrap();
+        for secret in ["anna@example.com", "47qrt$9191"] {
+            assert!(
+                !bytes.windows(secret.len()).any(|w| w == secret.as_bytes()),
+                "{secret} is still in the file"
+            );
+        }
     }
 
     #[test]

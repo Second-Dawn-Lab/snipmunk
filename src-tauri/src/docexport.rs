@@ -254,6 +254,10 @@ pub async fn pick_export_save(
     if !KINDS.contains(&kind.as_str()) {
         return Err(CmdError::new("bad_request", "unknown kind of file"));
     }
+    // A measurement run has no one to answer a file dialog: it names the file.
+    if let Some(path) = crate::capture::picked_by_the_test(&kind) {
+        return Ok(Some(path));
+    }
     let mut dialog = app
         .dialog()
         .file()
@@ -338,20 +342,19 @@ fn print_pdf(
         std::thread::sleep(Duration::from_millis(300));
     }
     let (loaded_tx, loaded_rx) = channel();
-    let window =
-        tauri::WebviewWindowBuilder::new(app, "exportprint", tauri::WebviewUrl::External(url))
-            .title("Snipmunk – Export")
-            .visible(false)
-            .focused(false)
-            .skip_taskbar(true)
-            .inner_size(900.0, 1200.0)
-            .on_page_load(move |_, payload| {
-                if matches!(payload.event(), PageLoadEvent::Finished) {
-                    let _ = loaded_tx.send(());
-                }
-            })
-            .build()
-            .map_err(io)?;
+    let window = crate::webview::window(app, "exportprint", tauri::WebviewUrl::External(url))
+        .title("Snipmunk – Export")
+        .visible(false)
+        .focused(false)
+        .skip_taskbar(true)
+        .inner_size(900.0, 1200.0)
+        .on_page_load(move |_, payload| {
+            if matches!(payload.event(), PageLoadEvent::Finished) {
+                let _ = loaded_tx.send(());
+            }
+        })
+        .build()
+        .map_err(io)?;
     let finish = |window: &tauri::WebviewWindow| {
         let _ = window.close();
         let _ = std::fs::remove_file(&page);

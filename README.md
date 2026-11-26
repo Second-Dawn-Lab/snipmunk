@@ -41,7 +41,7 @@ See the [roadmap](docs/ROADMAP.md) for the phases.
 
 ## Privacy and offline use
 
-Snipmunk is built to work entirely on your computer. Screenshots are kept in `%AppData%\SecondDawn\snipmunk` so a crash or restart never loses them, and you choose how long they stay (settings: clear on exit, or delete sessions after N days). There is no telemetry, no account and no upload. The only network access will be the update check against this repository's GitHub releases (not active yet).
+Snipmunk is built to work entirely on your computer. Screenshots are kept in `%AppData%\SecondDawn\snipmunk` so a crash or restart never loses them, and you choose how long they stay (settings: clear on exit, or delete sessions after N days). There is no telemetry, no account and no upload. The only network access is the update check against this repository's GitHub releases, and the download of an update you choose to install (the Microsoft Store version has neither). See the [privacy policy](PRIVACY.md).
 
 ### Two things to know about redactions and the clipboard
 
